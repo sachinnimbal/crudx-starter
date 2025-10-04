@@ -48,6 +48,11 @@ public class CrudXServiceAutoConfiguration implements BeanDefinitionRegistryPost
     protected ApplicationContext applicationContext;
     private final Set<String> processedEntities = new HashSet<>();
     private static final Set<Class<?>> discoveredSQLEntities = new HashSet<>();
+    private static final String RESET = "\u001B[0m";
+    private static final String BOLD = "\u001B[1m";
+    private static final String GREEN = "\u001B[32m";
+    private static final String CYAN = "\u001B[36m";
+    private static final String WHITE = "\u001B[37m";
 
     @Autowired
     private Environment environment;
@@ -244,15 +249,15 @@ public class CrudXServiceAutoConfiguration implements BeanDefinitionRegistryPost
     public org.springframework.boot.autoconfigure.orm.jpa.HibernatePropertiesCustomizer hibernatePropertiesCustomizer() {
         return (hibernateProperties) -> {
             if (!discoveredSQLEntities.isEmpty()) {
-                log.info("╔════════════════════════════════════════════════════════════════╗");
-                log.info("║     Registering SQL Entities with Hibernate                    ║");
-                log.info("╠════════════════════════════════════════════════════════════════╣");
+                log.info(CYAN + "================================================" + RESET);
+                log.info(BOLD + WHITE + "  Registering SQL Entities with Hibernate" + RESET);
+                log.info(CYAN + "================================================" + RESET);
 
                 for (Class<?> entityClass : discoveredSQLEntities) {
-                    log.info("║  ✓ {}", String.format("%-58s", entityClass.getName()) + "║");
+                    log.info(GREEN + "  [OK] " + RESET + entityClass.getName());
                 }
 
-                log.info("╚════════════════════════════════════════════════════════════════╝");
+                log.info(CYAN + "================================================" + RESET);
             }
         };
     }

@@ -5,7 +5,6 @@ import org.springframework.context.ApplicationListener;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
 
-
 /**
  * @author Sachin Nimbal
  * @version 1.0.0
@@ -18,13 +17,7 @@ public class CrudXBannerConfiguration implements ApplicationListener<Application
 
     private final Environment environment;
 
-    // ANSI escape codes
     private static final String RESET = "\u001B[0m";
-    // Define two sets of colors (light vs dark friendly)
-    private static final String DARK_MODE_TEXT = "\u001B[37m";   // White
-    private static final String LIGHT_MODE_TEXT = "\u001B[30m";  // Black (dark text)
-    // Fallback
-    private static final String DEFAULT_TEXT = "\u001B[37m";
     private static final String RED = "\u001B[31m";
     private static final String GREEN = "\u001B[32m";
     private static final String YELLOW = "\u001B[33m";
@@ -37,111 +30,60 @@ public class CrudXBannerConfiguration implements ApplicationListener<Application
         this.environment = environment;
     }
 
-    // Decide based on property
-    private String getThemeColor() {
-        String theme = environment.getProperty("samvya.theme", "dark").toLowerCase();
-        return switch (theme) {
-            case "light" -> LIGHT_MODE_TEXT;
-            case "dark" -> DARK_MODE_TEXT;
-            default -> DEFAULT_TEXT;
-        };
-    }
-
     @Override
     public void onApplicationEvent(ApplicationReadyEvent event) {
-        printBannerWithEffect();
-        simulateProgressBar();
+        printSimpleBanner();
         printDatabaseInfo();
         printStartupTime();
     }
 
-    private void printBannerWithEffect() {
-        String textColor = getThemeColor();
-        String[] bannerLines = {
-                BOLD + textColor,
-                "  █████████                                                       ",
-                " ███░░░░░███                                                      ",
-                "░███    ░░░  ██████  █████████████  █████ ██████████ ████ ██████  ",
-                "░░█████████ ░░░░░███░░███░░███░░███░░███ ░░███░░███ ░███ ░░░░░███ ",
-                " ░░░░░░░░███ ███████ ░███ ░███ ░███ ░███  ░███ ░███ ░███  ███████ ",
-                " ███    ░██████░░███ ░███ ░███ ░███ ░░███ ███  ░███ ░███ ███░░███ ",
-                "░░█████████░░█████████████░███ █████ ░░█████   ░░███████░░████████",
-                " ░░░░░░░░░  ░░░░░░░░░░░░░ ░░░ ░░░░░   ░░░░░     ░░░░░███ ░░░░░░░░ ",
-                "                                                ███ ░███          ",
-                "                                               ░░██████           ",
-                "                                                ░░░░░░            ",
-                "        CRUD Framework - Version 1.0.0               ",
-                "      Lightweight & High-Performance CRUD            ",
-                RESET
-        };
-
-        for (String line : bannerLines) {
-            System.out.println(line);
-            try {
-                Thread.sleep(60); // keep the slide-up effect
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-        }
+    private String getVersion() {
+        Package pkg = this.getClass().getPackage();
+        String implVersion = pkg.getImplementationVersion();
+        return implVersion != null ? implVersion : "0.0.1-SNAPSHOT";
     }
 
-    private void simulateProgressBar() {
-        System.out.print(CYAN + "Starting Application: " + RESET);
-        int total = 30;
-        for (int i = 0; i < total; i++) {
-            System.out.print(GREEN + "█" + RESET);
-            try {
-                Thread.sleep(50); // adjust speed here
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-        }
-        System.out.println(" " + GREEN + "DONE!" + RESET + " 🚀");
+    private void printSimpleBanner() {
+        System.out.println();
+        System.out.println(CYAN + "============================================" + RESET);
+        System.out.println(CYAN + "||" + RESET + BOLD + "      CRUDX Framework v" + getVersion() + "       " + RESET + CYAN + "||" + RESET);
+        System.out.println(CYAN + "||" + RESET + "  Lightweight & High-Performance CRUD  " + CYAN + "||" + RESET);
+        System.out.println(CYAN + "============================================" + RESET);
+        System.out.println();
     }
 
     private void printDatabaseInfo() {
-        System.out.println(CYAN + "╔════════════════════════════════════════════════════════════════════════╗" + RESET);
-        System.out.println(CYAN + "║                    " + BOLD + "Database Configuration Status" + RESET + CYAN + "                       ║" + RESET);
-        System.out.println(CYAN + "╠════════════════════════════════════════════════════════════════════════╣" + RESET);
+        System.out.println(CYAN + "--------------------------------------" + RESET);
+        System.out.println(BOLD + "  Database Configuration Status" + RESET);
+        System.out.println(CYAN + "--------------------------------------" + RESET);
 
         boolean mongoEnabled = isMongoEnabled();
         boolean mysqlEnabled = isMySqlEnabled();
         boolean postgresEnabled = isPostgresEnabled();
 
-        // Helper function for proper spacing
-        System.out.println(formatCapabilityRow("MongoDB Support", mongoEnabled));
-        System.out.println(formatCapabilityRow("MySQL Support", mysqlEnabled));
-        System.out.println(formatCapabilityRow("PostgreSQL Support", postgresEnabled));
+        System.out.println(formatStatus("MongoDB Support", mongoEnabled));
+        System.out.println(formatStatus("MySQL Support", mysqlEnabled));
+        System.out.println(formatStatus("PostgreSQL Support", postgresEnabled));
 
-        System.out.println(CYAN + "╚════════════════════════════════════════════════════════════════════════╝" + RESET);
-        System.out.println(YELLOW + "📌 Note: Configure only one database provider." + RESET);
-        System.out.println(YELLOW + "   ▶ Use either MongoDB OR MySQL/PostgreSQL." + RESET);
-        System.out.println(YELLOW + "   ▶ MySQL and PostgreSQL cannot be active at the same time." + RESET);
+        System.out.println(CYAN + "--------------------------------------" + RESET);
+        System.out.println(YELLOW + "Note: Configure only one database provider" + RESET);
+        System.out.println(YELLOW + " -> Use either MongoDB OR MySQL/PostgreSQL" + RESET);
         System.out.println();
-        System.out.println("🚀 " + GREEN + BOLD + "Samvya CRUD Framework is ready!" + RESET);
-        System.out.println("📚 " + CYAN + "Documentation: " + YELLOW + "https://github.com/sachinnimbal/samvya-crud-examples/wiki" + RESET);
+        System.out.println(GREEN + BOLD + ">> CRUDX Framework is ready!" + RESET);
+        System.out.println(CYAN + ">> Documentation: " + YELLOW + "https://github.com/sachinnimbal/crudx-examples/wiki" + RESET);
         System.out.println();
     }
 
-    private String formatCapabilityRow(String name, boolean isActive) {
-        String status = isActive ? GREEN + "✓ Configured" : RED + "✗ Not Configured";
-        int totalWidth = 73; // total width inside borders
-
-        // row without padding
-        String row = "║ ▶ " + String.format("%-18s", name) + ": " + status;
-
-        // remove ANSI codes to calculate padding
-        int visibleLength = row.replaceAll("\u001B\\[[;\\d]*m", "").length();
-        int remaining = totalWidth - visibleLength;
-
-        // pad spaces, then add right border in CYAN
-        return row + " ".repeat(Math.max(0, remaining)) + CYAN + "║" + RESET;
+    private String formatStatus(String name, boolean isActive) {
+        String status = isActive ? GREEN + "[CONFIGURED]" : RED + "[NOT CONFIGURED]";
+        return " -> " + String.format("%-20s", name) + ": " + status + RESET;
     }
 
     private void printStartupTime() {
         long end = System.currentTimeMillis();
         double durationSec = (end - STARTUP_TIME) / 1000.0;
-        System.out.printf(YELLOW + BOLD + "⏱ Application started in %.3f seconds%n" + RESET, durationSec);
+        System.out.printf(YELLOW + BOLD + ">> Application started in %.3f seconds%n" + RESET, durationSec);
+        System.out.println();
     }
 
     private boolean isMongoEnabled() {

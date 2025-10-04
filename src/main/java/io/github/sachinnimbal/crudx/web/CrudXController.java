@@ -76,7 +76,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                     serviceBeanName);
             throw new IllegalStateException(
                     "Service bean not found: " + serviceBeanName +
-                            ". Ensure entity extends SamvyaJPAEntity or SamvyaMongoEntity", e
+                            ". Ensure entity extends CrudXJPAEntity or CrudXMongoEntity", e
             );
         }
     }

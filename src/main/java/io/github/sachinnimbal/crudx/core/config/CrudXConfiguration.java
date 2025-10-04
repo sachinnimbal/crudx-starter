@@ -16,13 +16,12 @@ import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.data.mongodb.config.EnableMongoAuditing;
 import org.springframework.data.mongodb.repository.config.EnableMongoRepositories;
 
-
 /**
  * @author Sachin Nimbal
  * @version 1.0.0
- * @since 2025
  * @Contact: <a href="mailto:sachinnimbal9@gmail.com">sachinnimbal9@gmail.com</a>
  * @see <a href="https://www.linkedin.com/in/sachin-nimbal/">LinkedIn Profile</a>
+ * @since 2025
  */
 @Slf4j
 @Configuration
@@ -34,7 +33,6 @@ import org.springframework.data.mongodb.repository.config.EnableMongoRepositorie
 })
 public class CrudXConfiguration {
 
-    // ANSI Color Codes - consistent with banner
     private static final String RESET = "\u001B[0m";
     private static final String BOLD = "\u001B[1m";
     private static final String RED = "\u001B[31m";
@@ -51,10 +49,10 @@ public class CrudXConfiguration {
     }
 
     private void logFrameworkInitialization() {
-        log.info(CYAN + "╔════════════════════════════════════════════════════════════════════╗" + RESET);
-        log.info(CYAN + "║" + RESET + BOLD + WHITE + "        Samvya CRUD Framework Initialization                    " + RESET + CYAN + "║" + RESET);
-        log.info(CYAN + "║" + RESET + "        " + GREEN + "Zero-Boilerplate Service Generation Active" + RESET + "                 " + CYAN + "║" + RESET);
-        log.info(CYAN + "╚════════════════════════════════════════════════════════════════════╝" + RESET);
+        log.info(CYAN + "========================================" + RESET);
+        log.info(BOLD + WHITE + "  CRUDX Framework Initialization" + RESET);
+        log.info(GREEN + "  Zero-Boilerplate Service Generation" + RESET);
+        log.info(CYAN + "========================================" + RESET);
     }
 
     @PostConstruct
@@ -73,35 +71,34 @@ public class CrudXConfiguration {
     }
 
     private String buildNoDatabaseConfigError() {
-        StringBuilder message = new StringBuilder();
-        message.append("\n");
-        message.append(CYAN).append("╔════════════════════════════════════════════════════════════════════╗\n").append(RESET);
-        message.append(CYAN).append("║").append(RESET).append(BOLD).append(RED).append("               DATABASE CONFIGURATION ERROR                     ").append(RESET).append(CYAN).append("║\n").append(RESET);
-        message.append(CYAN).append("╠════════════════════════════════════════════════════════════════════╣\n").append(RESET);
-        message.append(CYAN).append("║").append(RESET).append(" ").append(RED).append("No database configuration found!").append(RESET).append("                               ").append(CYAN).append("║\n").append(RESET);
-        message.append(CYAN).append("║").append(RESET).append("                                                                    ").append(CYAN).append("║\n").append(RESET);
-        message.append(CYAN).append("║").append(RESET).append(" ").append(YELLOW).append("Please configure at least one database:").append(RESET).append("                       ").append(CYAN).append("║\n").append(RESET);
-        message.append(CYAN).append("║").append(RESET).append("                                                                    ").append(CYAN).append("║\n").append(RESET);
-        message.append(CYAN).append("║").append(RESET).append(" ").append(GREEN).append("For SQL (MySQL/PostgreSQL):").append(RESET).append("                                  ").append(CYAN).append("║\n").append(RESET);
-        message.append(CYAN).append("║").append(RESET).append("   spring.datasource.url=jdbc:mysql://localhost:3306/mydb         ").append(CYAN).append("║\n").append(RESET);
-        message.append(CYAN).append("║").append(RESET).append("   spring.datasource.username=root                                ").append(CYAN).append("║\n").append(RESET);
-        message.append(CYAN).append("║").append(RESET).append("   spring.datasource.password=yourpassword                        ").append(CYAN).append("║\n").append(RESET);
-        message.append(CYAN).append("║").append(RESET).append("   spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver  ").append(CYAN).append("║\n").append(RESET);
-        message.append(CYAN).append("║").append(RESET).append("                                                                    ").append(CYAN).append("║\n").append(RESET);
-        message.append(CYAN).append("║").append(RESET).append(" ").append(GREEN).append("For MongoDB:").append(RESET).append("                                                  ").append(CYAN).append("║\n").append(RESET);
-        message.append(CYAN).append("║").append(RESET).append("   spring.data.mongodb.uri=mongodb://localhost:27017/mydb         ").append(CYAN).append("║\n").append(RESET);
-        message.append(CYAN).append("║").append(RESET).append("                                                                    ").append(CYAN).append("║\n").append(RESET);
-        message.append(CYAN).append("║").append(RESET).append(" ").append(WHITE).append("Add these properties to your application.properties or").append(RESET).append("           ").append(CYAN).append("║\n").append(RESET);
-        message.append(CYAN).append("║").append(RESET).append(" ").append(WHITE).append("application.yml file").append(RESET).append("                                          ").append(CYAN).append("║\n").append(RESET);
-        message.append(CYAN).append("╚════════════════════════════════════════════════════════════════════╝\n").append(RESET);
-        return message.toString();
+        StringBuilder msg = new StringBuilder();
+        msg.append("\n");
+        msg.append(RED + "================================================\n" + RESET);
+        msg.append(RED + BOLD + "     DATABASE CONFIGURATION ERROR\n" + RESET);
+        msg.append(RED + "================================================\n" + RESET);
+        msg.append(RED + "No database configuration found!\n" + RESET);
+        msg.append("\n");
+        msg.append(YELLOW + "Please configure at least one database:\n" + RESET);
+        msg.append("\n");
+        msg.append(GREEN + "For SQL (MySQL/PostgreSQL):\n" + RESET);
+        msg.append("  spring.datasource.url=jdbc:mysql://localhost:3306/mydb\n");
+        msg.append("  spring.datasource.username=root\n");
+        msg.append("  spring.datasource.password=yourpassword\n");
+        msg.append("  spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver\n");
+        msg.append("\n");
+        msg.append(GREEN + "For MongoDB:\n" + RESET);
+        msg.append("  spring.data.mongodb.uri=mongodb://localhost:27017/mydb\n");
+        msg.append("\n");
+        msg.append(WHITE + "Add these to your application.properties or application.yml\n" + RESET);
+        msg.append(RED + "================================================\n" + RESET);
+        return msg.toString();
     }
 
     @Configuration
     @ConditionalOnProperty(prefix = "spring.data.mongodb", name = "uri")
     @EnableMongoRepositories(basePackages = {
             "io.github.sachinnimbal.crudx",
-            "${samvya.mongo.repository.packages:}"
+            "${crudx.mongo.repository.packages:}"
     })
     @EnableMongoAuditing
     public static class MongoConfiguration {
@@ -116,18 +113,14 @@ public class CrudXConfiguration {
         private void logMongoConfiguration() {
             String mongoUri = environment.getProperty("spring.data.mongodb.uri");
 
-            log.info(CYAN + "╔════════════════════════════════════════════════════════════════════╗" + RESET);
-            log.info(CYAN + "║" + RESET + BOLD + WHITE + "            MongoDB Configuration Active                        " + RESET + CYAN + "║" + RESET);
-            log.info(CYAN + "╠════════════════════════════════════════════════════════════════════╣" + RESET);
-            log.info(CYAN + "║" + RESET + "  " + GREEN + "✓" + RESET + " MongoTemplate configured                                      " + CYAN + "║" + RESET);
-            log.info(CYAN + "║" + RESET + "  " + GREEN + "✓" + RESET + " MongoDB Auditing enabled                                      " + CYAN + "║" + RESET);
-            log.info(CYAN + "║" + RESET + "  " + GREEN + "✓" + RESET + " MongoDB Repositories enabled                                  " + CYAN + "║" + RESET);
-            log.info(CYAN + "║" + RESET + "                                                                    " + CYAN + "║" + RESET);
-
-            String maskedUri = maskMongoUri(mongoUri);
-            String uriLine = String.format("  Connection URI: %-47s", maskedUri);
-            log.info(CYAN + "║" + RESET + uriLine + CYAN + "║" + RESET);
-            log.info(CYAN + "╚════════════════════════════════════════════════════════════════════╝" + RESET);
+            log.info(CYAN + "----------------------------------------" + RESET);
+            log.info(BOLD + WHITE + "  MongoDB Configuration Active" + RESET);
+            log.info(CYAN + "----------------------------------------" + RESET);
+            log.info(GREEN + "  [OK] MongoTemplate configured" + RESET);
+            log.info(GREEN + "  [OK] MongoDB Auditing enabled" + RESET);
+            log.info(GREEN + "  [OK] MongoDB Repositories enabled" + RESET);
+            log.info(CYAN + "  Connection: " + RESET + maskMongoUri(mongoUri));
+            log.info(CYAN + "----------------------------------------" + RESET);
         }
 
         private String maskMongoUri(String uri) {
@@ -140,12 +133,12 @@ public class CrudXConfiguration {
     @ConditionalOnProperty(prefix = "spring.datasource", name = "url")
     @EnableJpaRepositories(basePackages = {
             "io.github.sachinnimbal.crudx",
-            "${samvya.jpa.repository.packages:}"
+            "${crudx.jpa.repository.packages:}"
     })
     @EnableJpaAuditing
     @EntityScan(basePackages = {
             "io.github.sachinnimbal.crudx",
-            "${samvya.jpa.entity.packages:}"
+            "${crudx.jpa.entity.packages:}"
     })
     public static class JpaConfiguration {
 
@@ -160,20 +153,15 @@ public class CrudXConfiguration {
             String datasourceUrl = environment.getProperty("spring.datasource.url");
             String databaseType = detectDatabaseType(datasourceUrl);
 
-            log.info(CYAN + "╔════════════════════════════════════════════════════════════════════╗" + RESET);
-            log.info(CYAN + "║" + RESET + BOLD + WHITE + "            JPA/SQL Configuration Active                        " + RESET + CYAN + "║" + RESET);
-            log.info(CYAN + "╠════════════════════════════════════════════════════════════════════╣" + RESET);
-            log.info(CYAN + "║" + RESET + "  " + GREEN + "✓" + RESET + " EntityManager configured                                      " + CYAN + "║" + RESET);
-            log.info(CYAN + "║" + RESET + "  " + GREEN + "✓" + RESET + " JPA Auditing enabled                                          " + CYAN + "║" + RESET);
-            log.info(CYAN + "║" + RESET + "  " + GREEN + "✓" + RESET + " JPA Repositories enabled                                      " + CYAN + "║" + RESET);
-            log.info(CYAN + "║" + RESET + "                                                                    " + CYAN + "║" + RESET);
-
-            String dbTypeLine = String.format("  Database Type: %-48s", databaseType);
-            String urlLine = String.format("  Connection URL: %-47s", truncate(maskPassword(datasourceUrl), 47));
-
-            log.info(CYAN + "║" + RESET + dbTypeLine + CYAN + "║" + RESET);
-            log.info(CYAN + "║" + RESET + urlLine + CYAN + "║" + RESET);
-            log.info(CYAN + "╚════════════════════════════════════════════════════════════════════╝" + RESET);
+            log.info(CYAN + "----------------------------------------" + RESET);
+            log.info(BOLD + WHITE + "  JPA/SQL Configuration Active" + RESET);
+            log.info(CYAN + "----------------------------------------" + RESET);
+            log.info(GREEN + "  [OK] EntityManager configured" + RESET);
+            log.info(GREEN + "  [OK] JPA Auditing enabled" + RESET);
+            log.info(GREEN + "  [OK] JPA Repositories enabled" + RESET);
+            log.info(CYAN + "  Database: " + RESET + databaseType);
+            log.info(CYAN + "  URL: " + RESET + truncate(maskPassword(datasourceUrl), 50));
+            log.info(CYAN + "----------------------------------------" + RESET);
         }
 
         @Bean
@@ -185,10 +173,8 @@ public class CrudXConfiguration {
                 );
 
                 hibernateProperties.put("hibernate.hbm2ddl.auto", ddlAuto);
-
                 hibernateProperties.putIfAbsent("hibernate.format_sql",
                         environment.getProperty("spring.jpa.properties.hibernate.format_sql", "false"));
-
                 hibernateProperties.putIfAbsent("hibernate.use_sql_comments",
                         environment.getProperty("spring.jpa.properties.hibernate.use_sql_comments", "false"));
 
@@ -197,16 +183,12 @@ public class CrudXConfiguration {
         }
 
         private void logHibernateConfiguration(String ddlAuto) {
-            log.info(CYAN + "╔════════════════════════════════════════════════════════════════════╗" + RESET);
-            log.info(CYAN + "║" + RESET + BOLD + WHITE + "            Hibernate DDL Configuration                         " + RESET + CYAN + "║" + RESET);
-            log.info(CYAN + "╠════════════════════════════════════════════════════════════════════╣" + RESET);
-
-            String ddlLine = String.format("  DDL Auto Mode: %-48s", ddlAuto);
-            String descLine = String.format("  Schema will be: %-45s", getSchemaActionDescription(ddlAuto));
-
-            log.info(CYAN + "║" + RESET + ddlLine + CYAN + "║" + RESET);
-            log.info(CYAN + "║" + RESET + descLine + CYAN + "║" + RESET);
-            log.info(CYAN + "╚════════════════════════════════════════════════════════════════════╝" + RESET);
+            log.info(CYAN + "----------------------------------------" + RESET);
+            log.info(BOLD + WHITE + "  Hibernate DDL Configuration" + RESET);
+            log.info(CYAN + "----------------------------------------" + RESET);
+            log.info(CYAN + "  DDL Mode: " + RESET + YELLOW + ddlAuto + RESET);
+            log.info(CYAN + "  Action: " + RESET + getSchemaActionDescription(ddlAuto));
+            log.info(CYAN + "----------------------------------------" + RESET);
         }
 
         private String getSchemaActionDescription(String ddlAuto) {

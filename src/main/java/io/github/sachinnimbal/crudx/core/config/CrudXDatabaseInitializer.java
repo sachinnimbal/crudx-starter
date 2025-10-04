@@ -12,18 +12,16 @@ import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
 
-
 /**
  * @author Sachin Nimbal
  * @version 1.0.0
- * @since 2025
  * @Contact: <a href="mailto:sachinnimbal9@gmail.com">sachinnimbal9@gmail.com</a>
  * @see <a href="https://www.linkedin.com/in/sachin-nimbal/">LinkedIn Profile</a>
+ * @since 2025
  */
 @Slf4j
 public class CrudXDatabaseInitializer implements ApplicationContextInitializer<ConfigurableApplicationContext> {
 
-    // ANSI Color Codes - consistent with banner
     private static final String RESET = "\u001B[0m";
     private static final String BOLD = "\u001B[1m";
     private static final String RED = "\u001B[31m";
@@ -32,7 +30,6 @@ public class CrudXDatabaseInitializer implements ApplicationContextInitializer<C
     private static final String CYAN = "\u001B[36m";
     private static final String WHITE = "\u001B[37m";
 
-    // Database Driver Constants
     private static final String MYSQL_DRIVER = "com.mysql.cj.jdbc.Driver";
     private static final String POSTGRES_DRIVER = "org.postgresql.Driver";
     private static final String MONGODB_DRIVER = "com.mongodb.MongoClientSettings";
@@ -59,7 +56,7 @@ public class CrudXDatabaseInitializer implements ApplicationContextInitializer<C
         if (!hasSqlConfig && !hasMongoConfig) {
             String errorMessage = buildNoConfigErrorMessage(availableDrivers);
             logError(errorMessage);
-            throw new IllegalStateException("Database drivers found but no configuration provided. Please configure at least one database.");
+            throw new IllegalStateException("Database drivers found but no configuration provided.");
         }
 
         logActiveConfigurations(hasSqlConfig, hasMongoConfig, sqlUrl, mongoUri);
@@ -70,7 +67,7 @@ public class CrudXDatabaseInitializer implements ApplicationContextInitializer<C
             } catch (Exception e) {
                 String errorMessage = buildConnectionErrorMessage(sqlUrl, e.getMessage());
                 logError(errorMessage);
-                throw new IllegalStateException("SQL database server is not available or connection failed", e);
+                throw new IllegalStateException("SQL database connection failed", e);
             }
         }
 
@@ -81,17 +78,9 @@ public class CrudXDatabaseInitializer implements ApplicationContextInitializer<C
 
     private List<String> detectAvailableDrivers() {
         List<String> drivers = new ArrayList<>();
-
-        if (isClassPresent(MYSQL_DRIVER)) {
-            drivers.add("MySQL");
-        }
-        if (isClassPresent(POSTGRES_DRIVER)) {
-            drivers.add("PostgreSQL");
-        }
-        if (isClassPresent(MONGODB_DRIVER)) {
-            drivers.add("MongoDB");
-        }
-
+        if (isClassPresent(MYSQL_DRIVER)) drivers.add("MySQL");
+        if (isClassPresent(POSTGRES_DRIVER)) drivers.add("PostgreSQL");
+        if (isClassPresent(MONGODB_DRIVER)) drivers.add("MongoDB");
         return drivers;
     }
 
@@ -139,274 +128,241 @@ public class CrudXDatabaseInitializer implements ApplicationContextInitializer<C
     }
 
     private String buildNoConfigErrorMessage(List<String> availableDrivers) {
-        StringBuilder message = new StringBuilder();
-        message.append("\n");
-        message.append(formatBoxTop());
-        message.append(formatBoxTitle("DATABASE CONFIGURATION ERROR"));
-        message.append(formatBoxSeparator());
-        message.append(formatBoxRow("Database driver(s) found in classpath but not configured!"));
-        message.append(formatBoxRow(""));
-        message.append(formatBoxRow("Detected drivers:", CYAN));
-
+        StringBuilder msg = new StringBuilder();
+        msg.append("\n");
+        msg.append(RED + "===============================================\n" + RESET);
+        msg.append(RED + BOLD + "   DATABASE CONFIGURATION ERROR\n" + RESET);
+        msg.append(RED + "===============================================\n" + RESET);
+        msg.append(RED + "Database driver(s) found but not configured!\n" + RESET);
+        msg.append("\n");
+        msg.append(CYAN + "Detected drivers:\n" + RESET);
         for (String driver : availableDrivers) {
-            message.append(formatBoxRow("  • " + driver, WHITE));
+            msg.append(WHITE + "  -> " + driver + "\n" + RESET);
         }
-
-        message.append(formatBoxRow(""));
-        message.append(formatBoxRow("Please configure at least one database:", YELLOW));
-        message.append(formatBoxRow(""));
+        msg.append("\n");
+        msg.append(YELLOW + "Please configure at least one database:\n" + RESET);
+        msg.append("\n");
 
         if (availableDrivers.contains("MySQL")) {
-            message.append(formatBoxRow("For MySQL:", GREEN));
-            message.append(formatBoxRow("  spring.datasource.url=jdbc:mysql://localhost:3306/dbname"));
-            message.append(formatBoxRow("  spring.datasource.username=root"));
-            message.append(formatBoxRow("  spring.datasource.password=password"));
-            message.append(formatBoxRow("  spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver"));
-            message.append(formatBoxRow(""));
+            msg.append(GREEN + "For MySQL:\n" + RESET);
+            msg.append("  spring.datasource.url=jdbc:mysql://localhost:3306/dbname\n");
+            msg.append("  spring.datasource.username=root\n");
+            msg.append("  spring.datasource.password=password\n");
+            msg.append("  spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver\n\n");
         }
 
         if (availableDrivers.contains("PostgreSQL")) {
-            message.append(formatBoxRow("For PostgreSQL:", GREEN));
-            message.append(formatBoxRow("  spring.datasource.url=jdbc:postgresql://localhost:5432/db"));
-            message.append(formatBoxRow("  spring.datasource.username=postgres"));
-            message.append(formatBoxRow("  spring.datasource.password=password"));
-            message.append(formatBoxRow("  spring.datasource.driver-class-name=org.postgresql.Driver"));
-            message.append(formatBoxRow(""));
+            msg.append(GREEN + "For PostgreSQL:\n" + RESET);
+            msg.append("  spring.datasource.url=jdbc:postgresql://localhost:5432/db\n");
+            msg.append("  spring.datasource.username=postgres\n");
+            msg.append("  spring.datasource.password=password\n");
+            msg.append("  spring.datasource.driver-class-name=org.postgresql.Driver\n\n");
         }
 
         if (availableDrivers.contains("MongoDB")) {
-            message.append(formatBoxRow("For MongoDB:", GREEN));
-            message.append(formatBoxRow("  spring.data.mongodb.uri=mongodb://localhost:27017/dbname"));
-            message.append(formatBoxRow(""));
+            msg.append(GREEN + "For MongoDB:\n" + RESET);
+            msg.append("  spring.data.mongodb.uri=mongodb://localhost:27017/dbname\n\n");
         }
 
-        message.append(formatBoxBottom());
-        return message.toString();
+        msg.append(RED + "===============================================\n" + RESET);
+        return msg.toString();
     }
 
     private String buildMissingConfigErrorMessage(List<String> missingConfigs) {
-        StringBuilder message = new StringBuilder();
-        message.append("\n");
-        message.append(formatBoxTop());
-        message.append(formatBoxTitle("DATABASE DRIVER-CONFIGURATION MISMATCH"));
-        message.append(formatBoxSeparator());
-        message.append(formatBoxRow("The following database driver(s) are in your classpath"));
-        message.append(formatBoxRow("but corresponding configurations are missing:"));
-        message.append(formatBoxRow(""));
+        StringBuilder msg = new StringBuilder();
+        msg.append("\n");
+        msg.append(RED + "===============================================\n" + RESET);
+        msg.append(RED + BOLD + "   DRIVER-CONFIGURATION MISMATCH\n" + RESET);
+        msg.append(RED + "===============================================\n" + RESET);
+        msg.append("Driver(s) in classpath but config missing:\n\n");
 
         for (String driver : missingConfigs) {
-            message.append(formatBoxRow("  ✗ " + driver, RED));
+            msg.append(RED + "  [X] ").append(driver).append("\n").append(RESET);
         }
 
-        message.append(formatBoxRow(""));
-        message.append(formatBoxRow("Please add configuration for the detected driver(s):", YELLOW));
-        message.append(formatBoxRow(""));
+        msg.append("\n");
+        msg.append(YELLOW + "Add configuration or remove dependency:\n" + RESET);
+        msg.append("\n");
 
         if (missingConfigs.contains("MySQL")) {
-            message.append(formatBoxRow("MySQL Configuration Required:", GREEN));
-            message.append(formatBoxRow("  spring.datasource.url=jdbc:mysql://localhost:3306/dbname"));
-            message.append(formatBoxRow("  spring.datasource.username=root"));
-            message.append(formatBoxRow("  spring.datasource.password=password"));
-            message.append(formatBoxRow("  spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver"));
-            message.append(formatBoxRow(""));
+            msg.append(GREEN + "MySQL Configuration:\n" + RESET);
+            msg.append("  spring.datasource.url=jdbc:mysql://localhost:3306/dbname\n");
+            msg.append("  spring.datasource.username=root\n");
+            msg.append("  spring.datasource.password=password\n");
+            msg.append("  spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver\n\n");
         }
 
         if (missingConfigs.contains("PostgreSQL")) {
-            message.append(formatBoxRow("PostgreSQL Configuration Required:", GREEN));
-            message.append(formatBoxRow("  spring.datasource.url=jdbc:postgresql://localhost:5432/db"));
-            message.append(formatBoxRow("  spring.datasource.username=postgres"));
-            message.append(formatBoxRow("  spring.datasource.password=password"));
-            message.append(formatBoxRow("  spring.datasource.driver-class-name=org.postgresql.Driver"));
-            message.append(formatBoxRow(""));
+            msg.append(GREEN + "PostgreSQL Configuration:\n" + RESET);
+            msg.append("  spring.datasource.url=jdbc:postgresql://localhost:5432/db\n");
+            msg.append("  spring.datasource.username=postgres\n");
+            msg.append("  spring.datasource.password=password\n");
+            msg.append("  spring.datasource.driver-class-name=org.postgresql.Driver\n\n");
         }
 
         if (missingConfigs.contains("MongoDB")) {
-            message.append(formatBoxRow("MongoDB Configuration Required:", GREEN));
-            message.append(formatBoxRow("  spring.data.mongodb.uri=mongodb://localhost:27017/dbname"));
-            message.append(formatBoxRow(""));
+            msg.append(GREEN + "MongoDB Configuration:\n" + RESET);
+            msg.append("  spring.data.mongodb.uri=mongodb://localhost:27017/dbname\n\n");
         }
 
-        message.append(formatBoxRow("OR remove the unused dependency from build.gradle/pom.xml", YELLOW));
-        message.append(formatBoxBottom());
-        return message.toString();
+        msg.append(YELLOW + "OR remove unused dependency from build.gradle/pom.xml\n" + RESET);
+        msg.append(RED + "===============================================\n" + RESET);
+        return msg.toString();
     }
 
     private String buildManualDatabaseCreationMessage(String dbType, String dbName, String url) {
-        StringBuilder message = new StringBuilder();
-        message.append("\n");
-        message.append(formatBoxTop());
-        message.append(formatBoxTitle("DATABASE MANUAL CREATION REQUIRED"));
-        message.append(formatBoxSeparator());
-        message.append(formatBoxRow("Auto-creation is disabled (crudx.database.auto-create=false)"));
-        message.append(formatBoxRow("Database '" + dbName + "' does not exist!", RED));
-        message.append(formatBoxRow(""));
-        message.append(formatBoxRow("Database Type: " + dbType, CYAN));
-        message.append(formatBoxRow("Connection URL: " + maskPassword(url), CYAN));
-        message.append(formatBoxRow(""));
+        StringBuilder msg = new StringBuilder();
+        msg.append("\n");
+        msg.append(RED + "===============================================\n" + RESET);
+        msg.append(RED + BOLD + "   DATABASE MANUAL CREATION REQUIRED\n" + RESET);
+        msg.append(RED + "===============================================\n" + RESET);
+        msg.append("Auto-creation disabled (crudx.database.auto-create=false)\n");
+        msg.append(RED + "Database '").append(dbName).append("' does not exist!\n").append(RESET);
+        msg.append("\n");
+        msg.append(CYAN + "Database Type: ").append(dbType).append("\n").append(RESET);
+        msg.append(CYAN + "Connection URL: ").append(maskPassword(url)).append("\n").append(RESET);
+        msg.append("\n");
 
         if ("MySQL".equals(dbType)) {
-            message.append(formatBoxRow("Please create the database manually using MySQL CLI:", YELLOW));
-            message.append(formatBoxRow(""));
-            message.append(formatBoxRow("Step 1: Connect to MySQL", GREEN));
-            message.append(formatBoxRow("  mysql -u root -p"));
-            message.append(formatBoxRow(""));
-            message.append(formatBoxRow("Step 2: Create database", GREEN));
-            message.append(formatBoxRow("  CREATE DATABASE `" + dbName + "`"));
-            message.append(formatBoxRow("         CHARACTER SET utf8mb4"));
-            message.append(formatBoxRow("         COLLATE utf8mb4_unicode_ci;"));
-            message.append(formatBoxRow(""));
-            message.append(formatBoxRow("Step 3: Verify database creation", GREEN));
-            message.append(formatBoxRow("  SHOW DATABASES;"));
-            message.append(formatBoxRow(""));
-            message.append(formatBoxRow("Step 4: Grant permissions (if needed)", GREEN));
-            message.append(formatBoxRow("  GRANT ALL PRIVILEGES ON `" + dbName + "`.* TO 'your_user'@'%';"));
-            message.append(formatBoxRow("  FLUSH PRIVILEGES;"));
+            msg.append(YELLOW + "Create database manually using MySQL CLI:\n" + RESET);
+            msg.append("\n");
+            msg.append(GREEN + "Step 1: Connect to MySQL\n" + RESET);
+            msg.append("  mysql -u root -p\n\n");
+            msg.append(GREEN + "Step 2: Create database\n" + RESET);
+            msg.append("  CREATE DATABASE `").append(dbName).append("`\n");
+            msg.append("  CHARACTER SET utf8mb4\n");
+            msg.append("  COLLATE utf8mb4_unicode_ci;\n\n");
+            msg.append(GREEN + "Step 3: Verify\n" + RESET);
+            msg.append("  SHOW DATABASES;\n\n");
+            msg.append(GREEN + "Step 4: Grant permissions (if needed)\n" + RESET);
+            msg.append("  GRANT ALL PRIVILEGES ON `" + dbName + "`.* TO 'user'@'%';\n");
+            msg.append("  FLUSH PRIVILEGES;\n");
         } else if ("PostgreSQL".equals(dbType)) {
-            message.append(formatBoxRow("Please create the database manually using PostgreSQL CLI:", YELLOW));
-            message.append(formatBoxRow(""));
-            message.append(formatBoxRow("Step 1: Connect to PostgreSQL", GREEN));
-            message.append(formatBoxRow("  psql -U postgres"));
-            message.append(formatBoxRow(""));
-            message.append(formatBoxRow("Step 2: Create database", GREEN));
-            message.append(formatBoxRow("  CREATE DATABASE \"" + dbName + "\" WITH ENCODING 'UTF8';"));
-            message.append(formatBoxRow(""));
-            message.append(formatBoxRow("Step 3: Verify database creation", GREEN));
-            message.append(formatBoxRow("  \\l"));
-            message.append(formatBoxRow(""));
-            message.append(formatBoxRow("Step 4: Grant permissions (if needed)", GREEN));
-            message.append(formatBoxRow("  GRANT ALL PRIVILEGES ON DATABASE \"" + dbName + "\" TO your_user;"));
+            msg.append(YELLOW + "Create database manually using PostgreSQL CLI:\n" + RESET);
+            msg.append("\n");
+            msg.append(GREEN + "Step 1: Connect to PostgreSQL\n" + RESET);
+            msg.append("  psql -U postgres\n\n");
+            msg.append(GREEN + "Step 2: Create database\n" + RESET);
+            msg.append("  CREATE DATABASE \"" + dbName + "\" WITH ENCODING 'UTF8';\n\n");
+            msg.append(GREEN + "Step 3: Verify\n" + RESET);
+            msg.append("  \\l\n\n");
+            msg.append(GREEN + "Step 4: Grant permissions (if needed)\n" + RESET);
+            msg.append("  GRANT ALL PRIVILEGES ON DATABASE \"" + dbName + "\" TO user;\n");
         }
 
-        message.append(formatBoxRow(""));
-        message.append(formatBoxRow("Alternative: Enable auto-creation", CYAN));
-        message.append(formatBoxRow("  crudx.database.auto-create=true"));
-        message.append(formatBoxBottom());
-        return message.toString();
+        msg.append("\n");
+        msg.append(CYAN + "Alternative: Enable auto-creation\n" + RESET);
+        msg.append("  crudx.database.auto-create=true\n");
+        msg.append(RED + "===============================================\n" + RESET);
+        return msg.toString();
     }
 
     private String buildDriverNotFoundErrorMessage(String dbType, String driverClass, String url) {
-        StringBuilder message = new StringBuilder();
-        message.append("\n");
-        message.append(formatBoxTop());
-        message.append(formatBoxTitle("DATABASE DRIVER NOT FOUND ERROR"));
-        message.append(formatBoxSeparator());
-        message.append(formatBoxRow("Database configuration found but driver is missing!"));
-        message.append(formatBoxRow(""));
-        message.append(formatBoxRow("Database Type: " + dbType, CYAN));
-        message.append(formatBoxRow("Driver Class: " + driverClass, CYAN));
-        message.append(formatBoxRow("Connection URL: " + maskPassword(url), CYAN));
-        message.append(formatBoxRow(""));
-        message.append(formatBoxRow("You have TWO options:", YELLOW));
-        message.append(formatBoxRow(""));
-        message.append(formatBoxRow("OPTION 1: Add the missing database driver dependency", GREEN));
-        message.append(formatBoxRow(""));
+        StringBuilder msg = new StringBuilder();
+        msg.append("\n");
+        msg.append(RED + "===============================================\n" + RESET);
+        msg.append(RED + BOLD + "   DATABASE DRIVER NOT FOUND\n" + RESET);
+        msg.append(RED + "===============================================\n" + RESET);
+        msg.append("Database config found but driver missing!\n\n");
+        msg.append(CYAN + "Database Type: " + dbType + "\n" + RESET);
+        msg.append(CYAN + "Driver Class: " + driverClass + "\n" + RESET);
+        msg.append(CYAN + "Connection URL: " + maskPassword(url) + "\n" + RESET);
+        msg.append("\n");
+        msg.append(YELLOW + "You have TWO options:\n" + RESET);
+        msg.append("\n");
+        msg.append(GREEN + "OPTION 1: Add database driver dependency\n" + RESET);
+        msg.append("\n");
 
         if ("MySQL".equals(dbType)) {
-            message.append(formatBoxRow("For Gradle (build.gradle):"));
-            message.append(formatBoxRow("  runtimeOnly 'com.mysql:mysql-connector-j:8.3.0'"));
-            message.append(formatBoxRow(""));
-            message.append(formatBoxRow("For Maven (pom.xml):"));
-            message.append(formatBoxRow("  <dependency>"));
-            message.append(formatBoxRow("    <groupId>com.mysql</groupId>"));
-            message.append(formatBoxRow("    <artifactId>mysql-connector-j</artifactId>"));
-            message.append(formatBoxRow("    <version>8.3.0</version>"));
-            message.append(formatBoxRow("    <scope>runtime</scope>"));
-            message.append(formatBoxRow("  </dependency>"));
+            msg.append("For Gradle (build.gradle):\n");
+            msg.append("  runtimeOnly 'com.mysql:mysql-connector-j:8.3.0'\n\n");
+            msg.append("For Maven (pom.xml):\n");
+            msg.append("  <dependency>\n");
+            msg.append("    <groupId>com.mysql</groupId>\n");
+            msg.append("    <artifactId>mysql-connector-j</artifactId>\n");
+            msg.append("    <version>8.3.0</version>\n");
+            msg.append("    <scope>runtime</scope>\n");
+            msg.append("  </dependency>\n");
         } else if ("PostgreSQL".equals(dbType)) {
-            message.append(formatBoxRow("For Gradle (build.gradle):"));
-            message.append(formatBoxRow("  runtimeOnly 'org.postgresql:postgresql:42.7.3'"));
-            message.append(formatBoxRow(""));
-            message.append(formatBoxRow("For Maven (pom.xml):"));
-            message.append(formatBoxRow("  <dependency>"));
-            message.append(formatBoxRow("    <groupId>org.postgresql</groupId>"));
-            message.append(formatBoxRow("    <artifactId>postgresql</artifactId>"));
-            message.append(formatBoxRow("    <version>42.7.3</version>"));
-            message.append(formatBoxRow("    <scope>runtime</scope>"));
-            message.append(formatBoxRow("  </dependency>"));
+            msg.append("For Gradle (build.gradle):\n");
+            msg.append("  runtimeOnly 'org.postgresql:postgresql:42.7.3'\n\n");
+            msg.append("For Maven (pom.xml):\n");
+            msg.append("  <dependency>\n");
+            msg.append("    <groupId>org.postgresql</groupId>\n");
+            msg.append("    <artifactId>postgresql</artifactId>\n");
+            msg.append("    <version>42.7.3</version>\n");
+            msg.append("    <scope>runtime</scope>\n");
+            msg.append("  </dependency>\n");
         }
 
-        message.append(formatBoxRow(""));
-        message.append(formatBoxRow("OPTION 2: Remove the database configuration", GREEN));
-        message.append(formatBoxRow(""));
-        message.append(formatBoxRow("Remove or comment out these properties from your"));
-        message.append(formatBoxRow("application.yml or application.properties:"));
-        message.append(formatBoxRow(""));
-        message.append(formatBoxRow("  spring.datasource.url"));
-        message.append(formatBoxRow("  spring.datasource.username"));
-        message.append(formatBoxRow("  spring.datasource.password"));
-        message.append(formatBoxRow("  spring.datasource.driver-class-name"));
-        message.append(formatBoxRow(""));
-        message.append(formatBoxRow("After removing the configuration, the application will use"));
-        message.append(formatBoxRow("only the available database(s) (e.g., MongoDB)"));
-        message.append(formatBoxBottom());
-        return message.toString();
+        msg.append("\n");
+        msg.append(GREEN + "OPTION 2: Remove database configuration\n" + RESET);
+        msg.append("\nRemove from application.yml/application.properties:\n");
+        msg.append("  spring.datasource.url\n");
+        msg.append("  spring.datasource.username\n");
+        msg.append("  spring.datasource.password\n");
+        msg.append("  spring.datasource.driver-class-name\n");
+        msg.append(RED + "===============================================\n" + RESET);
+        return msg.toString();
     }
 
     private String buildConnectionErrorMessage(String url, String error) {
-        StringBuilder message = new StringBuilder();
-        message.append("\n");
-        message.append(formatBoxTop());
-        message.append(formatBoxTitle("SQL DATABASE CONNECTION ERROR"));
-        message.append(formatBoxSeparator());
-        message.append(formatBoxRow("Failed to connect to SQL database server", RED));
-        message.append(formatBoxRow(""));
-        message.append(formatBoxRow("Error: " + truncate(error, 60), RED));
-        message.append(formatBoxRow(""));
-        message.append(formatBoxRow("Please verify:", YELLOW));
-        message.append(formatBoxRow("  ✗ Database server is running"));
-        message.append(formatBoxRow("  ✗ Connection URL is correct"));
-        message.append(formatBoxRow("  ✗ Username and password are valid"));
-        message.append(formatBoxRow("  ✗ Network connectivity to database server"));
-        message.append(formatBoxRow(""));
-        message.append(formatBoxRow("Configuration:", CYAN));
-        message.append(formatBoxRow("  URL: " + maskPassword(url)));
-        message.append(formatBoxBottom());
-        return message.toString();
+        return "\n" +
+                RED + "===============================================\n" + RESET +
+                RED + BOLD + "   SQL DATABASE CONNECTION ERROR\n" + RESET +
+                RED + "===============================================\n" + RESET +
+                RED + "Failed to connect to SQL database\n" + RESET +
+                "\n" +
+                RED + "Error: " + truncate(error, 60) + "\n" + RESET +
+                "\n" +
+                YELLOW + "Please verify:\n" + RESET +
+                "  -> Database server is running\n" +
+                "  -> Connection URL is correct\n" +
+                "  -> Username and password are valid\n" +
+                "  -> Network connectivity\n" +
+                "\n" +
+                CYAN + "Configuration:\n" + RESET +
+                "  URL: " + maskPassword(url) + "\n" +
+                RED + "===============================================\n" + RESET;
     }
 
     private void logActiveConfigurations(boolean hasSqlConfig, boolean hasMongoConfig, String sqlUrl, String mongoUri) {
-        log.info(CYAN + "╔════════════════════════════════════════════════════════════════════╗" + RESET);
-        log.info(CYAN + "║" + BOLD + WHITE + "              Active Database Configurations                    " + RESET + CYAN + "║" + RESET);
-        log.info(CYAN + "╠════════════════════════════════════════════════════════════════════╣" + RESET);
+        log.info(CYAN + "----------------------------------------" + RESET);
+        log.info(BOLD + "  Active Database Configurations" + RESET);
+        log.info(CYAN + "----------------------------------------" + RESET);
 
         if (hasSqlConfig) {
             String dbType = detectSqlDatabaseType(sqlUrl);
-            log.info(CYAN + "║" + RESET + "  " + GREEN + "✓" + RESET + " SQL Database (" + BOLD + dbType + RESET + ")" +
-                    " ".repeat(Math.max(0, 47 - dbType.length())) + CYAN + "║" + RESET);
-            String maskedUrl = maskPassword(sqlUrl);
-            log.info(CYAN + "║" + RESET + "    URL: " + truncate(maskedUrl, 58) +
-                    " ".repeat(Math.max(0, 58 - truncate(maskedUrl, 58).length())) + CYAN + "║" + RESET);
+            log.info(GREEN + "  [OK] SQL Database (" + BOLD + "{}" + RESET + GREEN + ")" + RESET, dbType);
+            log.info("       URL: {}", truncate(maskPassword(sqlUrl), 50));
         }
 
         if (hasMongoConfig) {
-            log.info(CYAN + "║" + RESET + "  " + GREEN + "✓" + RESET + " MongoDB Database" +
-                    " ".repeat(48) + CYAN + "║" + RESET);
-            String maskedUri = maskPassword(mongoUri);
-            log.info(CYAN + "║" + RESET + "    URI: " + truncate(maskedUri, 57) +
-                    " ".repeat(Math.max(0, 57 - truncate(maskedUri, 57).length())) + CYAN + "║" + RESET);
+            log.info(GREEN + "  [OK] MongoDB Database" + RESET);
+            log.info("       URI: {}", truncate(maskPassword(mongoUri), 50));
         }
 
-        log.info(CYAN + "╚════════════════════════════════════════════════════════════════════╝" + RESET);
+        log.info(CYAN + "----------------------------------------" + RESET);
     }
 
     private void handleSqlDatabaseInitialization(Environment env, String url) {
         Boolean autoCreate = env.getProperty("crudx.database.auto-create", Boolean.class, true);
-
         String databaseName = extractDatabaseName(url);
+
         if (databaseName == null) {
             logWarning("Could not extract database name from URL: " + maskPassword(url));
             return;
         }
 
         if (!autoCreate) {
-            log.info(YELLOW + "Database auto-creation is disabled (crudx.database.auto-create=false)" + RESET);
+            log.info(YELLOW + "Database auto-creation disabled" + RESET);
             try {
                 validateSqlConnection(env, url);
             } catch (Exception e) {
                 String dbType = detectSqlDatabaseType(url);
-                String manualInstructions = buildManualDatabaseCreationMessage(dbType, databaseName, url);
-                logError(manualInstructions);
-                throw new IllegalStateException("Database '" + databaseName + "' does not exist. Please create it manually or enable auto-creation.", e);
+                String manual = buildManualDatabaseCreationMessage(dbType, databaseName, url);
+                logError(manual);
+                throw new IllegalStateException("Database '" + databaseName + "' does not exist", e);
             }
             return;
         }
@@ -420,21 +376,21 @@ public class CrudXDatabaseInitializer implements ApplicationContextInitializer<C
         String driver = env.getProperty("spring.datasource.driver-class-name");
 
         if (driver == null) {
-            throw new IllegalStateException("spring.datasource.driver-class-name is required but not configured");
+            throw new IllegalStateException("spring.datasource.driver-class-name required");
         }
 
         try {
             Class.forName(driver);
             try (Connection conn = DriverManager.getConnection(url, username, password)) {
-                log.info(GREEN + "✓ SQL database connection validated successfully" + RESET);
+                log.info(GREEN + "[OK] SQL connection validated" + RESET);
             }
         } catch (ClassNotFoundException e) {
             String dbType = detectSqlDatabaseType(url);
-            String errorMessage = buildDriverNotFoundErrorMessage(dbType, driver, url);
-            logError(errorMessage);
-            throw new IllegalStateException("Database driver not found: " + driver, e);
+            String error = buildDriverNotFoundErrorMessage(dbType, driver, url);
+            logError(error);
+            throw new IllegalStateException("Driver not found: " + driver, e);
         } catch (Exception e) {
-            throw new RuntimeException("Failed to connect to SQL database", e);
+            throw new RuntimeException("Failed to connect to database", e);
         }
     }
 
@@ -448,7 +404,7 @@ public class CrudXDatabaseInitializer implements ApplicationContextInitializer<C
                 return parts[parts.length - 1];
             }
         } catch (Exception e) {
-            log.error("Error extracting database name from URL", e);
+            log.error("Error extracting database name", e);
         }
         return null;
     }
@@ -459,7 +415,7 @@ public class CrudXDatabaseInitializer implements ApplicationContextInitializer<C
         String driver = env.getProperty("spring.datasource.driver-class-name");
 
         if (driver == null) {
-            throw new IllegalStateException("spring.datasource.driver-class-name is required but not configured");
+            throw new IllegalStateException("spring.datasource.driver-class-name required");
         }
 
         try {
@@ -471,14 +427,14 @@ public class CrudXDatabaseInitializer implements ApplicationContextInitializer<C
             } else if (driver.contains("postgresql")) {
                 createPostgreSQLDatabaseIfNeeded(originalUrl, username, password, dbName);
             } else {
-                logWarning("Unsupported database driver for auto-creation: " + driver);
+                logWarning("Unsupported driver for auto-creation: " + driver);
                 validateConnectionWithDatabase(originalUrl, username, password);
             }
         } catch (ClassNotFoundException e) {
             String dbType = detectSqlDatabaseType(originalUrl);
-            String errorMessage = buildDriverNotFoundErrorMessage(dbType, driver, originalUrl);
-            logError(errorMessage);
-            throw new IllegalStateException("Database driver not found: " + driver, e);
+            String error = buildDriverNotFoundErrorMessage(dbType, driver, originalUrl);
+            logError(error);
+            throw new IllegalStateException("Driver not found: " + driver, e);
         } catch (Exception e) {
             throw new RuntimeException("Failed to connect to database server", e);
         }
@@ -495,7 +451,7 @@ public class CrudXDatabaseInitializer implements ApplicationContextInitializer<C
                     dbName
             );
             stmt.executeUpdate(createDbSql);
-            log.info(GREEN + "✓ MySQL database '" + dbName + "' created/verified successfully" + RESET);
+            log.info(GREEN + "[OK] MySQL database '{}' created/verified" + RESET, dbName);
         }
     }
 
@@ -515,10 +471,10 @@ public class CrudXDatabaseInitializer implements ApplicationContextInitializer<C
                             String createDbSql = String.format("CREATE DATABASE \"%s\" WITH ENCODING 'UTF8'",
                                     dbName.replace("\"", "\"\""));
                             createStmt.executeUpdate(createDbSql);
-                            log.info(GREEN + "✓ PostgreSQL database '" + dbName + "' created successfully" + RESET);
+                            log.info(GREEN + "[OK] PostgreSQL database '" + dbName + "' created" + RESET);
                         }
                     } else {
-                        log.info(GREEN + "✓ PostgreSQL database '" + dbName + "' already exists" + RESET);
+                        log.info(GREEN + "[OK] PostgreSQL database '" + dbName + "' exists" + RESET);
                     }
                 }
             }
@@ -527,75 +483,31 @@ public class CrudXDatabaseInitializer implements ApplicationContextInitializer<C
 
     private void validateConnectionWithDatabase(String url, String username, String password) throws Exception {
         try (Connection conn = DriverManager.getConnection(url, username, password)) {
-            log.info(GREEN + "✓ Database connection validated successfully" + RESET);
+            log.info(GREEN + "[OK] Database connection validated" + RESET);
         }
     }
 
     private void validateMongoConnection(String mongoUri) {
-        log.info(CYAN + "MongoDB configuration detected - connection will be validated on first use" + RESET);
+        log.info(CYAN + "MongoDB config detected - will validate on first use" + RESET);
     }
 
     private String detectSqlDatabaseType(String url) {
-        if (url.contains("mysql")) {
-            return "MySQL";
-        } else if (url.contains("postgresql")) {
-            return "PostgreSQL";
-        } else if (url.contains("oracle")) {
-            return "Oracle";
-        } else if (url.contains("sqlserver")) {
-            return "SQL Server";
-        }
+        if (url.contains("mysql")) return "MySQL";
+        if (url.contains("postgresql")) return "PostgreSQL";
+        if (url.contains("oracle")) return "Oracle";
+        if (url.contains("sqlserver")) return "SQL Server";
         return "Unknown";
     }
 
     private String maskPassword(String url) {
-        if (url == null) {
-            return "null";
-        }
+        if (url == null) return "null";
         return url.replaceAll(":[^:@]+@", ":****@");
     }
 
     private String truncate(String str, int maxLength) {
-        if (str == null) {
-            return "";
-        }
-        if (str.length() <= maxLength) {
-            return str;
-        }
+        if (str == null) return "";
+        if (str.length() <= maxLength) return str;
         return str.substring(0, maxLength - 3) + "...";
-    }
-
-    // Box formatting helpers
-    private String formatBoxTop() {
-        return CYAN + "╔════════════════════════════════════════════════════════════════════╗\n" + RESET;
-    }
-
-    private String formatBoxBottom() {
-        return CYAN + "╚════════════════════════════════════════════════════════════════════╝\n" + RESET;
-    }
-
-    private String formatBoxSeparator() {
-        return CYAN + "╠════════════════════════════════════════════════════════════════════╣\n" + RESET;
-    }
-
-    private String formatBoxTitle(String title) {
-        int totalWidth = 68;
-        int padding = (totalWidth - title.length()) / 2;
-        String leftPad = " ".repeat(padding);
-        String rightPad = " ".repeat(totalWidth - title.length() - padding);
-        return CYAN + "║" + RESET + leftPad + BOLD + WHITE + title + RESET + rightPad + CYAN + "║\n" + RESET;
-    }
-
-    private String formatBoxRow(String content) {
-        return formatBoxRow(content, WHITE);
-    }
-
-    private String formatBoxRow(String content, String color) {
-        int totalWidth = 68;
-        String strippedContent = content.replaceAll("\u001B\\[[;\\d]*m", "");
-        int contentLength = strippedContent.length();
-        int padding = totalWidth - contentLength;
-        return CYAN + "║" + RESET + " " + color + content + RESET + " ".repeat(Math.max(0, padding - 1)) + CYAN + "║\n" + RESET;
     }
 
     private void logError(String message) {
@@ -603,6 +515,6 @@ public class CrudXDatabaseInitializer implements ApplicationContextInitializer<C
     }
 
     private void logWarning(String message) {
-        log.warn(YELLOW + message + RESET);
+        log.warn(YELLOW + "{}" + RESET, message);
     }
 }
