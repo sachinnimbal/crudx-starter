@@ -6,22 +6,20 @@ plugins {
     id 'com.gradleup.nmcp' version '0.0.8'
 }
 
-apply from: 'gradle/author.gradle'
-
-group = 'io.github.sachinnimbal'
-version = '0.0.1-SNAPSHOT'
-description = 'CRUDX — The Next-Gen Multi-Database CRUD Framework for Spring Boot.'
+group = project.findProperty("group")
+version = project.findProperty("version")
+description = project.findProperty("description")
 
 java {
-	toolchain {
-		languageVersion = JavaLanguageVersion.of(21)
-	}
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
     withSourcesJar()
     withJavadocJar()
 }
 
 repositories {
-	mavenCentral()
+    mavenCentral()
 }
 
 dependencyManagement {
@@ -31,33 +29,26 @@ dependencyManagement {
 }
 
 dependencies {
-    // --- API: exposed to consumers ---
     api 'org.springframework.boot:spring-boot-starter-validation'
     api 'org.springframework.boot:spring-boot-starter-aop'
     api 'org.springframework:spring-context'
     api 'org.springframework.boot:spring-boot-configuration-processor'
     api 'org.springframework.boot:spring-boot-autoconfigure'
-    // Optional: only if your starter is strictly web-based.
-    // If your starter should also work in CLI / batch apps, move this to compileOnly.
     api 'org.springframework.boot:spring-boot-starter-web'
 
-    // --- CompileOnly: optional integrations ---
     compileOnly 'org.springframework.boot:spring-boot-starter-data-mongodb'
     compileOnly 'org.springframework.boot:spring-boot-starter-data-jpa'
     compileOnly 'com.mysql:mysql-connector-j'
     compileOnly 'org.postgresql:postgresql'
     compileOnly 'jakarta.persistence:jakarta.persistence-api'
 
-    // Lombok (compile only, not shipped to consumers)
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
 
-    // --- Internal implementations ---
     implementation 'org.slf4j:slf4j-api'
     implementation 'com.fasterxml.jackson.core:jackson-databind'
     implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
 
-    // --- Test dependencies ---
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     testImplementation 'org.springframework.boot:spring-boot-starter-data-mongodb'
@@ -90,7 +81,7 @@ publishing {
 
             pom {
                 name = 'CRUDX Starter'
-                description = 'Universal CRUD Framework for Spring Boot - Supports MySQL, PostgreSQL, and MongoDB'
+                description = project.description
                 url = 'https://github.com/sachinnimbal/crdux-starter'
 
                 licenses {
@@ -111,12 +102,11 @@ publishing {
 
                 scm {
                     connection = 'scm:git:git://github.com/sachinnimbal/crdux-starter.git'
-                    developerConnection = 'scm:git:ssh://github.com:sachinnimbal/crdux-starter.git'
+                    developerConnection = 'scm:git:ssh://github.com/sachinnimbal/crdux-starter.git'
                     url = 'https://github.com/sachinnimbal/crdux-starter'
                 }
             }
 
-            // Publish resolved versions from dependency management
             versionMapping {
                 usage('java-api') {
                     fromResolutionOf('runtimeClasspath')
@@ -146,8 +136,8 @@ publishing {
 }
 
 signing {
-    def signingKey = findProperty("signingKey")
-    def signingPassword = findProperty("signingPassword")
+    def signingKey = project.findProperty("signingKey")
+    def signingPassword = project.findProperty("signingPassword")
 
     if (signingKey && signingPassword) {
         useInMemoryPgpKeys(signingKey as String, signingPassword as String)
@@ -156,7 +146,6 @@ signing {
     sign publishing.publications.mavenJava
 }
 
-// Only require signing when publishing to Maven Central
 gradle.taskGraph.whenReady { graph ->
     tasks.withType(Sign).configureEach {
         onlyIf {
