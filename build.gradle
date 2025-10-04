@@ -6,6 +6,8 @@ plugins {
     id 'com.gradleup.nmcp' version '0.0.8'
 }
 
+apply from: 'gradle/author.gradle'
+
 group = project.findProperty("group")
 version = project.findProperty("version")
 description = project.findProperty("description")

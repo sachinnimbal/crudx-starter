@@ -16,12 +16,13 @@ import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.data.mongodb.config.EnableMongoAuditing;
 import org.springframework.data.mongodb.repository.config.EnableMongoRepositories;
 
+
 /**
  * @author Sachin Nimbal
- * @version 1.0.0
+ * @version 1.0.0-SNAPSHOT
+ * @since 2025
  * @Contact: <a href="mailto:sachinnimbal9@gmail.com">sachinnimbal9@gmail.com</a>
  * @see <a href="https://www.linkedin.com/in/sachin-nimbal/">LinkedIn Profile</a>
- * @since 2025
  */
 @Slf4j
 @Configuration

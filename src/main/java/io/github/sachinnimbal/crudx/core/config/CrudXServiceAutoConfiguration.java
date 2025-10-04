@@ -36,7 +36,7 @@ import java.util.Set;
 
 /**
  * @author Sachin Nimbal
- * @version 1.0.0
+ * @version 1.0.0-SNAPSHOT
  * @since 2025
  * @Contact: <a href="mailto:sachinnimbal9@gmail.com">sachinnimbal9@gmail.com</a>
  * @see <a href="https://www.linkedin.com/in/sachin-nimbal/">LinkedIn Profile</a>
@@ -64,7 +64,7 @@ public class CrudXServiceAutoConfiguration implements BeanDefinitionRegistryPost
 
     @Override
     public void postProcessBeanDefinitionRegistry(BeanDefinitionRegistry registry) throws BeansException {
-        log.info("🔍 Auto-discovering CrudX controllers and generating services...");
+        log.info("Auto-discovering CrudX controllers and generating services...");
 
         String[] beanNames = registry.getBeanDefinitionNames();
         int servicesCreated = 0;
@@ -96,7 +96,7 @@ public class CrudXServiceAutoConfiguration implements BeanDefinitionRegistryPost
                             processedEntities.add(entityKey);
                             servicesCreated++;
 
-                            log.info("  ✓ {} -> {} ({})",
+                            log.info(" {} -> {} ({})",
                                     entityInfo.entityClass.getSimpleName(),
                                     entityInfo.serviceBeanName,
                                     entityInfo.databaseType);
@@ -111,11 +111,11 @@ public class CrudXServiceAutoConfiguration implements BeanDefinitionRegistryPost
         }
 
         if (servicesCreated > 0) {
-            log.info("✓ Auto-generated {} service bean(s) successfully", servicesCreated);
+            log.info("Auto-generated {} service bean(s) successfully", servicesCreated);
         }
 
         if (!discoveredSQLEntities.isEmpty()) {
-            log.info("✓ Discovered {} SQL entity/entities for JPA registration", discoveredSQLEntities.size());
+            log.info("Discovered {} SQL entity/entities for JPA registration", discoveredSQLEntities.size());
         }
     }
 
