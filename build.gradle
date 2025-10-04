@@ -86,12 +86,12 @@ publishing {
         mavenJava(MavenPublication) {
             from components.java
 
-            artifactId = 'crdux-starter'
+            artifactId = 'crudx-starter'
 
             pom {
                 name = 'CRUDX Starter'
                 description = project.description
-                url = 'https://github.com/sachinnimbal/crdux-starter'
+                url = 'https://github.com/sachinnimbal/crudx-starter'
 
                 licenses {
                     license {
@@ -110,9 +110,9 @@ publishing {
                 }
 
                 scm {
-                    connection = 'scm:git:git://github.com/sachinnimbal/crdux-starter.git'
-                    developerConnection = 'scm:git:ssh://github.com/sachinnimbal/crdux-starter.git'
-                    url = 'https://github.com/sachinnimbal/crdux-starter'
+                    connection = 'scm:git:git://github.com/sachinnimbal/crudx-starter.git'
+                    developerConnection = 'scm:git:ssh://github.com/sachinnimbal/crudx-starter.git'
+                    url = 'https://github.com/sachinnimbal/crudx-starter'
                 }
             }
 
@@ -130,7 +130,7 @@ publishing {
     repositories {
         maven {
             name = "GitHubPackages"
-            url = uri("https://maven.pkg.github.com/sachinnimbal/crdux-starter")
+            url = uri("https://maven.pkg.github.com/sachinnimbal/crudx-starter")
             credentials {
                 username = project.findProperty("gpr.user") ?: System.getenv("GITHUB_ACTOR")
                 password = project.findProperty("gpr.key") ?: System.getenv("GITHUB_TOKEN")
