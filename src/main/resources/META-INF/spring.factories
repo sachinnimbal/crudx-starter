@@ -1,0 +1,8 @@
+# src/main/resources/META-INF/spring.factories
+org.springframework.context.ApplicationContextInitializer=\
+    io.github.sachinnimbal.crdux.core.config.CrudXDatabaseInitializer
+org.springframework.boot.autoconfigure.EnableAutoConfiguration=\
+    io.github.sachinnimbal.crdux.core.config.CrudXConfiguration,\
+    io.github.sachinnimbal.crdux.core.config.CrudXServiceAutoConfiguration,\
+    io.github.sachinnimbal.crdux.core.config.CrudXBannerConfiguration,\
+    io.github.sachinnimbal.crdux.core.exception.CrudXGlobalExceptionHandler
