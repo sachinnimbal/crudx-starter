@@ -6,8 +6,6 @@ plugins {
     id 'com.gradleup.nmcp' version '0.0.8'
 }
 
-apply from: 'gradle/author.gradle'
-
 group = project.findProperty("group")
 version = project.findProperty("version")
 description = project.findProperty("description")
@@ -56,6 +54,7 @@ dependencies {
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
 
+    implementation 'org.springframework.boot:spring-boot-starter-thymeleaf'
     implementation 'org.slf4j:slf4j-api'
     implementation 'com.fasterxml.jackson.core:jackson-databind'
     implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'

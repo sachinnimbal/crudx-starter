@@ -985,49 +985,6 @@ async function updateEmployee(id, updates) {
   });
   return await response.json();
 }
-```
-
-### Python (Requests Library)
-
-```python
-import requests
-
-BASE_URL = 'http://localhost:8080/api/employees'
-
-# Create employee
-def create_employee(employee_data):
-    response = requests.post(BASE_URL, json=employee_data)
-    return response.json()
-
-# Get employee by ID
-def get_employee(employee_id):
-    response = requests.get(f'{BASE_URL}/{employee_id}')
-    return response.json()
-
-# Update employee
-def update_employee(employee_id, updates):
-    response = requests.patch(f'{BASE_URL}/{employee_id}', json=updates)
-    return response.json()
-
-# Delete employee
-def delete_employee(employee_id):
-    response = requests.delete(f'{BASE_URL}/{employee_id}')
-    return response.json()
-
-# Example usage
-employee = {
-    'name': 'Sanjay Gupta',
-    'email': 'sanjay.gupta@company.com',
-    'department': 'IT Support',
-    'salary': 55000
-}
-
-result = create_employee(employee)
-if result['success']:
-    print(f"Created employee with ID: {result['data']['id']}")
-else:
-    print(f"Error: {result['message']}")
-```
 
 ---
 

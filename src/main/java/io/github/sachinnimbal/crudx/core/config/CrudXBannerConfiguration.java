@@ -45,12 +45,10 @@ public class CrudXBannerConfiguration implements ApplicationListener<Application
     }
 
     private void printSimpleBanner() {
-        System.out.println();
         System.out.println(CYAN + "============================================" + RESET);
-        System.out.println(CYAN + "||" + RESET + BOLD + "      CRUDX Framework v" + getVersion() + "       " + RESET + CYAN + "||" + RESET);
-        System.out.println(CYAN + "||" + RESET + "  Lightweight & High-Performance CRUD  " + CYAN + "||" + RESET);
+        System.out.println(GREEN + " :: CRUDX Framework ::    " + RESET + BOLD + "(v" + getVersion() + ")" + RESET);
+        System.out.println(CYAN + "||" + RESET + BOLD + "  Lightweight & High-Performance CRUD  " + RESET + CYAN + "||" + RESET);
         System.out.println(CYAN + "============================================" + RESET);
-        System.out.println();
     }
 
     private void printDatabaseInfo() {
@@ -72,12 +70,25 @@ public class CrudXBannerConfiguration implements ApplicationListener<Application
         System.out.println();
         System.out.println(GREEN + BOLD + ">> CRUDX Framework is ready!" + RESET);
         System.out.println(CYAN + ">> Documentation: " + YELLOW + "https://github.com/sachinnimbal/crudx-examples/wiki" + RESET);
+        System.out.println(CYAN + ">> Performance Dashboard: " + YELLOW + getDashboardUrl() + RESET);
         System.out.println();
     }
 
     private String formatStatus(String name, boolean isActive) {
         String status = isActive ? GREEN + "[CONFIGURED]" : RED + "[NOT CONFIGURED]";
         return " -> " + String.format("%-20s", name) + ": " + status + RESET;
+    }
+
+    private String getDashboardUrl() {
+        String port = environment.getProperty("server.port", "8080");
+        String contextPath = environment.getProperty("server.servlet.context-path", "");
+        String host = environment.getProperty("server.address", "localhost");
+
+        if (contextPath.endsWith("/")) {
+            contextPath = contextPath.substring(0, contextPath.length() - 1);
+        }
+
+        return String.format("http://%s:%s%s/crudx/performance/dashboard", host, port, contextPath);
     }
 
     private void printStartupTime() {
