@@ -15,7 +15,7 @@ import org.springframework.stereotype.Component;
  */
 @Component
 @ConfigurationProperties(prefix = "") // CRITICAL: Use empty prefix to match top-level keys
-@PropertySource("classpath:crudx-author.properties")
+@PropertySource("classpath:crudx.properties")
 @Data
 public class CrudxMetadataProperties {
 
