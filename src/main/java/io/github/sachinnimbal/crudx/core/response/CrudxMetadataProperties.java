@@ -5,10 +5,13 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.PropertySource;
 import org.springframework.stereotype.Component;
 
+
 /**
- * Single Configuration class to load all metadata from crudx-author.properties.
- * Uses an empty prefix ("") to match top-level keys (author.* and project.*)
- * via nested inner classes.
+ * @author Sachin Nimbal
+ * @version 1.0.0
+ * @since 2025
+ * @Contact: <a href="mailto:sachinnimbal9@gmail.com">sachinnimbal9@gmail.com</a>
+ * @see <a href="https://www.linkedin.com/in/sachin-nimbal/">LinkedIn Profile</a>
  */
 @Component
 @ConfigurationProperties(prefix = "") // CRITICAL: Use empty prefix to match top-level keys

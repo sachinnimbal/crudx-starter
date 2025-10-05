@@ -1,59 +1,91 @@
 # CrudX Framework - Help Guide
 
-## Table of Contents
-1. [Getting Started](#getting-started)
-2. [Database Configuration](#database-configuration)
-3. [Creating Entities](#creating-entities)
-4. [Creating Controllers](#creating-controllers)
-5. [Advanced Features](#advanced-features)
-6. [Troubleshooting](#troubleshooting)
-7. [Best Practices](#best-practices)
+Complete troubleshooting guide and FAQ for CrudX framework.
 
 ---
 
-## Getting Started
+## Table of Contents
 
-### Step 1: Add Dependencies
+1. [Quick Troubleshooting](#quick-troubleshooting)
+2. [Setup Issues](#setup-issues)
+3. [Database Configuration](#database-configuration)
+4. [Runtime Errors](#runtime-errors)
+5. [Performance Issues](#performance-issues)
+6. [Best Practices](#best-practices)
+7. [FAQ](#faq)
 
-Choose your database and add the appropriate dependency:
+---
 
-**For MySQL:**
-```gradle
-dependencies {
-    implementation 'io.github.sachinnimbal:crudx-core:0.0.1'
-    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
-    runtimeOnly 'com.mysql:mysql-connector-j:8.3.0'
-}
+## Quick Troubleshooting
+
+### Application Won't Start
+
+**Symptom:** Application fails to start with database configuration errors.
+
+**Common Causes & Solutions:**
+
+1. **No Database Configuration Found**
+```yaml
+# ❌ Missing configuration
+spring:
+  datasource:
+    # empty
+
+# ✅ Correct configuration
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:3306/mydb
+    username: root
+    password: password
 ```
 
-**For PostgreSQL:**
-```gradle
-dependencies {
-    implementation 'io.github.sachinnimbal:crudx-core:0.0.1'
-    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
-    runtimeOnly 'org.postgresql:postgresql:42.7.3'
-}
+2. **Database Driver Not Found**
+```bash
+# Error: "Driver class not found: com.mysql.cj.jdbc.Driver"
+
+# Solution: Add driver dependency
+Maven:
+<dependency>
+    <groupId>com.mysql</groupId>
+    <artifactId>mysql-connector-j</artifactId>
+    <version>8.3.0</version>
+    <scope>runtime</scope>
+</dependency>
+
+Gradle:
+runtimeOnly 'com.mysql:mysql-connector-j:8.3.0'
 ```
 
-**For MongoDB:**
-```gradle
-dependencies {
-    implementation 'io.github.sachinnimbal:crudx-core:0.0.1'
-    implementation 'org.springframework.boot:spring-boot-starter-data-mongodb'
-}
+3. **Database Connection Failed**
+```bash
+# Error: "Connection refused" or "Communications link failure"
+
+# Solutions:
+# 1. Check if database server is running
+systemctl status mysql  # Linux
+brew services list      # macOS
+
+# 2. Verify connection details
+# 3. Check firewall settings
+# 4. Ensure database exists (or enable auto-create)
+crudx:
+  database:
+    auto-create: true
 ```
 
-### Step 2: Enable CrudX
+---
 
-Add `@CrudX` annotation to your main application class:
+## Setup Issues
 
+### Issue: CrudX Annotation Not Working
+
+**Symptom:** `@CrudX` annotation has no effect; services not auto-generated.
+
+**Solution:**
+
+1. **Ensure correct annotation placement:**
 ```java
-package com.company.myapp;
-
-import io.github.sachinnimbal.crudx.core.annotations.CrudX;
-import org.springframework.boot.SpringApplication;
-import org.springframework.boot.autoconfigure.SpringBootApplication;
-
+// ✅ Correct
 @SpringBootApplication
 @CrudX
 public class MyApplication {
@@ -61,6 +93,101 @@ public class MyApplication {
         SpringApplication.run(MyApplication.class, args);
     }
 }
+
+// ❌ Wrong - not on main class
+@Configuration
+@CrudX
+public class SomeConfig { }
+```
+
+2. **Check dependency is correctly added:**
+```xml
+<!-- Maven -->
+<dependency>
+    <groupId>io.github.sachinnimbal</groupId>
+    <artifactId>crudx-starter</artifactId>
+    <version>1.0.0</version>
+</dependency>
+```
+
+3. **Verify Spring Boot version compatibility:**
+```xml
+<!-- CrudX requires Spring Boot 3.x -->
+<parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.2.0</version> <!-- Or higher -->
+</parent>
+```
+
+### Issue: Service Bean Not Found
+
+**Symptom:**
+```
+IllegalStateException: Service bean not found: employeeService
+```
+
+**Root Cause:** Entity doesn't extend correct CrudX base class.
+
+**Solution:**
+
+```java
+// ❌ Wrong - generic base class
+public class Employee extends CrudXBaseEntity<Long> {
+    // This won't work!
+}
+
+// ✅ Correct - database-specific base class
+// For MySQL:
+public class Employee extends CrudXMySQLEntity<Long> {
+    private String name;
+    private String email;
+}
+
+// For PostgreSQL:
+public class Employee extends CrudXPostgreSQLEntity<Long> {
+    private String name;
+    private String email;
+}
+
+// For MongoDB:
+public class Employee extends CrudXMongoEntity<String> {
+    private String name;
+    private String email;
+}
+```
+
+### Issue: Controller Endpoints Not Working
+
+**Symptom:** 404 errors for all CRUD endpoints.
+
+**Solution:**
+
+1. **Ensure controller extends CrudXController:**
+```java
+// ❌ Wrong
+@RestController
+@RequestMapping("/api/employees")
+public class EmployeeController {
+    // Missing extends
+}
+
+// ✅ Correct
+@RestController
+@RequestMapping("/api/employees")
+public class EmployeeController extends CrudXController<Employee, Long> {
+    // Auto-generates endpoints
+}
+```
+
+2. **Verify correct generic types:**
+```java
+// Entity ID type must match controller generic
+public class Employee extends CrudXMySQLEntity<Long> { }
+
+// Controller must use same ID type
+public class EmployeeController extends CrudXController<Employee, Long> { }
+//                                                                    ^^^^ Must match
 ```
 
 ---
@@ -69,625 +196,716 @@ public class MyApplication {
 
 ### MySQL Configuration
 
-**application.yml:**
+**Basic Setup:**
 ```yaml
 spring:
   datasource:
-    url: jdbc:mysql://localhost:3306/company_db
+    url: jdbc:mysql://localhost:3306/mydb
     username: root
-    password: root123
+    password: password
     driver-class-name: com.mysql.cj.jdbc.Driver
   jpa:
     hibernate:
       ddl-auto: update
-    show-sql: true
     properties:
       hibernate:
-        format_sql: true
-        dialect: org.hibernate.dialect.MySQLDialect
+        dialect: org.hibernate.dialect.MySQL8Dialect
+```
+
+**Common Issues:**
+
+1. **Time Zone Error:**
+```yaml
+# Error: "The server time zone value 'IST' is unrecognized"
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:3306/mydb?serverTimezone=UTC
+```
+
+2. **SSL Connection Error:**
+```yaml
+# Error: "SSL connection error"
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:3306/mydb?useSSL=false&allowPublicKeyRetrieval=true
+```
+
+3. **Character Encoding:**
+```yaml
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:3306/mydb?characterEncoding=UTF-8&useUnicode=true
 ```
 
 ### PostgreSQL Configuration
 
-**application.yml:**
+**Basic Setup:**
 ```yaml
 spring:
   datasource:
-    url: jdbc:postgresql://localhost:5432/company_db
+    url: jdbc:postgresql://localhost:5432/mydb
     username: postgres
-    password: postgres123
+    password: password
     driver-class-name: org.postgresql.Driver
   jpa:
     hibernate:
       ddl-auto: update
-    show-sql: true
     properties:
       hibernate:
-        format_sql: true
         dialect: org.hibernate.dialect.PostgreSQLDialect
 ```
 
-### MongoDB Configuration
-
-**application.yml:**
-```yaml
-spring:
-  data:
-    mongodb:
-      uri: mongodb://localhost:27017/company_db
-      # OR separate configuration
-      host: localhost
-      port: 27017
-      database: company_db
-      username: admin
-      password: admin123
-```
-
-### Auto-Create Database
-
-CrudX can automatically create databases if they don't exist:
-
-```yaml
-crudx:
-  database:
-    auto-create: true  # default: true
-```
-
----
-
-## Creating Entities
-
-### MySQL/PostgreSQL Entities
-
-**Example 1: Simple Employee Entity**
-```java
-package com.company.myapp.model;
-
-import io.github.sachinnimbal.crudx.core.model.CrudXMySQLEntity;
-import jakarta.persistence.*;
-import lombok.Data;
-import lombok.EqualsAndHashCode;
-
-@Data
-@EqualsAndHashCode(callSuper = true)
-@Entity
-@Table(name = "employees")
-public class Employee extends CrudXMySQLEntity<Long> {
-
-    @Column(nullable = false, length = 100)
-    private String name;
-
-    @Column(nullable = false, unique = true, length = 100)
-    private String email;
-
-    @Column(length = 50)
-    private String department;
-
-    @Column(name = "phone_number", length = 15)
-    private String phoneNumber;
-
-    private Double salary;
-}
-```
-
-**Example 2: Product Entity with Unique Constraint**
-```java
-package com.company.myapp.model;
-
-import io.github.sachinnimbal.crudx.core.annotations.CrudXUniqueConstraint;
-import io.github.sachinnimbal.crudx.core.model.CrudXMySQLEntity;
-import jakarta.persistence.*;
-import lombok.Data;
-import lombok.EqualsAndHashCode;
-
-@Data
-@EqualsAndHashCode(callSuper = true)
-@Entity
-@Table(name = "products")
-@CrudXUniqueConstraint(
-        fields = {"sku"},
-        message = "Product with this SKU already exists"
-)
-public class Product extends CrudXMySQLEntity<Long> {
-
-    @Column(nullable = false)
-    private String name;
-
-    @Column(nullable = false, unique = true)
-    private String sku;
-
-    @Column(columnDefinition = "TEXT")
-    private String description;
-
-    private Double price;
-
-    private Integer stock;
-
-    @Column(length = 50)
-    private String category;
-}
-```
-
-**Example 3: Customer with Multiple Unique Constraints**
-```java
-package com.company.myapp.model;
-
-import io.github.sachinnimbal.crudx.core.annotations.CrudXUniqueConstraint;
-import io.github.sachinnimbal.crudx.core.annotations.CrudXUniqueConstraints;
-import io.github.sachinnimbal.crudx.core.model.CrudXPostgreSQLEntity;
-import jakarta.persistence.*;
-import lombok.Data;
-import lombok.EqualsAndHashCode;
-
-@Data
-@EqualsAndHashCode(callSuper = true)
-@Entity
-@Table(name = "customers")
-@CrudXUniqueConstraints({
-        @CrudXUniqueConstraint(
-                fields = {"email"},
-                message = "Customer with this email already exists"
-        ),
-        @CrudXUniqueConstraint(
-                fields = {"phoneNumber"},
-                name = "uk_customer_phone",
-                message = "Customer with this phone number already exists"
-        ),
-        @CrudXUniqueConstraint(
-                fields = {"aadharNumber"},
-                name = "uk_customer_aadhar",
-                message = "Customer with this Aadhar number already exists"
-        )
-})
-public class Customer extends CrudXPostgreSQLEntity<Long> {
-
-    @Column(nullable = false)
-    private String fullName;
-
-    @Column(nullable = false, unique = true)
-    private String email;
-
-    @Column(name = "phone_number", unique = true)
-    private String phoneNumber;
-
-    @Column(name = "aadhar_number", unique = true, length = 12)
-    private String aadharNumber;
-
-    private String address;
-
-    private String city;
-
-    @Column(name = "pin_code")
-    private String pinCode;
-}
-```
-
-### MongoDB Entities
-
-**Example 1: Simple User Entity**
-```java
-package com.company.myapp.model;
-
-import io.github.sachinnimbal.crudx.core.model.CrudXMongoEntity;
-import lombok.Data;
-import lombok.EqualsAndHashCode;
-import org.springframework.data.mongodb.core.mapping.Document;
-
-@Data
-@EqualsAndHashCode(callSuper = true)
-@Document(collection = "users")
-public class User extends CrudXMongoEntity<String> {
-    
-    private String username;
-    private String email;
-    private String password;
-    private String role;
-    private Boolean active;
-}
-```
-
-**Example 2: Order Entity with Nested Objects**
-```java
-package com.company.myapp.model;
-
-import io.github.sachinnimbal.crudx.core.annotations.CrudXUniqueConstraint;
-import io.github.sachinnimbal.crudx.core.model.CrudXMongoEntity;
-import lombok.Data;
-import lombok.EqualsAndHashCode;
-import org.springframework.data.mongodb.core.mapping.Document;
-
-import java.util.List;
-
-@Data
-@EqualsAndHashCode(callSuper = true)
-@Document(collection = "orders")
-@CrudXUniqueConstraint(
-    fields = {"orderNumber"},
-    message = "Order with this number already exists"
-)
-public class Order extends CrudXMongoEntity<String> {
-    
-    private String orderNumber;
-    private String customerId;
-    private List<OrderItem> items;
-    private Double totalAmount;
-    private String status;
-    private String deliveryAddress;
-    
-    @Data
-    public static class OrderItem {
-        private String productId;
-        private String productName;
-        private Integer quantity;
-        private Double price;
-    }
-}
-```
-
----
-
-## Creating Controllers
-
-### Basic Controller
-
-```java
-package com.company.myapp.controller;
-
-import com.company.myapp.model.Employee;
-import io.github.sachinnimbal.crudx.web.CrudXController;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
-
-@RestController
-@RequestMapping("/api/employees")
-public class EmployeeController extends CrudXController<Employee, Long> {
-    // All CRUD endpoints are auto-generated!
-}
-```
-
-### Controller with Lifecycle Hooks
-
-```java
-package com.company.myapp.controller;
-
-import com.company.myapp.model.Product;
-import io.github.sachinnimbal.crudx.web.CrudXController;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
-
-import java.util.List;
-import java.util.Map;
-
-@Slf4j
-@RestController
-@RequestMapping("/api/products")
-public class ProductController extends CrudXController<Product, Long> {
-    
-    @Override
-    protected void beforeCreate(Product product) {
-        log.info("Validating product before creation: {}", product.getName());
-        // Custom validation logic
-        if (product.getPrice() < 0) {
-            throw new IllegalArgumentException("Price cannot be negative");
-        }
-    }
-    
-    @Override
-    protected void afterCreate(Product product) {
-        log.info("Product created successfully with ID: {}", product.getId());
-        // Send notification, update cache, etc.
-    }
-    
-    @Override
-    protected void beforeUpdate(Long id, Map<String, Object> updates, Product existingProduct) {
-        log.info("Updating product ID: {}", id);
-        // Check business rules
-        if (updates.containsKey("stock") && (Integer) updates.get("stock") < 0) {
-            throw new IllegalArgumentException("Stock cannot be negative");
-        }
-    }
-    
-    @Override
-    protected void afterUpdate(Product updatedProduct, Product oldProduct) {
-        log.info("Product updated: {} -> {}", oldProduct.getName(), updatedProduct.getName());
-        // Sync with inventory system
-    }
-    
-    @Override
-    protected void beforeDelete(Long id, Product product) {
-        log.warn("Deleting product: {}", product.getName());
-        // Check if product has active orders
-    }
-}
-```
-
----
-
-## Advanced Features
-
-### 1. Unique Constraints
-
-Single field constraint:
-```java
-@CrudXUniqueConstraint(
-    fields = {"email"},
-    message = "Email already exists"
-)
-```
-
-Multiple fields constraint:
-```java
-@CrudXUniqueConstraint(
-    fields = {"firstName", "lastName", "dateOfBirth"},
-    name = "uk_person_identity",
-    message = "Person with same name and birth date already exists"
-)
-```
-
-Multiple separate constraints (using @Repeatable):
-```java
-@CrudXUniqueConstraint(
-    fields = {"email"},
-    message = "Email already exists"
-)
-@CrudXUniqueConstraint(
-    fields = {"phoneNumber"},
-    message = "Phone number already exists"
-)
-```
-
-Alternative: Using @CrudXUniqueConstraints container:
-```java
-@CrudXUniqueConstraints({
-    @CrudXUniqueConstraint(
-        fields = {"email"},
-        message = "Email already exists"
-    ),
-    @CrudXUniqueConstraint(
-        fields = {"phoneNumber"},
-        message = "Phone number already exists"
-    ),
-    @CrudXUniqueConstraint(
-        fields = {"username"},
-        message = "Username already exists"
-    )
-})
-```
-
-**Note:** Both approaches work identically. The `@CrudXUniqueConstraints` (plural) is the container annotation that holds multiple `@CrudXUniqueConstraint` annotations. Use whichever syntax you prefer.
-
-### 2. Audit Fields
-
-All entities automatically include audit fields:
-- `createdAt` - Timestamp of creation
-- `createdBy` - User who created (can be set manually)
-- `updatedAt` - Timestamp of last update
-- `updatedBy` - User who last updated
-
-```java
-// Access audit information
-Employee emp = employeeService.findById(1L);
-System.out.println("Created: " + emp.getAudit().getCreatedAt());
-System.out.println("Last Updated: " + emp.getAudit().getUpdatedAt());
-```
-
-### 3. Batch Operations
-
-CrudX provides efficient batch operations with skip functionality:
-
-```java
-// Create multiple employees
-List<Employee> employees = Arrays.asList(
-    new Employee("Rahul Sharma", "rahul@company.com"),
-    new Employee("Priya Patel", "priya@company.com"),
-    new Employee("Amit Kumar", "amit@company.com")
-);
-
-// Skip duplicates
-POST /api/employees/batch?skipDuplicates=true
-
-// Fail on first duplicate
-POST /api/employees/batch?skipDuplicates=false
-```
-
-### 4. Custom Service Access
-
-If you need direct service access:
-
-```java
-@RestController
-@RequestMapping("/api/custom")
-public class CustomController extends CrudXController<Employee, Long> {
-    
-    @GetMapping("/department/{dept}")
-    public List<Employee> getByDepartment(@PathVariable String dept) {
-        // Access the auto-generated service
-        List<Employee> allEmployees = crudService.findAll();
-        return allEmployees.stream()
-            .filter(e -> dept.equals(e.getDepartment()))
-            .collect(Collectors.toList());
-    }
-}
-```
-
----
-
-## Troubleshooting
-
-### Issue 1: Service Bean Not Found
-
-**Error:**
-```
-Service bean not found: employeeService
-```
-
-**Solution:**
-- Ensure entity extends `CrudXMySQLEntity`, `CrudXPostgreSQLEntity`, or `CrudXMongoEntity`
-- Verify `@CrudX` annotation is on main application class
-- Check entity class is in a package scanned by Spring
-
-### Issue 2: Database Not Created
-
-**Error:**
-```
-Database 'company_db' does not exist
-```
-
-**Solution:**
-- Enable auto-creation:
-```yaml
+**Common Issues:**
+
+1. **Database Does Not Exist:**
+```bash
+# Create database manually
+psql -U postgres
+CREATE DATABASE mydb;
+\q
+
+# Or enable auto-create
 crudx:
   database:
     auto-create: true
 ```
-- Or manually create database
 
-### Issue 3: Unique Constraint Violation
-
-**Error:**
+2. **Schema Issues:**
+```yaml
+spring:
+  jpa:
+    properties:
+      hibernate:
+        default_schema: public
 ```
-Duplicate entry found for fields: email
+
+### MongoDB Configuration
+
+**Basic Setup:**
+```yaml
+spring:
+  data:
+    mongodb:
+      uri: mongodb://localhost:27017/mydb
+      # Or separate properties:
+      host: localhost
+      port: 27017
+      database: mydb
 ```
 
-**Solution:**
-- This is expected behavior when creating duplicate entries
-- Use `skipDuplicates=true` in batch operations to skip duplicates
-- Ensure unique values before creation
+**Authentication:**
+```yaml
+spring:
+  data:
+    mongodb:
+      uri: mongodb://username:password@localhost:27017/mydb?authSource=admin
+```
 
-### Issue 4: Large Dataset Performance
+**Common Issues:**
 
-**Issue:** Slow response for large datasets
+1. **Connection Timeout:**
+```yaml
+spring:
+  data:
+    mongodb:
+      uri: mongodb://localhost:27017/mydb?connectTimeoutMS=10000&socketTimeoutMS=10000
+```
 
-**Solution:**
-- Use pagination endpoint: `/api/employees/paged?page=0&size=20`
-- CrudX auto-paginates when dataset exceeds 1000 records
-- Adjust threshold in your controller if needed
+2. **Authentication Failed:**
+```bash
+# Check MongoDB user exists
+mongo
+use admin
+db.auth("username", "password")
+```
+
+### Multi-Database Setup
+
+**Using both SQL and MongoDB:**
+```yaml
+# application.yml
+spring:
+  # MySQL for transactional data
+  datasource:
+    url: jdbc:mysql://localhost:3306/mydb
+    username: root
+    password: password
+  
+  # MongoDB for flexible documents
+  data:
+    mongodb:
+      uri: mongodb://localhost:27017/mydb
+```
+
+```java
+// MySQL Entity
+@Entity
+public class Order extends CrudXMySQLEntity<Long> {
+    private Long customerId;
+    private BigDecimal amount;
+}
+
+// MongoDB Document
+@Document
+public class OrderHistory extends CrudXMongoEntity<String> {
+    private Long orderId;
+    private List<String> events;
+}
+```
+
+---
+
+## Runtime Errors
+
+### Duplicate Entry Errors
+
+**Symptom:**
+```
+DuplicateEntityException: Duplicate entry found for unique constraint
+```
+
+**Solutions:**
+
+1. **Handle duplicates in batch operations:**
+```bash
+# Skip duplicates instead of failing
+POST /api/employees/batch?skipDuplicates=true
+```
+
+2. **Add unique constraints to entity:**
+```java
+@Entity
+@CrudXUniqueConstraint(
+    fields = {"email"},
+    message = "Email already exists"
+)
+public class Employee extends CrudXMySQLEntity<Long> {
+    private String email;
+}
+```
+
+3. **Check before creating:**
+```java
+@Override
+protected void beforeCreate(Employee entity) {
+    // Custom validation
+    if (isDuplicate(entity.getEmail())) {
+        throw new DuplicateEntityException("Email already exists");
+    }
+}
+```
+
+### Entity Not Found Errors
+
+**Symptom:**
+```
+EntityNotFoundException: Employee not found with id: 123
+```
+
+**Solutions:**
+
+1. **Verify ID exists before operations:**
+```bash
+# Check existence first
+GET /api/employees/exists/123
+```
+
+2. **Use batch operations with skip:**
+```bash
+# Will skip non-existent IDs
+DELETE /api/employees/batch
+[123, 456, 789]
+```
+
+3. **Handle in custom logic:**
+```java
+@Override
+protected void beforeDelete(Long id, Employee entity) {
+    if (!crudService.existsById(id)) {
+        // Handle gracefully
+    }
+}
+```
+
+### Memory Issues
+
+**Symptom:**
+```
+OutOfMemoryError: Java heap space
+```
+
+**Solutions:**
+
+1. **Use pagination for large datasets:**
+```bash
+# Instead of fetching all
+GET /api/employees
+
+# Use pagination
+GET /api/employees/paged?page=0&size=100
+```
+
+2. **CrudX auto-handles large datasets:**
+```bash
+# If dataset > 1000, CrudX auto-switches to pagination
+GET /api/employees
+# Returns first 1000 with pagination info
+```
+
+3. **Increase heap size:**
+```bash
+# JVM options
+java -Xms512m -Xmx2048m -jar myapp.jar
+```
+
+4. **Enable memory optimization:**
+```yaml
+crudx:
+  performance:
+    track-memory: false  # Disable if causing issues
+```
+
+### Validation Errors
+
+**Symptom:**
+```
+MethodArgumentNotValidException: Validation failed
+```
+
+**Solutions:**
+
+1. **Add validation annotations:**
+```java
+public class Employee extends CrudXMySQLEntity<Long> {
+    @NotNull(message = "Name is required")
+    @Size(min = 2, max = 100)
+    private String name;
+    
+    @Email(message = "Invalid email format")
+    private String email;
+}
+```
+
+2. **Handle validation in lifecycle hooks:**
+```java
+@Override
+protected void beforeCreate(Employee entity) {
+    if (entity.getName() == null || entity.getName().trim().isEmpty()) {
+        throw new IllegalArgumentException("Name cannot be empty");
+    }
+}
+```
+
+---
+
+## Performance Issues
+
+### Slow Query Performance
+
+**Symptom:** Endpoints responding slowly.
+
+**Diagnosis:**
+```yaml
+# Enable SQL logging
+spring:
+  jpa:
+    properties:
+      hibernate:
+        format_sql: true
+        use_sql_comments: true
+    show-sql: true
+```
+
+**Solutions:**
+
+1. **Add database indexes:**
+```java
+@Entity
+@Table(indexes = {
+    @Index(name = "idx_email", columnList = "email"),
+    @Index(name = "idx_name", columnList = "name")
+})
+public class Employee extends CrudXMySQLEntity<Long> {
+    private String name;
+    private String email;
+}
+```
+
+2. **Use pagination:**
+```bash
+# Always paginate large result sets
+GET /api/employees/paged?page=0&size=50
+```
+
+3. **Optimize queries:**
+```java
+// Use specific fields instead of full entity
+@Override
+protected void afterFindById(Employee entity) {
+    // Lazy load related entities only when needed
+}
+```
+
+4. **Enable performance monitoring:**
+```yaml
+crudx:
+  performance:
+    enabled: true
+```
+Access dashboard at: `http://localhost:8080/crudx/performance/dashboard`
+
+### Batch Operation Timeouts
+
+**Symptom:** Batch operations timing out or failing.
+
+**Solutions:**
+
+1. **Reduce batch size:**
+```bash
+# Instead of 10,000 records at once
+POST /api/employees/batch
+[... 10000 items ...]
+
+# Split into smaller batches (recommended: 100-1000)
+POST /api/employees/batch
+[... 500 items ...]
+```
+
+2. **CrudX has built-in limits:**
+```java
+// Auto-limits to 1000 records per batch for safety
+// Processes in sub-batches of 100 for memory efficiency
+```
+
+3. **Use async processing for large batches:**
+```java
+@Async
+public CompletableFuture<BatchResult<Employee>> createLargeBatch(List<Employee> employees) {
+    return CompletableFuture.completedFuture(
+        crudService.createBatch(employees, true)
+    );
+}
+```
+
+### High Memory Usage
+
+**Symptom:** Application consuming too much memory.
+
+**Solutions:**
+
+1. **Avoid fetching all records:**
+```bash
+# ❌ Don't do this for large datasets
+GET /api/employees
+
+# ✅ Use pagination
+GET /api/employees/paged?page=0&size=100
+```
+
+2. **CrudX uses cursor-based streaming for large datasets:**
+```java
+// Automatically switches to streaming when count > 5000
+// Processes in batches of 100 to minimize memory
+```
+
+3. **Monitor with built-in dashboard:**
+```yaml
+crudx:
+  performance:
+    enabled: true
+    track-memory: true
+```
+
+4. **Reduce metric retention:**
+```yaml
+crudx:
+  performance:
+    max-stored-metrics: 500  # Default: 1000
+    retention-minutes: 30     # Default: 60
+```
 
 ---
 
 ## Best Practices
 
-### 1. Entity Design
+### Entity Design
 
 ```java
-// ✅ Good: Clear naming and proper annotations
+// ✅ Good Practice - Multiple unique constraints
 @Entity
-@Table(name = "employees", indexes = {
-    @Index(name = "idx_department", columnList = "department"),
-    @Index(name = "idx_email", columnList = "email")
+@CrudXUniqueConstraints({
+    @CrudXUniqueConstraint(
+        fields = {"email"}, 
+        message = "Email already exists"
+    ),
+    @CrudXUniqueConstraint(
+        fields = {"username"}, 
+        message = "Username taken"
+    ),
+    @CrudXUniqueConstraint(
+        fields = {"name", "department"}, 
+        message = "Employee name must be unique within department"
+    )
 })
 public class Employee extends CrudXMySQLEntity<Long> {
-    @Column(nullable = false, length = 100)
     private String name;
-    
-    @Column(nullable = false, unique = true)
+    private String email;
+    private String username;
+    private String department;
+}
+
+// ✅ Single constraint - no wrapper needed
+@Entity
+@CrudXUniqueConstraint(fields = {"email"})
+public class User extends CrudXMySQLEntity<Long> {
     private String email;
 }
 
-// ❌ Bad: No constraints, no indexes
+// ❌ Bad Practice - Missing constraints
+@Entity
 public class Employee extends CrudXMySQLEntity<Long> {
-    private String name;
-    private String email;
+    private String email; // Should be unique but not enforced
 }
 ```
 
-### 2. Controller Organization
+### Controller Design
 
 ```java
-// ✅ Good: Clear endpoint structure
+// ✅ Good Practice
 @RestController
-@RequestMapping("/api/v1/employees")
+@RequestMapping("/api/employees")
+@CrossOrigin(origins = "http://localhost:3000")
 public class EmployeeController extends CrudXController<Employee, Long> {
+    
+    @Autowired
+    private EmailService emailService;
+    
+    @Override
+    protected void afterCreate(Employee entity) {
+        emailService.sendWelcome(entity.getEmail());
+    }
+    
+    @Override
+    protected void beforeDelete(Long id, Employee entity) {
+        // Cleanup related data
+        relatedDataService.cleanup(id);
+    }
 }
 
-// ✅ Good: Version your APIs
+// ❌ Bad Practice - Overriding core endpoints
 @RestController
-@RequestMapping("/api/v2/employees")
-public class EmployeeV2Controller extends CrudXController<Employee, Long> {
-}
-```
-
-### 3. Error Handling
-
-```java
-// ✅ Good: Use lifecycle hooks for validation
-@Override
-protected void beforeCreate(Employee employee) {
-    if (employee.getSalary() != null && employee.getSalary() < 10000) {
-        throw new IllegalArgumentException("Minimum salary is 10,000");
+@RequestMapping("/api/employees")
+public class EmployeeController extends CrudXController<Employee, Long> {
+    
+    // ❌ Don't override core CRUD methods
+    @PostMapping
+    public ResponseEntity<?> create(@RequestBody Employee entity) {
+        // This breaks CrudX functionality
     }
 }
 ```
 
-### 4. Pagination Usage
-
-```java
-// ✅ Good: Use pagination for large datasets
-GET /api/employees/paged?page=0&size=20&sortBy=name&sortDirection=ASC
-
-// ❌ Bad: Fetching all records without pagination
-GET /api/employees  // Might return thousands of records
-```
-
-### 5. Batch Operations
-
-```java
-// ✅ Good: Use skipDuplicates for data imports
-POST /api/employees/batch?skipDuplicates=true
-
-// ✅ Good: Limit batch size
-List<Employee> batch = employees.subList(0, 1000);
-```
-
----
-
-## Configuration Reference
-
-### CrudX Properties
+### Database Configuration
 
 ```yaml
-crudx:
-  database:
-    auto-create: true  # Auto-create database if not exists
-  
-  # For JPA
-  jpa:
-    repository:
-      packages: com.company.repositories  # Additional repository packages
-    entity:
-      packages: com.company.domain        # Additional entity packages
-  
-  # For MongoDB
-  mongo:
-    repository:
-      packages: com.company.repositories  # Additional repository packages
-```
-
-### Performance Tuning
-
-```yaml
+# ✅ Production configuration
 spring:
+  datasource:
+    url: jdbc:mysql://localhost:3306/mydb
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 5
+      connection-timeout: 30000
   jpa:
+    hibernate:
+      ddl-auto: validate  # Never use 'create' or 'create-drop' in production
     properties:
       hibernate:
-        jdbc:
-          batch_size: 100               # Batch insert size
-          fetch_size: 50                # Fetch size
-        order_inserts: true
-        order_updates: true
-        cache:
-          use_second_level_cache: true
+        format_sql: false
+        use_sql_comments: false
+    show-sql: false
+
+# ❌ Bad Practice - Insecure configuration
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:3306/mydb
+    username: root
+    password: password123  # Hardcoded password
+  jpa:
+    hibernate:
+      ddl-auto: create  # Drops and recreates tables on restart!
+```
+
+### Performance Optimization
+
+```java
+// ✅ Efficient batch processing
+List<Employee> employees = readFromFile(); // 10,000 records
+
+// Split into chunks
+int chunkSize = 500;
+for (int i = 0; i < employees.size(); i += chunkSize) {
+    List<Employee> chunk = employees.subList(
+        i, 
+        Math.min(i + chunkSize, employees.size())
+    );
+    crudService.createBatch(chunk, true);
+}
+
+// ❌ Inefficient - all at once
+crudService.createBatch(employees, true); // May timeout
 ```
 
 ---
 
-## Support
+## FAQ
 
-**Created by:** Sachin Nimbal
-**Location:** Bangalore, India
+### General Questions
 
-For help:
-- Documentation: https://github.com/sachinnimbal/crudx-examples/wiki
-- Issues: https://github.com/sachinnimbal/crudx-examples/issues
-- Examples: https://github.com/sachinnimbal/crudx-examples
+**Q: Can I use CrudX with existing Spring Boot projects?**
+
+A: Yes! Simply add the `@CrudX` annotation to your main class and start creating CrudX controllers. Existing controllers and services remain unaffected.
+
+**Q: Does CrudX work with Spring Security?**
+
+A: Yes, CrudX controllers are standard Spring controllers and work with Spring Security. Add security annotations as usual:
+```java
+@RestController
+@RequestMapping("/api/employees")
+@PreAuthorize("hasRole('ADMIN')")
+public class EmployeeController extends CrudXController<Employee, Long> {
+}
+```
+
+**Q: Can I customize the generated endpoints?**
+
+A: Yes, use lifecycle hooks to add custom logic without losing auto-generated functionality. For completely custom endpoints, add new methods to your controller.
+
+**Q: Does CrudX support transactions?**
+
+A: Yes, all CrudX operations are automatically transactional. For custom transaction boundaries, use `@Transactional` annotation.
+
+**Q: Can I use CrudX with multiple databases?**
+
+A: Yes! You can use different database types in the same application. Just extend the appropriate base class for each entity.
+
+### Technical Questions
+
+**Q: What happens when dataset exceeds 1000 records?**
+
+A: CrudX automatically switches to paginated response with a message indicating the total count. Use the `/paged` endpoint for full control.
+
+**Q: How does batch operation duplicate handling work?**
+
+A: When `skipDuplicates=true`, CrudX:
+1. Validates each entity against unique constraints
+2. Skips duplicates and continues processing
+3. Returns both created entities and skip reasons
+
+When `skipDuplicates=false` (default):
+1. First duplicate causes entire batch to fail
+2. Transaction rolls back
+3. No entities are created
+
+**Q: How accurate is memory tracking?**
+
+A: CrudX uses thread-local memory allocation measurement (`ThreadMXBean`). First requests show higher values due to JVM warmup. Typical request memory: 50-500KB.
+
+**Q: Can I disable auto-generation for specific entities?**
+
+A: Yes, simply don't create a controller that extends `CrudXController` for that entity. Use standard Spring Data repositories instead.
+
+**Q: Does CrudX affect existing Spring Data repositories?**
+
+A: No, CrudX only manages entities with CrudX controllers. Your existing repositories continue to work normally.
+
+### Performance Questions
+
+**Q: What's the maximum batch size?**
+
+A: CrudX automatically limits batches to 1000 records for safety. For larger datasets, split into multiple batches.
+
+**Q: How does CrudX handle large datasets?**
+
+A: For datasets > 5000 records, CrudX automatically uses cursor-based streaming with batches of 100 records to minimize memory usage.
+
+**Q: Should I always enable performance monitoring?**
+
+A: For development/testing: Yes, very helpful for optimization.
+For production: Only if you need it - adds minimal overhead (~2-3ms per request) but consumes memory for metrics storage.
+
+**Q: Why is my first request slow?**
+
+A: This is JVM warmup. Subsequent requests are significantly faster as JIT compilation optimizes the code.
+
+### Troubleshooting Questions
+
+**Q: My controller endpoints return 404**
+
+A: Check:
+1. Controller extends `CrudXController<Entity, ID>`
+2. Entity extends correct base class (CrudXMySQLEntity, etc.)
+3. `@RestController` and `@RequestMapping` are present
+4. Application has `@CrudX` annotation
+
+**Q: Getting "Service bean not found" error**
+
+A: Entity must extend database-specific base class:
+- `CrudXMySQLEntity` for MySQL
+- `CrudXPostgreSQLEntity` for PostgreSQL
+- `CrudXMongoEntity` for MongoDB
+
+**Q: Unique constraint not working**
+
+A: Ensure you're using `@CrudXUniqueConstraint` (not JPA's `@UniqueConstraint`). For multiple constraints, use `@CrudXUniqueConstraints` wrapper.
+
+**Q: Performance dashboard shows 404**
+
+A: Check:
+1. `crudx.performance.enabled=true` in configuration
+2. Accessing correct path: `/crudx/performance/dashboard`
+3. Application started without errors
+
+---
+
+## Getting Help
+
+### Community Support
+
+- **GitHub Issues**: [Report bugs or request features](https://github.com/sachinnimbal/crudx-starter/issues)
+- **Stack Overflow**: Tag questions with `crudx-framework`
+- **Examples**: [Sample projects](https://github.com/sachinnimbal/crudx-examples)
+
+### Documentation
+
+- **API Documentation**: [API_DOCUMENTATION.md](API_DOCUMENTATION.md)
+- **README**: [README.md](README.md)
+- **Wiki**: [Detailed guides and tutorials](https://github.com/sachinnimbal/crudx-examples/wiki)
+
+### Contact
+
+- **Email**: sachinnimbal@gmail.com
+- **LinkedIn**: [Sachin Nimbal](https://www.linkedin.com/in/sachin-nimbal/)
+
+---
+
+## Debugging Checklist
+
+When encountering issues, check these in order:
+
+- [ ] CrudX dependency is in `pom.xml` or `build.gradle`
+- [ ] `@CrudX` annotation on main application class
+- [ ] Database configuration present in `application.yml`
+- [ ] Database server is running and accessible
+- [ ] Entity extends correct base class (`CrudXMySQLEntity`, etc.)
+- [ ] Controller extends `CrudXController<Entity, ID>`
+- [ ] Generic types match between entity and controller
+- [ ] Database driver dependency is present
+- [ ] No conflicting Spring Data repositories for same entity
+- [ ] Application starts without errors in console
+
+---
+
+**Still stuck? Check the [API Documentation](API_DOCUMENTATION.md) or open an issue on GitHub.**
