@@ -1,0 +1,1395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CrudX Performance Analytics</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0"></script>
+    <style>
+        :root {
+            --bg-primary: #0f172a;
+            --bg-secondary: #1e293b;
+            --bg-tertiary: #334155;
+            --text-primary: #f1f5f9;
+            --text-secondary: #cbd5e1;
+            --text-muted: #64748b;
+            --border-color: #475569;
+            --accent-primary: #6366f1;
+            --accent-secondary: #8b5cf6;
+        }
+
+        .light-mode {
+            --bg-primary: #ffffff;
+            --bg-secondary: #f8fafc;
+            --bg-tertiary: #f1f5f9;
+            --text-primary: #0f172a;
+            --text-secondary: #475569;
+            --text-muted: #94a3b8;
+            --border-color: #e2e8f0;
+            --accent-primary: #6366f1;
+            --accent-secondary: #8b5cf6;
+        }
+
+        body {
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            transition: all 0.3s ease;
+        }
+
+        @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        .pulse-dot { animation: pulse-dot 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+
+        .details-row {
+            display: none;
+        }
+
+        .details-row.open {
+            display: table-row;
+        }
+
+        .details-content {
+            max-height: 0;
+            overflow: hidden;
+            opacity: 0;
+            transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease;
+        }
+
+        .details-row.open .details-content {
+            max-height: 2000px;
+            opacity: 1;
+        }
+
+        .table-row {
+            transition: all 0.2s ease;
+        }
+
+        .table-row:hover {
+            background: var(--bg-tertiary);
+            transform: translateX(4px);
+        }
+
+        .chevron-icon {
+            transition: transform 0.3s ease;
+        }
+
+        .chevron-icon.rotated {
+            transform: rotate(180deg);
+        }
+
+        .card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            transition: all 0.3s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3);
+        }
+
+        .badge {
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .nested-pagination {
+            background: var(--bg-tertiary);
+            padding: 0.75rem 1rem;
+            border-radius: 0.5rem;
+            margin-top: 0.75rem;
+            border: 1px solid var(--border-color);
+        }
+
+        .pagination-container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+            padding: 1rem 0 0.5rem 0;
+        }
+
+        .pagination-buttons {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+        }
+
+        .pagination-btn {
+            min-width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid var(--border-color);
+            transition: all 0.2s ease;
+            font-weight: 500;
+        }
+
+        .pagination-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            border-color: var(--accent-primary);
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.2);
+        }
+
+        .pagination-btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+
+        .pagination-btn.active {
+            background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+            border-color: transparent;
+            color: white;
+        }
+
+        .theme-toggle {
+            position: relative;
+            width: 60px;
+            height: 30px;
+            background: var(--bg-tertiary);
+            border-radius: 15px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .theme-toggle-slider {
+            position: absolute;
+            top: 3px;
+            left: 3px;
+            width: 24px;
+            height: 24px;
+            background: var(--accent-primary);
+            border-radius: 50%;
+            transition: all 0.3s ease;
+        }
+
+        .light-mode .theme-toggle-slider {
+            transform: translateX(30px);
+        }
+
+        .metric-card {
+            background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%);
+        }
+
+        .light-mode .nested-pagination {
+            background: var(--bg-tertiary);
+            border-color: var(--border-color);
+        }
+
+        .light-mode .card {
+            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+        }
+
+        .modal-backdrop {
+            backdrop-filter: blur(8px);
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .slide-in {
+            animation: slideIn 0.3s ease-out;
+        }
+
+        .status-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+    </style>
+</head>
+<body>
+
+<header class="sticky top-0 z-40 border-b" style="background: var(--bg-secondary); border-color: var(--border-color);">
+    <div class="max-w-7xl mx-auto px-6 py-4">
+        <div class="flex items-center justify-between">
+            <div class="flex items-center gap-6">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center shadow-lg">
+                        <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                        </svg>
+                    </div>
+                    <div>
+                        <h1 class="text-2xl font-bold">CrudX Performance</h1>
+                        <p class="text-xs" style="color: var(--text-muted);">v1.0.0 • by <a
+                                href="https://www.linkedin.com/in/sachin-nimbal/" target="_blank"
+                                class="text-indigo-400 hover:text-indigo-300 transition-colors">Sachin Nimbal</a></p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-4">
+                <div class="flex items-center gap-2 bg-green-500/10 px-3 py-1.5 rounded-full border border-green-500/20">
+                    <div class="w-2 h-2 bg-green-400 rounded-full pulse-dot"></div>
+                    <span class="text-green-300 text-xs font-semibold">LIVE</span>
+                </div>
+
+                <div class="theme-toggle" onclick="toggleTheme()">
+                    <div class="theme-toggle-slider"></div>
+                </div>
+
+                <button onclick="toggleInfo()" class="px-4 py-2 rounded-lg text-sm font-medium transition-all"
+                        style="background: var(--bg-tertiary);">
+                    About Framework
+                </button>
+            </div>
+        </div>
+    </div>
+</header>
+
+<div id="infoModal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop"
+     style="background: rgba(0, 0, 0, 0.7);">
+    <div class="card rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto slide-in">
+        <div class="p-8">
+            <div class="flex items-start justify-between mb-6">
+                <div>
+                    <h2 class="text-3xl font-bold mb-2">CrudX Framework</h2>
+                    <p style="color: var(--text-secondary);">Zero-Boilerplate CRUD Operations for Spring Boot</p>
+                </div>
+                <button onclick="toggleInfo()" class="hover:text-white transition-colors"
+                        style="color: var(--text-muted);">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+
+            <div class="space-y-6">
+                <div class="card rounded-xl p-4">
+                    <div class="grid grid-cols-2 gap-4 text-sm">
+                        <div>
+                            <span style="color: var(--text-secondary);">Version:</span>
+                            <span id="modalVersion" class="font-semibold ml-2">Loading...</span>
+                        </div>
+                        <div>
+                            <span style="color: var(--text-secondary);">Since:</span>
+                            <span id="modalSince" class="font-semibold ml-2">Loading...</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <h3 class="text-xl font-bold mb-3">Author</h3>
+                        <div class="card rounded-xl p-4">
+                            <div class="flex items-center gap-4 mb-3">
+                                <div class="w-16 h-16 bg-gradient-to-br from-indigo-600 to-purple-600 rounded-full flex items-center justify-center text-white text-2xl font-bold">
+                                    SN
+                                </div>
+                                <div>
+                                    <p id="modalAuthorName" class="font-bold text-lg">Loading...</p>
+                                    <p style="color: var(--text-secondary);" class="text-sm">Full Stack Developer</p>
+                                </div>
+                            </div>
+                            <div class="space-y-2 text-sm">
+                                <div class="flex items-center gap-2">
+                                    <svg class="w-4 h-4" style="color: var(--text-muted);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+                                    </svg>
+                                    <a id="modalAuthorEmail" href="" class="text-indigo-400 hover:text-indigo-300 transition-colors">Loading...</a>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <svg class="w-4 h-4" style="color: var(--text-muted);" fill="currentColor" viewBox="0 0 24 24">
+                                        <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
+                                    </svg>
+                                    <a id="modalAuthorLinkedin" href="" target="_blank" class="text-indigo-400 hover:text-indigo-300 transition-colors">Loading...</a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Quick Start -->
+                <div class="space-y-6">
+                    <h3 class="text-xl font-bold mb-3">⚡ Quick Start (5 Steps)</h3>
+
+                    <div class="space-y-4 text-sm leading-relaxed">
+                        <!-- Step 1 -->
+                        <div class="card bg-gray-800/50 border border-gray-700 rounded-xl p-4">
+                            <h4 class="font-semibold text-indigo-400 mb-1">Step 1: Add Dependencies</h4>
+                            <p class="text-gray-300">Add the core dependency and your database driver:</p>
+                            <pre class="bg-gray-900/60 rounded-lg p-3 mt-2 text-xs overflow-x-auto"><code id="dependencyCode">implementation 'io.github.sachinnimbal:crudx-starter:loading...'</code></pre>
+                        </div>
+
+                        <!-- Step 2 -->
+                        <div class="card bg-gray-800/50 border border-gray-700 rounded-xl p-4">
+                            <h4 class="font-semibold text-indigo-400 mb-1">Step 2: Enable CrudX</h4>
+                            <p class="text-gray-300">Annotate your main Spring Boot class:</p>
+                            <pre class="bg-gray-900/60 rounded-lg p-3 mt-2 text-xs overflow-x-auto"><code>@SpringBootApplication
+@CrudX
+public class MyApp { ... }</code></pre>
+                        </div>
+
+                        <!-- Step 3 -->
+                        <div class="card bg-gray-800/50 border border-gray-700 rounded-xl p-4">
+                            <h4 class="font-semibold text-indigo-400 mb-1">Step 3: Configure Database</h4>
+                            <p class="text-gray-300">Add <code>application.yml</code> for MySQL, PostgreSQL, or MongoDB:</p>
+                            <pre class="bg-gray-900/60 rounded-lg p-3 mt-2 text-xs overflow-x-auto"><code>spring:
+  datasource:
+    url: jdbc:mysql://localhost:3306/company_db
+    username: root
+    password: root123</code></pre>
+                        </div>
+
+                        <!-- Step 4 -->
+                        <div class="card bg-gray-800/50 border border-gray-700 rounded-xl p-4">
+                            <h4 class="font-semibold text-indigo-400 mb-1">Step 4: Create Entity</h4>
+                            <p class="text-gray-300">Extend CrudX base model for your DB type:</p>
+                            <pre class="bg-gray-900/60 rounded-lg p-3 mt-2 text-xs overflow-x-auto"><code>public class Employee extends CrudXMySQLEntity&lt;Long&gt; {
+  private String name;
+  private String email;
+}</code></pre>
+                        </div>
+
+                        <!-- Step 5 -->
+                        <div class="card bg-gray-800/50 border border-gray-700 rounded-xl p-4">
+                            <h4 class="font-semibold text-indigo-400 mb-1">Step 5: Create Controller</h4>
+                            <p class="text-gray-300">Extend <code>CrudXController</code> to auto-enable CRUD endpoints:</p>
+                            <pre class="bg-gray-900/60 rounded-lg p-3 mt-2 text-xs overflow-x-auto"><code>@RestController
+@RequestMapping("/api/employees")
+public class EmployeeController extends CrudXController&lt;Employee, Long&gt; { }</code></pre>
+                        </div>
+                    </div>
+
+                    <!-- Info Box -->
+                    <div class="bg-blue-500/10 border border-blue-500/30 rounded-xl p-4 mt-6">
+                        <div class="flex items-start gap-3">
+                            <svg class="w-5 h-5 text-blue-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                      d="M13 16h-1v-4h-1m1-4h.01M21 12A9 9 0 113 12a9 9 0 0118 0z"/>
+                            </svg>
+                            <p class="text-blue-300 text-sm">
+                                CrudX auto-generates CRUD APIs, repositories, and services for all annotated entities.
+                                No manual boilerplate needed — just focus on your domain logic!
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-blue-500/10 border border-blue-500/30 rounded-xl p-4">
+                    <div class="flex items-start gap-3">
+                        <svg class="w-5 h-5 text-blue-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor"
+                             viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                        <div class="text-sm text-blue-300">
+                            <strong>About Memory Metrics:</strong> Memory values show thread-allocated memory during
+                            request processing. First requests typically show higher values due to JVM warmup.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-8 pt-6 border-t" style="border-color: var(--border-color);">
+                <button onclick="toggleInfo()"
+                        class="w-full px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 rounded-lg font-semibold shadow-lg transition-all">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<main class="max-w-7xl mx-auto px-6 py-8">
+    <div class="flex flex-wrap items-center gap-4 mb-8">
+        <button onclick="loadData()"
+                class="px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 rounded-lg font-semibold shadow-lg transform hover:scale-105 transition-all">
+            <span class="flex items-center gap-2">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                </svg>
+                Refresh
+            </span>
+        </button>
+        <button onclick="toggleAutoRefresh()" class="px-6 py-3 rounded-lg font-semibold shadow-lg transition-all"
+                style="background: var(--bg-tertiary);">
+            <span id="autoRefreshText">⏸ Pause Auto-Refresh</span>
+        </button>
+        <button onclick="clearMetrics()"
+                class="px-6 py-3 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 rounded-lg font-semibold shadow-lg transition-all">
+            <span class="flex items-center gap-2">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                </svg>
+                Clear Metrics
+            </span>
+        </button>
+        <div class="ml-auto text-sm" style="color: var(--text-muted);">
+            Last updated: <span id="lastUpdate" class="font-semibold" style="color: var(--text-secondary);">-</span>
+        </div>
+    </div>
+
+    <div id="error" class="hidden mb-8 bg-red-500/10 border border-red-500/50 rounded-xl p-4 flex items-center gap-3">
+        <svg class="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+        </svg>
+        <span id="errorText" class="text-red-300"></span>
+    </div>
+
+    <div id="loading" class="text-center py-20">
+        <div class="inline-block w-16 h-16 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+        <p class="mt-4 text-xl" style="color: var(--text-muted);">Loading analytics...</p>
+    </div>
+
+    <div id="content" class="hidden space-y-8">
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div class="metric-card card rounded-2xl p-6 shadow-xl">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="p-3 bg-blue-500/20 rounded-xl">
+                        <svg class="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/>
+                        </svg>
+                    </div>
+                </div>
+                <p class="text-sm uppercase tracking-wider font-semibold mb-2" style="color: var(--text-muted);">Total
+                    Requests</p>
+                <p class="text-4xl font-bold" id="totalRequests">0</p>
+            </div>
+
+            <div class="metric-card card rounded-2xl p-6 shadow-xl">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="p-3 bg-green-500/20 rounded-xl">
+                        <svg class="w-6 h-6 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                    </div>
+                </div>
+                <p class="text-sm uppercase tracking-wider font-semibold mb-2" style="color: var(--text-muted);">Success
+                    Rate</p>
+                <p class="text-4xl font-bold"><span id="successRate">0</span>%</p>
+                <div class="mt-3 rounded-full h-2 overflow-hidden" style="background: var(--bg-tertiary);">
+                    <div id="successBar"
+                         class="bg-gradient-to-r from-green-500 to-emerald-500 h-full transition-all duration-500"
+                         style="width: 0%"></div>
+                </div>
+            </div>
+
+            <div class="metric-card card rounded-2xl p-6 shadow-xl">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="p-3 bg-purple-500/20 rounded-xl">
+                        <svg class="w-6 h-6 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                    </div>
+                </div>
+                <p class="text-sm uppercase tracking-wider font-semibold mb-2" style="color: var(--text-muted);">Avg
+                    Response</p>
+                <p class="text-4xl font-bold"><span id="avgTime">0</span><span class="text-2xl"
+                                                                               style="color: var(--text-muted);">ms</span>
+                </p>
+            </div>
+
+            <div class="metric-card card rounded-2xl p-6 shadow-xl">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="p-3 bg-orange-500/20 rounded-xl">
+                        <svg class="w-6 h-6 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"/>
+                        </svg>
+                    </div>
+                </div>
+                <p class="text-sm uppercase tracking-wider font-semibold mb-2" style="color: var(--text-muted);">Avg
+                    Memory</p>
+                <p class="text-4xl font-bold" id="avgMemory">0 KB</p>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div class="card rounded-2xl p-6 shadow-xl">
+                <h3 class="text-xl font-bold mb-2">Response Time Distribution</h3>
+                <p class="text-sm mb-6" style="color: var(--text-muted);">Performance categories</p>
+                <div class="relative h-64">
+                    <canvas id="responseTimeChart"></canvas>
+                </div>
+            </div>
+
+            <div class="card rounded-2xl p-6 shadow-xl">
+                <h3 class="text-xl font-bold mb-2">Request Status</h3>
+                <p class="text-sm mb-6" style="color: var(--text-muted);">Success vs Failed</p>
+                <div class="relative h-64">
+                    <canvas id="statusChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="card rounded-2xl p-6 shadow-xl">
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+                <div>
+                    <h3 class="text-xl font-bold mb-2">Endpoint Performance</h3>
+                    <p class="text-sm" style="color: var(--text-muted);">Click any row to view detailed metrics</p>
+                </div>
+                <div class="flex flex-col sm:flex-row gap-3">
+                    <input type="text"
+                           id="endpointSearch"
+                           placeholder="Search endpoints..."
+                           onkeyup="filterEndpoints()"
+                           class="search-input px-4 py-2 border rounded-lg text-sm transition-all"
+                           style="background: var(--bg-tertiary); border-color: var(--border-color); color: var(--text-primary);">
+                    <select id="sortSelect" onchange="sortEndpoints()"
+                            class="px-4 py-2 border rounded-lg text-sm transition-all"
+                            style="background: var(--bg-tertiary); border-color: var(--border-color); color: var(--text-primary);">
+                        <option value="calls">Sort by Calls</option>
+                        <option value="avgTime">Sort by Avg Time</option>
+                        <option value="successRate">Sort by Success Rate</option>
+                        <option value="memory">Sort by Memory</option>
+                    </select>
+                    <select id="itemsPerPageSelect" onchange="changeItemsPerPage()"
+                            class="px-4 py-2 border rounded-lg text-sm transition-all"
+                            style="background: var(--bg-tertiary); border-color: var(--border-color); color: var(--text-primary);">
+                        <option value="10">10 per page</option>
+                        <option value="20" selected>20 per page</option>
+                        <option value="50">50 per page</option>
+                        <option value="100">100 per page</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="text-sm mb-4" style="color: var(--text-muted);">
+                Showing <span id="showingCount" class="font-semibold" style="color: var(--text-secondary);">0</span> of
+                <span id="totalCount" class="font-semibold" style="color: var(--text-secondary);">0</span> endpoints
+            </div>
+
+            <div class="overflow-x-auto">
+                <table class="w-full" id="endpointTable">
+                    <thead>
+                    <tr class="border-b" style="border-color: var(--border-color);">
+                        <th class="text-left py-3 px-4 text-sm font-semibold" style="color: var(--text-secondary);">
+                            Method
+                        </th>
+                        <th class="text-left py-3 px-4 text-sm font-semibold" style="color: var(--text-secondary);">
+                            Endpoint
+                        </th>
+                        <th class="text-center py-3 px-4 text-sm font-semibold" style="color: var(--text-secondary);">
+                            Calls
+                        </th>
+                        <th class="text-center py-3 px-4 text-sm font-semibold" style="color: var(--text-secondary);">
+                            Avg Time
+                        </th>
+                        <th class="text-center py-3 px-4 text-sm font-semibold" style="color: var(--text-secondary);">
+                            Success Rate
+                        </th>
+                        <th class="text-center py-3 px-4 text-sm font-semibold"
+                            style="color: var(--text-secondary);"></th>
+                    </tr>
+                    </thead>
+                    <tbody id="endpointList"></tbody>
+                </table>
+            </div>
+
+            <div id="pagination" class="pagination-container"></div>
+        </div>
+    </div>
+</main>
+
+<footer class="max-w-7xl mx-auto px-6 py-8 mt-12 border-t" style="border-color: var(--border-color);">
+    <div class="flex flex-col md:flex-row items-center justify-between gap-4 text-sm" style="color: var(--text-muted);">
+        <div class="text-center md:text-left">
+            <p>&copy; 2025 CrudX Framework. Built with ❤️ by <a id="footerAuthorLink" href="" target="_blank" class="text-indigo-400 hover:text-indigo-300 transition-colors">Loading...</a></p>
+        </div>
+        <div class="flex items-center gap-6">
+            <a id="footerEmail" href="" class="hover:text-white transition-colors">Contact</a>
+            <span>•</span>
+            <button onclick="toggleInfo()" class="hover:text-white transition-colors">About</button>
+            <span>•</span>
+            <span id="footerVersion">Loading...</span>
+        </div>
+    </div>
+</footer>
+
+<script>
+    const API_BASE = '/crudx/performance';
+    let autoRefresh = true;
+    let refreshInterval;
+    let charts = {};
+    let metricsData = [];
+    let allEndpointStats = [];
+    let filteredEndpointStats = [];
+    let currentPage = 1;
+    let itemsPerPage = 20;
+    let expandedRows = {};
+    let nestedPagination = {};
+    let metadataInfo = null;
+
+    async function loadMetadata() {
+        try {
+            const response = await fetch(`${API_BASE}/metadata`);
+            const result = await response.json();
+            if (result.success) {
+                metadataInfo = result.data;
+                updateMetadataDisplay();
+            }
+        } catch (error) {
+            console.error('Failed to load metadata:', error);
+        }
+    }
+
+    const chartDefaults = {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: {
+                labels: {
+                    color: getComputedStyle(document.documentElement).getPropertyValue('--text-secondary'),
+                    font: { size: 12 }
+                }
+            }
+        }
+    };
+
+    function toggleTheme() {
+        document.body.classList.toggle('light-mode');
+        const theme = document.body.classList.contains('light-mode') ? 'light' : 'dark';
+        localStorage.setItem('theme', theme);
+        updateChartsTheme();
+    }
+
+    function loadTheme() {
+        const savedTheme = localStorage.getItem('theme');
+        if (savedTheme === 'light') {
+            document.body.classList.add('light-mode');
+        }
+    }
+
+    function updateChartsTheme() {
+        const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary');
+        Object.values(charts).forEach(chart => {
+            if (chart && chart.options && chart.options.plugins && chart.options.plugins.legend) {
+                chart.options.plugins.legend.labels.color = textColor;
+                chart.update();
+            }
+        });
+    }
+
+    function toggleInfo() {
+        const modal = document.getElementById('infoModal');
+        modal.classList.toggle('hidden');
+    }
+
+    function updateMetadataDisplay() {
+        if (!metadataInfo) {
+            console.error('No metadata available');
+            return;
+        }
+
+        // Update header version
+        const versionText = document.querySelector('header p.text-xs');
+        if (versionText && metadataInfo.version && metadataInfo.authorName && metadataInfo.authorLinkedin) {
+            versionText.innerHTML = `v${metadataInfo.version} • by <a href="${metadataInfo.authorLinkedin}" target="_blank" class="text-indigo-400 hover:text-indigo-300 transition-colors">${metadataInfo.authorName}</a>`;
+        }
+
+        // Update modal content with null checks
+        const modalVersion = document.getElementById('modalVersion');
+        if (modalVersion) modalVersion.textContent = metadataInfo.version || 'N/A';
+
+        const modalSince = document.getElementById('modalSince');
+        if (modalSince) modalSince.textContent = metadataInfo.since || 'N/A';
+
+        const modalAuthorName = document.getElementById('modalAuthorName');
+        if (modalAuthorName) modalAuthorName.textContent = metadataInfo.authorName || 'N/A';
+
+        const modalAuthorEmail = document.getElementById('modalAuthorEmail');
+        if (modalAuthorEmail && metadataInfo.authorEmail) {
+            modalAuthorEmail.href = `mailto:${metadataInfo.authorEmail}`;
+            modalAuthorEmail.textContent = metadataInfo.authorEmail;
+        }
+
+        const modalAuthorLinkedin = document.getElementById('modalAuthorLinkedin');
+        if (modalAuthorLinkedin && metadataInfo.authorLinkedin) {
+            modalAuthorLinkedin.href = metadataInfo.authorLinkedin;
+            modalAuthorLinkedin.textContent = metadataInfo.authorLinkedin;
+        }
+
+        const footerVersion = document.getElementById('footerVersion');
+        if (footerVersion) footerVersion.textContent = `v${metadataInfo.version || 'N/A'}`;
+
+        const footerAuthorLink = document.getElementById('footerAuthorLink');
+        if (footerAuthorLink && metadataInfo.authorLinkedin && metadataInfo.authorName) {
+            footerAuthorLink.href = metadataInfo.authorLinkedin;
+            footerAuthorLink.textContent = metadataInfo.authorName;
+        }
+
+        const footerEmail = document.getElementById('footerEmail');
+        if (footerEmail && metadataInfo.authorEmail) {
+            footerEmail.href = `mailto:${metadataInfo.authorEmail}`;
+        }
+
+        // Update dependency version
+        const dependencyCode = document.getElementById('dependencyCode');
+        if (dependencyCode && metadataInfo.group && metadataInfo.artifact) {
+            const version = metadataInfo.projectVersion || metadataInfo.version || '1.0.0';
+            dependencyCode.textContent = `implementation '${metadataInfo.group}:${metadataInfo.artifact}:${version}'`;
+        }
+    }
+
+    function formatMemory(kb) {
+        if (!kb && kb !== 0) return 'N/A';
+        if (kb < 1024) return kb.toFixed(0) + ' KB';
+        return (kb / 1024).toFixed(2) + ' MB';
+    }
+
+    function getMethodBadge(method) {
+        const badges = {
+            'GET': 'bg-green-500/20 text-green-400 border-green-500/30',
+            'POST': 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+            'PUT': 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
+            'PATCH': 'bg-purple-500/20 text-purple-400 border-purple-500/30',
+            'DELETE': 'bg-red-500/20 text-red-400 border-red-500/30'
+        };
+        return badges[method] || 'bg-slate-600';
+    }
+
+    function toggleEndpointDetails(key) {
+        const detailsRow = document.getElementById(`details-${key}`);
+        const chevron = document.getElementById(`chevron-${key}`);
+
+        // Close other rows
+        document.querySelectorAll('.details-row.open').forEach(row => {
+            if (row.id !== `details-${key}`) {
+                row.classList.remove('open');
+                const otherKey = row.id.replace('details-', '');
+                const otherChevron = document.getElementById(`chevron-${otherKey}`);
+                if (otherChevron) otherChevron.classList.remove('rotated');
+                delete expandedRows[otherKey];
+            }
+        });
+
+        if (detailsRow.classList.contains('open')) {
+            detailsRow.classList.remove('open');
+            chevron.classList.remove('rotated');
+            delete expandedRows[key];
+        } else {
+            detailsRow.classList.add('open');
+            chevron.classList.add('rotated');
+            expandedRows[key] = true;
+            if (!nestedPagination[key]) {
+                nestedPagination[key] = { currentPage: 1, itemsPerPage: 5 };
+            }
+            updateNestedPagination(key);
+        }
+    }
+
+    async function loadData(silent = false) {
+        try {
+            if (!silent) {
+                document.getElementById('loading').classList.remove('hidden');
+                document.getElementById('content').classList.add('hidden');
+            }
+
+            const [summaryRes, metricsRes] = await Promise.all([
+                fetch(`${API_BASE}/summary`),
+                fetch(`${API_BASE}/metrics`)
+            ]);
+
+            const summary = await summaryRes.json();
+            const metrics = await metricsRes.json();
+
+            if (summary.success && metrics.success) {
+                metricsData = metrics.data;
+                allEndpointStats = Object.entries(summary.data.endpointStats || {}).map(([key, stats]) => ({
+                    key,
+                    ...stats
+                }));
+                filteredEndpointStats = [...allEndpointStats];
+
+                updateKPIs(summary.data);
+                updateCharts(summary.data, metrics.data);
+                sortEndpoints();
+
+                if (!silent) {
+                    document.getElementById('loading').classList.add('hidden');
+                    document.getElementById('content').classList.remove('hidden');
+                }
+                document.getElementById('error').classList.add('hidden');
+                document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
+            }
+       } catch (error) {
+            if (!silent) {
+                showError('Connection error: ' + error.message);
+            }
+        }
+    }
+
+    function updateKPIs(data) {
+        document.getElementById('totalRequests').textContent = (data.totalRequests || 0).toLocaleString();
+        document.getElementById('successRate').textContent = (data.successRate || 0).toFixed(1);
+        document.getElementById('successBar').style.width = (data.successRate || 0) + '%';
+        document.getElementById('avgTime').textContent = (data.avgExecutionTimeMs || 0).toFixed(0);
+        document.getElementById('avgMemory').textContent = formatMemory(data.avgMemoryKb || 0);
+    }
+
+    function updateCharts(summary, metrics) {
+        createResponseTimeChart(metrics);
+        createStatusChart(summary);
+    }
+
+    function createResponseTimeChart(metrics) {
+        const ctx = document.getElementById('responseTimeChart').getContext('2d');
+        if (charts.responseTime) charts.responseTime.destroy();
+
+        const fast = metrics.filter(m => m.executionTimeMs < 50).length;
+        const medium = metrics.filter(m => m.executionTimeMs >= 50 && m.executionTimeMs < 200).length;
+        const slow = metrics.filter(m => m.executionTimeMs >= 200).length;
+
+        charts.responseTime = new Chart(ctx, {
+            type: 'pie',
+            data: {
+                labels: ['Fast (<50ms)', 'Medium (50-200ms)', 'Slow (>200ms)'],
+                datasets: [{
+                    data: [fast, medium, slow],
+                    backgroundColor: ['#10b981', '#f59e0b', '#ef4444'],
+                    borderWidth: 2,
+                    borderColor: getComputedStyle(document.documentElement).getPropertyValue('--bg-secondary')
+                }]
+            },
+            options: chartDefaults
+        });
+    }
+
+    function createStatusChart(summary) {
+        const ctx = document.getElementById('statusChart').getContext('2d');
+        if (charts.status) charts.status.destroy();
+
+        charts.status = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: ['Successful', 'Failed'],
+                datasets: [{
+                    data: [summary.successfulRequests || 0, summary.failedRequests || 0],
+                    backgroundColor: ['#10b981', '#ef4444'],
+                    borderWidth: 2,
+                    borderColor: getComputedStyle(document.documentElement).getPropertyValue('--bg-secondary')
+                }]
+            },
+            options: chartDefaults
+        });
+    }
+
+    function filterEndpoints() {
+        const search = document.getElementById('endpointSearch').value.toLowerCase();
+
+        if (search === '') {
+            filteredEndpointStats = [...allEndpointStats];
+        } else {
+            filteredEndpointStats = allEndpointStats.filter(stats =>
+                stats.endpoint.toLowerCase().includes(search) ||
+                stats.method.toLowerCase().includes(search) ||
+                (stats.entityName && stats.entityName.toLowerCase().includes(search))
+            );
+        }
+
+        currentPage = 1;
+        sortEndpoints();
+    }
+
+    function sortEndpoints() {
+        const sortBy = document.getElementById('sortSelect').value;
+
+        filteredEndpointStats.sort((a, b) => {
+            switch(sortBy) {
+                case 'calls':
+                    return b.totalCalls - a.totalCalls;
+                case 'avgTime':
+                    return b.avgExecutionTimeMs - a.avgExecutionTimeMs;
+                case 'successRate':
+                    const rateA = a.totalCalls > 0 ? ((a.totalCalls - a.failedCalls) / a.totalCalls * 100) : 0;
+                    const rateB = b.totalCalls > 0 ? ((b.totalCalls - b.failedCalls) / b.totalCalls * 100) : 0;
+                    return rateB - rateA;
+                case 'memory':
+                    return (b.avgMemoryKb || 0) - (a.avgMemoryKb || 0);
+                default:
+                    return 0;
+            }
+        });
+
+        updateTable();
+    }
+
+    function changeItemsPerPage() {
+        itemsPerPage = parseInt(document.getElementById('itemsPerPageSelect').value);
+        currentPage = 1;
+        updateTable();
+    }
+
+    function updateTable() {
+        const tbody = document.getElementById('endpointList');
+        tbody.innerHTML = '';
+
+        document.getElementById('totalCount').textContent = filteredEndpointStats.length;
+
+        if (filteredEndpointStats.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="6" class="py-12 text-center" style="color: var(--text-muted);">No endpoints found</td></tr>`;
+            document.getElementById('showingCount').textContent = '0';
+            document.getElementById('pagination').innerHTML = '';
+            return;
+        }
+
+        const totalPages = Math.ceil(filteredEndpointStats.length / itemsPerPage);
+        const start = (currentPage - 1) * itemsPerPage;
+        const end = Math.min(start + itemsPerPage, filteredEndpointStats.length);
+        const pageStats = filteredEndpointStats.slice(start, end);
+
+        document.getElementById('showingCount').textContent = pageStats.length;
+
+        pageStats.forEach((stats) => {
+            const successRate = stats.totalCalls > 0 ?
+                ((stats.totalCalls - stats.failedCalls) / stats.totalCalls * 100).toFixed(1) : 0;
+
+            const safeKey = stats.key.replace(/[^a-zA-Z0-9]/g, '_');
+
+            const row = document.createElement('tr');
+            row.className = 'table-row border-b cursor-pointer';
+            row.style.borderColor = 'var(--border-color)';
+            row.onclick = () => toggleEndpointDetails(safeKey);
+            row.innerHTML = `
+                <td class="py-3 px-4">
+                    <span class="badge border ${getMethodBadge(stats.method)}">
+                        ${stats.method}
+                    </span>
+                </td>
+                <td class="py-3 px-4">
+                    <div class="flex items-center gap-2">
+                        <div>
+                            <div class="font-medium text-sm" style="color: var(--text-secondary);">${stats.endpoint}</div>
+                            ${stats.entityName ? `<div class="text-xs" style="color: var(--text-muted);">${stats.entityName}</div>` : ''}
+                        </div>
+                    </div>
+                </td>
+                <td class="py-3 px-4 text-center">
+                    <span class="font-medium text-sm" style="color: var(--text-secondary);">${stats.totalCalls}</span>
+                </td>
+                <td class="py-3 px-4 text-center">
+                    <span class="badge ${
+                        stats.avgExecutionTimeMs < 50 ? 'bg-green-500/20 text-green-400' :
+                        stats.avgExecutionTimeMs < 200 ? 'bg-yellow-500/20 text-yellow-400' :
+                        'bg-red-500/20 text-red-400'
+                    }">
+                        ${stats.avgExecutionTimeMs.toFixed(0)}ms
+                    </span>
+                </td>
+                <td class="py-3 px-4 text-center">
+                    <span class="text-sm font-semibold ${successRate >= 95 ? 'text-green-400' : successRate >= 80 ? 'text-yellow-400' : 'text-red-400'}">
+                        ${successRate}%
+                    </span>
+                </td>
+                <td class="py-3 px-4 text-center">
+                    <svg id="chevron-${safeKey}" class="chevron-icon w-5 h-5 inline-block transition-transform" style="color: var(--text-muted);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                    </svg>
+                </td>
+            `;
+            tbody.appendChild(row);
+
+            const detailsRow = document.createElement('tr');
+            detailsRow.id = `details-${safeKey}`;
+            detailsRow.className = `details-row border-b ${expandedRows[safeKey] ? 'open' : ''}`;
+            detailsRow.style.borderColor = 'var(--border-color)';
+            detailsRow.innerHTML = `
+                <td colspan="6" class="p-0">
+                    <div class="details-content">
+                        <div class="p-6 space-y-4" style="background: var(--bg-primary); border-top: 1px solid var(--border-color);">
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div class="rounded-lg p-4" style="background: var(--bg-secondary); border: 1px solid var(--border-color);">
+                                    <p class="text-xs mb-3 font-semibold uppercase" style="color: var(--text-muted);">Response Time</p>
+                                    <div class="space-y-2 text-sm">
+                                        <div class="flex justify-between">
+                                            <span style="color: var(--text-secondary);">Average:</span>
+                                            <span class="font-semibold">${stats.avgExecutionTimeMs.toFixed(0)}ms</span>
+                                        </div>
+                                        <div class="flex justify-between">
+                                            <span style="color: var(--text-secondary);">Min:</span>
+                                            <span class="text-green-400 font-semibold">${stats.minExecutionTimeMs || 0}ms</span>
+                                        </div>
+                                        <div class="flex justify-between">
+                                            <span style="color: var(--text-secondary);">Max:</span>
+                                            <span class="text-red-400 font-semibold">${stats.maxExecutionTimeMs}ms</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="rounded-lg p-4" style="background: var(--bg-secondary); border: 1px solid var(--border-color);">
+                                    <p class="text-xs mb-3 font-semibold uppercase" style="color: var(--text-muted);">Memory Usage</p>
+                                    <div class="space-y-2 text-sm">
+                                        <div class="flex justify-between">
+                                            <span style="color: var(--text-secondary);">Average:</span>
+                                            <span class="font-semibold">${stats.avgMemoryKb ? formatMemory(stats.avgMemoryKb) : 'N/A'}</span>
+                                        </div>
+                                        <div class="flex justify-between">
+                                            <span style="color: var(--text-secondary);">Min:</span>
+                                            <span class="text-green-400 font-semibold">${stats.minMemoryKb ? formatMemory(stats.minMemoryKb) : 'N/A'}</span>
+                                        </div>
+                                        <div class="flex justify-between">
+                                            <span style="color: var(--text-secondary);">Max:</span>
+                                            <span class="text-red-400 font-semibold">${stats.maxMemoryKb ? formatMemory(stats.maxMemoryKb) : 'N/A'}</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="rounded-lg p-4" style="background: var(--bg-secondary); border: 1px solid var(--border-color);">
+                                    <p class="text-xs mb-3 font-semibold uppercase" style="color: var(--text-muted);">Success Metrics</p>
+                                    <div class="space-y-2 text-sm">
+                                        <div class="flex justify-between">
+                                            <span style="color: var(--text-secondary);">Total Calls:</span>
+                                            <span class="font-semibold">${stats.totalCalls}</span>
+                                        </div>
+                                        <div class="flex justify-between">
+                                            <span style="color: var(--text-secondary);">Successful:</span>
+                                            <span class="text-green-400 font-semibold">${stats.totalCalls - stats.failedCalls}</span>
+                                        </div>
+                                        <div class="flex justify-between">
+                                            <span style="color: var(--text-secondary);">Failed:</span>
+                                            <span class="text-red-400 font-semibold">${stats.failedCalls}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="rounded-lg p-4" style="background: var(--bg-secondary); border: 1px solid var(--border-color);">
+                                <div class="flex justify-between items-center mb-3">
+                                    <p class="text-xs font-semibold uppercase" style="color: var(--text-muted);">Recent Requests</p>
+                                    <select id="nestedItemsPerPage-${safeKey}" onchange="changeNestedItemsPerPage('${safeKey}')" class="px-2 py-1 rounded text-xs" style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);">
+                                        <option value="5">5 per page</option>
+                                        <option value="10">10 per page</option>
+                                        <option value="20">20 per page</option>
+                                    </select>
+                                </div>
+                                <div id="recentRequests-${safeKey}" class="space-y-2"></div>
+                                <div id="nestedPagination-${safeKey}"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </td>
+            `;
+            tbody.appendChild(detailsRow);
+
+            if (expandedRows[safeKey]) {
+                setTimeout(() => {
+                    detailsRow.querySelector(`#chevron-${safeKey}`)?.classList.add('rotated');
+                    updateNestedPagination(safeKey);
+                }, 10);
+            }
+        });
+
+        renderPagination(totalPages);
+    }
+
+    function changeNestedItemsPerPage(key) {
+        const select = document.getElementById(`nestedItemsPerPage-${key}`);
+        nestedPagination[key].itemsPerPage = parseInt(select.value);
+        nestedPagination[key].currentPage = 1;
+        updateNestedPagination(key);
+    }
+
+    function updateNestedPagination(key) {
+        const stats = filteredEndpointStats.find(s => s.key.replace(/[^a-zA-Z0-9]/g, '_') === key);
+        if (!stats) return;
+
+        const filtered = metricsData
+            .filter(m => m.endpoint === stats.endpoint && m.method === stats.method)
+            .reverse();
+
+        if (!nestedPagination[key]) {
+            nestedPagination[key] = { currentPage: 1, itemsPerPage: 5 };
+        }
+
+        const { currentPage: page, itemsPerPage: perPage } = nestedPagination[key];
+        const totalItems = filtered.length;
+        const totalPages = Math.ceil(totalItems / perPage);
+        const start = (page - 1) * perPage;
+        const end = Math.min(start + perPage, totalItems);
+        const pageItems = filtered.slice(start, end);
+
+        const container = document.getElementById(`recentRequests-${key}`);
+        if (!container) return;
+
+        if (pageItems.length === 0) {
+            container.innerHTML = '<p class="text-sm" style="color: var(--text-muted);">No recent requests</p>';
+            document.getElementById(`nestedPagination-${key}`).innerHTML = '';
+            return;
+        }
+
+        container.innerHTML = pageItems.map(m => `
+            <div class="flex items-center justify-between p-3 rounded border text-sm" style="background: var(--bg-tertiary); border-color: var(--border-color);">
+                <div class="flex items-center gap-3 flex-1">
+                    <span class="status-indicator ${m.success ? 'bg-green-400' : 'bg-red-400'}"></span>
+                    <span style="color: var(--text-secondary);">${new Date(m.timestamp).toLocaleString()}</span>
+                    <span class="badge ${
+                        m.executionTimeMs < 50 ? 'bg-green-500/20 text-green-400 border border-green-500/30' :
+                        m.executionTimeMs < 200 ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' :
+                        'bg-red-500/20 text-red-400 border border-red-500/30'
+                    }">${m.executionTimeMs}ms</span>
+                    ${m.memoryUsedKb ? `<span style="color: var(--text-muted);">${formatMemory(m.memoryUsedKb)}</span>` : ''}
+                </div>
+                ${m.errorType ? `<span class="text-red-400 text-xs ml-2">${m.errorType}</span>` : ''}
+            </div>
+        `).join('');
+
+        renderNestedPagination(key, totalPages, totalItems);
+    }
+
+    function renderNestedPagination(key, totalPages, totalItems) {
+        const paginationDiv = document.getElementById(`nestedPagination-${key}`);
+        if (!paginationDiv) return;
+
+        if (totalPages <= 1) {
+            paginationDiv.innerHTML = '';
+            return;
+        }
+
+        const { currentPage } = nestedPagination[key];
+        const start = (currentPage - 1) * nestedPagination[key].itemsPerPage + 1;
+        const end = Math.min(currentPage * nestedPagination[key].itemsPerPage, totalItems);
+
+        let html = `
+            <div class="flex justify-between items-center">
+                <div class="text-xs" style="color: var(--text-muted);">
+                    Showing <span class="font-semibold" style="color: var(--text-secondary);">${start}-${end}</span> of <span class="font-semibold" style="color: var(--text-secondary);">${totalItems}</span>
+                </div>
+                <div class="flex gap-1 items-center">
+                    <button onclick="changeNestedPage('${key}', 1)" ${currentPage === 1 ? 'disabled' : ''}
+                            class="pagination-btn rounded text-xs disabled:opacity-30 disabled:cursor-not-allowed"
+                            style="background: var(--bg-secondary); border: 1px solid var(--border-color); min-width: 32px; height: 32px;"
+                            title="First page">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+                        </svg>
+                    </button>
+                    <button onclick="changeNestedPage('${key}', ${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''}
+                            class="pagination-btn rounded text-xs disabled:opacity-30 disabled:cursor-not-allowed"
+                            style="background: var(--bg-secondary); border: 1px solid var(--border-color); min-width: 32px; height: 32px;">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+                        </svg>
+                    </button>
+        `;
+
+        const maxButtons = 3;
+        let startPage = Math.max(1, currentPage - Math.floor(maxButtons / 2));
+        let endPage = Math.min(totalPages, startPage + maxButtons - 1);
+
+        if (endPage - startPage < maxButtons - 1) {
+            startPage = Math.max(1, endPage - maxButtons + 1);
+        }
+
+        for (let i = startPage; i <= endPage; i++) {
+            html += `
+                <button onclick="changeNestedPage('${key}', ${i})"
+                        class="pagination-btn rounded text-xs ${currentPage === i ? 'active' : ''}"
+                        style="${currentPage !== i ? 'background: var(--bg-secondary); border: 1px solid var(--border-color);' : ''} min-width: 32px; height: 32px;">
+                    ${i}
+                </button>
+            `;
+        }
+
+        html += `
+                    <button onclick="changeNestedPage('${key}', ${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''}
+                            class="pagination-btn rounded text-xs disabled:opacity-30 disabled:cursor-not-allowed"
+                            style="background: var(--bg-secondary); border: 1px solid var(--border-color); min-width: 32px; height: 32px;">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                        </svg>
+                    </button>
+                    <button onclick="changeNestedPage('${key}', ${totalPages})" ${currentPage === totalPages ? 'disabled' : ''}
+                            class="pagination-btn rounded text-xs disabled:opacity-30 disabled:cursor-not-allowed"
+                            style="background: var(--bg-secondary); border: 1px solid var(--border-color); min-width: 32px; height: 32px;"
+                            title="Last page">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        `;
+
+        paginationDiv.innerHTML = html;
+    }
+
+    function changeNestedPage(key, page) {
+        const stats = filteredEndpointStats.find(s => s.key.replace(/[^a-zA-Z0-9]/g, '_') === key);
+        if (!stats) return;
+
+        const filtered = metricsData.filter(m => m.endpoint === stats.endpoint && m.method === stats.method);
+        const totalPages = Math.ceil(filtered.length / nestedPagination[key].itemsPerPage);
+
+        if (page < 1 || page > totalPages) return;
+
+        nestedPagination[key].currentPage = page;
+        updateNestedPagination(key);
+    }
+
+    function renderPagination(totalPages) {
+        const paginationDiv = document.getElementById('pagination');
+
+        if (totalPages <= 1) {
+            paginationDiv.innerHTML = '';
+            return;
+        }
+
+        const start = (currentPage - 1) * itemsPerPage + 1;
+        const end = Math.min(currentPage * itemsPerPage, filteredEndpointStats.length);
+
+        let html = `
+            <div class="text-sm" style="color: var(--text-muted);">
+                Showing <span class="font-semibold" style="color: var(--text-secondary);">${start}-${end}</span>
+                of <span class="font-semibold" style="color: var(--text-secondary);">${filteredEndpointStats.length}</span>
+            </div>
+            <div class="pagination-buttons">
+                <button onclick="changePage(1)" ${currentPage === 1 ? 'disabled' : ''}
+                        class="pagination-btn rounded-lg"
+                        style="background: var(--bg-tertiary);"
+                        title="First page">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+                    </svg>
+                </button>
+                <button onclick="changePage(${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''}
+                        class="pagination-btn rounded-lg px-4"
+                        style="background: var(--bg-tertiary);">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+                    </svg>
+                </button>
+        `;
+
+        const maxButtons = 5;
+        let startPage = Math.max(1, currentPage - Math.floor(maxButtons / 2));
+        let endPage = Math.min(totalPages, startPage + maxButtons - 1);
+
+        if (endPage - startPage < maxButtons - 1) {
+            startPage = Math.max(1, endPage - maxButtons + 1);
+        }
+
+        if (startPage > 1) {
+            html += `<span class="px-2" style="color: var(--text-muted);">...</span>`;
+        }
+
+        for (let i = startPage; i <= endPage; i++) {
+            html += `
+                <button onclick="changePage(${i})"
+                        class="pagination-btn rounded-lg ${currentPage === i ? 'active' : ''}"
+                        style="${currentPage !== i ? 'background: var(--bg-tertiary);' : ''}">
+                    ${i}
+                </button>
+            `;
+        }
+
+        if (endPage < totalPages) {
+            html += `<span class="px-2" style="color: var(--text-muted);">...</span>`;
+        }
+
+        html += `
+                <button onclick="changePage(${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''}
+                        class="pagination-btn rounded-lg px-4"
+                        style="background: var(--bg-tertiary);">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                    </svg>
+                </button>
+                <button onclick="changePage(${totalPages})" ${currentPage === totalPages ? 'disabled' : ''}
+                        class="pagination-btn rounded-lg"
+                        style="background: var(--bg-tertiary);"
+                        title="Last page">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+                    </svg>
+                </button>
+            </div>
+        `;
+
+        paginationDiv.innerHTML = html;
+    }
+
+    function changePage(page) {
+        const totalPages = Math.ceil(filteredEndpointStats.length / itemsPerPage);
+        if (page < 1 || page > totalPages) return;
+        currentPage = page;
+        expandedRows = {};
+        updateTable();
+    }
+
+    async function clearMetrics() {
+        if (!confirm('Clear all performance metrics? This cannot be undone.')) return;
+        try {
+            const response = await fetch(`${API_BASE}/metrics`, { method: 'DELETE' });
+            const result = await response.json();
+            if (result.success) {
+                Object.values(charts).forEach(chart => chart && chart.destroy());
+                charts = {};
+                metricsData = [];
+                allEndpointStats = [];
+                filteredEndpointStats = [];
+                expandedRows = {};
+                nestedPagination = {};
+                loadData();
+            } else {
+                showError('Failed to clear metrics');
+            }
+        } catch (error) {
+            showError('Error: ' + error.message);
+        }
+    }
+
+    function toggleAutoRefresh() {
+        autoRefresh = !autoRefresh;
+        const btn = document.getElementById('autoRefreshText');
+        if (autoRefresh) {
+            btn.textContent = '⏸ Pause Auto-Refresh';
+            startAutoRefresh();
+        } else {
+            btn.textContent = '▶ Resume Auto-Refresh';
+            stopAutoRefresh();
+        }
+    }
+
+    function startAutoRefresh() {
+        if (refreshInterval) clearInterval(refreshInterval);
+        refreshInterval = setInterval(() => loadData(true), 5000);
+    }
+
+    function stopAutoRefresh() {
+        if (refreshInterval) {
+            clearInterval(refreshInterval);
+            refreshInterval = null;
+        }
+    }
+
+    function showError(message) {
+        document.getElementById('errorText').textContent = message;
+        document.getElementById('error').classList.remove('hidden');
+        document.getElementById('loading').classList.add('hidden');
+    }
+
+    // Initialize
+    loadTheme();
+    loadMetadata();
+    loadData();
+    startAutoRefresh();
+</script>
+</body>
+</html>

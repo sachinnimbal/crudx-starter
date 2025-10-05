@@ -1,29 +1,180 @@
 plugins {
-	id 'java'
-	id 'org.springframework.boot' version '3.5.6'
-	id 'io.spring.dependency-management' version '1.1.7'
+    id 'java-library'
+    id 'maven-publish'
+    id 'signing'
+    id 'io.spring.dependency-management' version '1.1.7'
+    id 'com.gradleup.nmcp' version '0.0.8'
 }
 
-group = 'io.github.sachinnimbal'
-version = '0.0.1-SNAPSHOT'
-description = 'CRUDX — The Next-Gen Multi-Database CRUD Framework for Spring Boot.'
+group = project.findProperty("group")
+version = project.findProperty("version")
+description = project.findProperty("description")
 
 java {
-	toolchain {
-		languageVersion = JavaLanguageVersion.of(21)
-	}
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    withSourcesJar()
+    withJavadocJar()
+    tasks.withType(Jar) {
+        manifest {
+            attributes(
+                    'Implementation-Title': project.name,
+                    'Implementation-Version': project.version,
+                    'Implementation-Vendor': 'Sachin Nimbal'
+            )
+        }
+    }
 }
 
 repositories {
-	mavenCentral()
+    mavenCentral()
+}
+
+dependencyManagement {
+    imports {
+        mavenBom 'org.springframework.boot:spring-boot-dependencies:3.2.0'
+    }
 }
 
 dependencies {
-	implementation 'org.springframework.boot:spring-boot-starter'
-	testImplementation 'org.springframework.boot:spring-boot-starter-test'
-	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    api 'org.springframework.boot:spring-boot-starter-validation'
+    api 'org.springframework.boot:spring-boot-starter-aop'
+    api 'org.springframework:spring-context'
+    api 'org.springframework.boot:spring-boot-configuration-processor'
+    api 'org.springframework.boot:spring-boot-autoconfigure'
+    api 'org.springframework.boot:spring-boot-starter-web'
+
+    compileOnly 'org.springframework.boot:spring-boot-starter-data-mongodb'
+    compileOnly 'org.springframework.boot:spring-boot-starter-data-jpa'
+    compileOnly 'com.mysql:mysql-connector-j'
+    compileOnly 'org.postgresql:postgresql'
+    compileOnly 'jakarta.persistence:jakarta.persistence-api'
+
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+
+    implementation 'org.springframework.boot:spring-boot-starter-thymeleaf'
+    implementation 'org.slf4j:slf4j-api'
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
+    implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    testImplementation 'org.springframework.boot:spring-boot-starter-data-mongodb'
+    testImplementation 'org.testcontainers:junit-jupiter'
+    testImplementation 'org.testcontainers:mongodb'
+    testImplementation 'org.testcontainers:mysql'
+    testImplementation 'org.testcontainers:postgresql'
+    testImplementation 'com.mysql:mysql-connector-j'
+    testImplementation 'org.postgresql:postgresql'
+    testCompileOnly 'org.projectlombok:lombok'
+    testAnnotationProcessor 'org.projectlombok:lombok'
 }
 
-tasks.named('test') {
-	useJUnitPlatform()
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.compilerArgs.add('-parameters')
+}
+
+tasks.withType(Javadoc).configureEach {
+    options.encoding = 'UTF-8'
+    options.addBooleanOption('Xdoclint:none', true)
+}
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            from components.java
+
+            artifactId = 'crudx-starter'
+
+            pom {
+                name = 'CRUDX Starter'
+                description = project.description
+                url = 'https://github.com/sachinnimbal/crudx-starter'
+
+                licenses {
+                    license {
+                        name = 'The Apache License, Version 2.0'
+                        url = 'https://www.apache.org/licenses/LICENSE-2.0.txt'
+                        distribution = 'repo'
+                    }
+                }
+
+                developers {
+                    developer {
+                        id = 'sachinnimbal'
+                        name = 'Sachin Nimbal'
+                        email = 'sachinnimbal9@gmail.com'
+                    }
+                }
+
+                scm {
+                    connection = 'scm:git:git://github.com/sachinnimbal/crudx-starter.git'
+                    developerConnection = 'scm:git:ssh://github.com/sachinnimbal/crudx-starter.git'
+                    url = 'https://github.com/sachinnimbal/crudx-starter'
+                }
+            }
+
+            versionMapping {
+                usage('java-api') {
+                    fromResolutionOf('runtimeClasspath')
+                }
+                usage('java-runtime') {
+                    fromResolutionResult()
+                }
+            }
+        }
+    }
+
+    repositories {
+        maven {
+            name = "GitHubPackages"
+            url = uri("https://maven.pkg.github.com/sachinnimbal/crudx-starter")
+            credentials {
+                username = project.findProperty("gpr.user") ?: System.getenv("GITHUB_ACTOR")
+                password = project.findProperty("gpr.key") ?: System.getenv("GITHUB_TOKEN")
+            }
+        }
+
+        maven {
+            name = "localRepo"
+            url = layout.buildDirectory.dir("repo")
+        }
+    }
+}
+
+signing {
+    def signingKey = project.findProperty("signingKey")
+    def signingPassword = project.findProperty("signingPassword")
+
+    if (signingKey && signingPassword) {
+        useInMemoryPgpKeys(signingKey as String, signingPassword as String)
+    }
+
+    sign publishing.publications.mavenJava
+}
+
+gradle.taskGraph.whenReady { graph ->
+    tasks.withType(Sign).configureEach {
+        onlyIf {
+            graph.hasTask(":publishAllPublicationsToCentralPortal") ||
+                    project.hasProperty("forceSigning")
+        }
+    }
+}
+
+nmcp {
+    publishAllProjectsProbablyBreakingProjectIsolation {
+        username = project.findProperty("mavenCentralUsername") ?: System.getenv("MAVEN_CENTRAL_USERNAME")
+        password = project.findProperty("mavenCentralPassword") ?: System.getenv("MAVEN_CENTRAL_PASSWORD")
+        publicationType = "AUTOMATIC"
+    }
+}
+
+tasks.register("publishLocal") {
+    group = "publishing"
+    description = "Publish to local build repo and Maven local"
+    dependsOn("publishToMavenLocal", "publishMavenJavaPublicationToLocalRepoRepository")
 }
