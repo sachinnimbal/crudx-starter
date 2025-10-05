@@ -449,7 +449,7 @@ GET /api/employees/paged?page=0&size=100
 ```bash
 # If dataset > 1000, CrudX auto-switches to pagination
 GET /api/employees
-# Returns first 1000 with pagination info
+# Returns first 50 with pagination info
 ```
 
 3. **Increase heap size:**

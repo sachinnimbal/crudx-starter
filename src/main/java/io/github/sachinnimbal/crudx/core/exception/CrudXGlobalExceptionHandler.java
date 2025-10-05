@@ -280,7 +280,19 @@ public class CrudXGlobalExceptionHandler {
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleGlobalException(
             Exception ex, WebRequest request) {
+        // Gracefully handle client disconnects (broken pipe errors)
+        // Using class name check to avoid hard dependency on specific exception types
+        String exceptionClassName = ex.getClass().getSimpleName();
+        String exceptionMessage = ex.getMessage() != null ? ex.getMessage() : "";
+        if ("AsyncRequestNotUsableException".equals(exceptionClassName) ||
+                "ClientAbortException".equals(exceptionClassName) ||
+                exceptionMessage.contains("Broken pipe") ||
+                exceptionMessage.contains("Connection reset") ||
+                (ex.getCause() != null && ex.getCause().toString().contains("ClientAbortException"))) {
 
+            log.debug("Client disconnected before response completed: {}", ex.getMessage());
+            return null; // Client is gone, no response needed
+        }
         log.error("Unexpected error occurred", ex);
 
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
