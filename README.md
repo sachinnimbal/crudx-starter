@@ -270,7 +270,7 @@ POST /api/employees/batch?skipDuplicates=true
 ```bash
 # Auto-switches to pagination for large datasets
 GET /api/employees
-# Returns first 1000 records if total > 1000
+# Returns first 50 records if total > 1000
 
 # Manual pagination
 GET /api/employees/paged?page=0&size=20&sortBy=name&sortDirection=ASC

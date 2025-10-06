@@ -47,6 +47,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
     private static final int MAX_PAGE_SIZE = 100000;
     private static final int LARGE_DATASET_THRESHOLD = 1000;
+    private static final int DEFAULT_PAGE_SIZE = 50;
 
     @PostConstruct
     protected void initializeService() {
@@ -256,22 +257,21 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             // Check total count first
             long totalCount = crudService.count();
 
-            // If dataset is large, automatically return paginated response
+            // If dataset is large, automatically return paginated response with 50 records
             if (totalCount > LARGE_DATASET_THRESHOLD) {
                 log.warn("Large dataset detected ({} records). Auto-switching to paginated response", totalCount);
 
-                // Build pageable with appropriate size for large datasets
+                // Build pageable with 50 records for large datasets
                 Pageable pageable;
                 if (sortBy != null) {
                     try {
                         Sort.Direction direction = Sort.Direction.fromString(sortDirection);
-                        pageable = PageRequest.of(0, LARGE_DATASET_THRESHOLD,
-                                Sort.by(direction, sortBy));
+                        pageable = PageRequest.of(0, DEFAULT_PAGE_SIZE, Sort.by(direction, sortBy));
                     } catch (IllegalArgumentException e) {
                         throw new IllegalArgumentException("Invalid sort direction: " + sortDirection + ". Must be ASC or DESC");
                     }
                 } else {
-                    pageable = PageRequest.of(0, LARGE_DATASET_THRESHOLD);
+                    pageable = PageRequest.of(0, 50);
                 }
 
                 Page<T> springPage = crudService.findAll(pageable);
