@@ -33,45 +33,30 @@ public class CrudXBannerConfiguration implements ApplicationListener<Application
 
     @Override
     public void onApplicationEvent(ApplicationReadyEvent event) {
-        printSimpleBanner();
         printDatabaseInfo();
         printStartupTime();
     }
 
-    private String getVersion() {
-        Package pkg = this.getClass().getPackage();
-        String implVersion = pkg.getImplementationVersion();
-        return implVersion != null ? implVersion : "0.0.1-SNAPSHOT";
-    }
-
-    private void printSimpleBanner() {
-        System.out.println(CYAN + "============================================" + RESET);
-        System.out.println(GREEN + " :: CRUDX Framework ::    " + RESET + BOLD + "(v" + getVersion() + ")" + RESET);
-        System.out.println(CYAN + "||" + RESET + BOLD + "  Lightweight & High-Performance CRUD  " + RESET + CYAN + "||" + RESET);
-        System.out.println(CYAN + "============================================" + RESET);
-    }
-
     private void printDatabaseInfo() {
-        System.out.println(CYAN + "--------------------------------------" + RESET);
-        System.out.println(BOLD + "  Database Configuration Status" + RESET);
-        System.out.println(CYAN + "--------------------------------------" + RESET);
+        logInfo(CYAN + "--------------------------------------" + RESET);
+        logInfo(BOLD + "  Database Configuration Status" + RESET);
+        logInfo(CYAN + "--------------------------------------" + RESET);
 
         boolean mongoEnabled = isMongoEnabled();
         boolean mysqlEnabled = isMySqlEnabled();
         boolean postgresEnabled = isPostgresEnabled();
 
-        System.out.println(formatStatus("MongoDB Support", mongoEnabled));
-        System.out.println(formatStatus("MySQL Support", mysqlEnabled));
-        System.out.println(formatStatus("PostgreSQL Support", postgresEnabled));
+        logInfo(formatStatus("MongoDB Support", mongoEnabled));
+        logInfo(formatStatus("MySQL Support", mysqlEnabled));
+        logInfo(formatStatus("PostgreSQL Support", postgresEnabled));
 
-        System.out.println(CYAN + "--------------------------------------" + RESET);
-        System.out.println(YELLOW + "Note: Configure only one database provider" + RESET);
-        System.out.println(YELLOW + " -> Use either MongoDB OR MySQL/PostgreSQL" + RESET);
-        System.out.println();
-        System.out.println(GREEN + BOLD + ">> CRUDX Framework is ready!" + RESET);
-        System.out.println(CYAN + ">> Documentation: " + YELLOW + "https://github.com/sachinnimbal/crudx-examples/wiki" + RESET);
-        System.out.println(CYAN + ">> Performance Dashboard: " + YELLOW + getDashboardUrl() + RESET);
-        System.out.println();
+        logInfo(CYAN + "--------------------------------------" + RESET);
+        logInfo(YELLOW + "Note: Configure only one database provider" + RESET);
+        logInfo(YELLOW + " -> Use either MongoDB OR MySQL/PostgreSQL" + RESET);
+        logInfo("");
+        logInfo(GREEN + BOLD + ">> CRUDX Framework is ready!" + RESET);
+        logInfo(CYAN + ">> Documentation: " + YELLOW + "API Documentation (https://github.com/sachinnimbal/crudx-starter/blob/main/API_DOCUMENTATION.md)" + RESET);
+        logInfo(CYAN + ">> Performance Dashboard: " + YELLOW + getDashboardUrl() + RESET);
     }
 
     private String formatStatus(String name, boolean isActive) {
@@ -94,8 +79,12 @@ public class CrudXBannerConfiguration implements ApplicationListener<Application
     private void printStartupTime() {
         long end = System.currentTimeMillis();
         double durationSec = (end - STARTUP_TIME) / 1000.0;
-        System.out.printf(YELLOW + BOLD + ">> Application started in %.3f seconds%n" + RESET, durationSec);
-        System.out.println();
+        logInfo(String.format(YELLOW + BOLD + ">> Application started in %.3f seconds" + RESET, durationSec));
+        logInfo("");
+    }
+
+    private void logInfo(String message) {
+        System.out.println(message);
     }
 
     private boolean isMongoEnabled() {

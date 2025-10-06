@@ -42,6 +42,7 @@ public class EndpointStats {
     private LocalDateTime firstCall;
     private LocalDateTime lastCall;
     private Map<String, Long> errorCounts;
+    private long memoryCallCount;
 
     public EndpointStats(String endpoint, String method, String entityName) {
         this.endpoint = endpoint;
@@ -61,33 +62,39 @@ public class EndpointStats {
 
     public void addMetric(PerformanceMetric metric) {
         totalCalls++;
-
-        if (metric.isSuccess()) {
-            successfulCalls++;
-        } else {
+        if (!metric.isSuccess()) {
             failedCalls++;
-            String errorType = metric.getErrorType() != null ? metric.getErrorType() : "Unknown";
-            errorCounts.merge(errorType, 1L, Long::sum);
         }
 
-        // Time tracking
         totalExecutionTimeMs += metric.getExecutionTimeMs();
-        minExecutionTimeMs = Math.min(minExecutionTimeMs, metric.getExecutionTimeMs());
-        maxExecutionTimeMs = Math.max(maxExecutionTimeMs, metric.getExecutionTimeMs());
         avgExecutionTimeMs = (double) totalExecutionTimeMs / totalCalls;
 
-        // Memory tracking
-        if (metric.getMemoryUsedKb() != null) {
-            totalMemoryKb += metric.getMemoryUsedKb();
-            minMemoryKb = Math.min(minMemoryKb, metric.getMemoryUsedKb());
-            maxMemoryKb = Math.max(maxMemoryKb, metric.getMemoryUsedKb());
-            avgMemoryKb = totalMemoryKb / totalCalls;
+        if (metric.getExecutionTimeMs() < minExecutionTimeMs) {
+            minExecutionTimeMs = metric.getExecutionTimeMs();
+        }
+        if (metric.getExecutionTimeMs() > maxExecutionTimeMs) {
+            maxExecutionTimeMs = metric.getExecutionTimeMs();
         }
 
-        if (firstCall == null) {
-            firstCall = metric.getTimestamp();
+        Long memoryKb = metric.getMemoryUsedKb();
+        if (memoryKb != null && memoryKb > 0) {
+            if (totalMemoryKb == null) {
+                totalMemoryKb = 0L;
+            }
+            totalMemoryKb += memoryKb;
+            memoryCallCount++;
+
+            // Calculate average only from metrics with memory data
+            avgMemoryKb = totalMemoryKb / memoryCallCount;
+
+            // Initialize min/max on first valid memory value
+            if (minMemoryKb == null || memoryKb < minMemoryKb) {
+                minMemoryKb = memoryKb;
+            }
+            if (maxMemoryKb == null || memoryKb > maxMemoryKb) {
+                maxMemoryKb = memoryKb;
+            }
         }
-        lastCall = metric.getTimestamp();
     }
 
     // Formatted memory getters

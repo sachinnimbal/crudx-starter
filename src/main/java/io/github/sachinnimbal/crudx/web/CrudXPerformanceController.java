@@ -1,7 +1,7 @@
 package io.github.sachinnimbal.crudx.web;
 
 import io.github.sachinnimbal.crudx.core.config.CrudXPerformanceProperties;
-import io.github.sachinnimbal.crudx.core.config.CrudxMetadataProperties;
+import io.github.sachinnimbal.crudx.core.response.CrudxMetadataProperties;
 import io.github.sachinnimbal.crudx.core.metrics.CrudXPerformanceTracker;
 import io.github.sachinnimbal.crudx.core.metrics.PerformanceMetric;
 import io.github.sachinnimbal.crudx.core.metrics.PerformanceSummary;
@@ -109,7 +109,7 @@ public class CrudXPerformanceController {
         // Project Data
         metadata.put("group", project.getGroup());
         metadata.put("artifact", project.getArtifact());
-        metadata.put("projectVersion", author.getVersion()); // Using author's version for project version
+        metadata.put("projectVersion", project.getVersion());
         return ResponseEntity.ok(ApiResponse.success(metadata, "Metadata retrieved"));
     }
 }

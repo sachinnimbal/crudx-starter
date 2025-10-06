@@ -33,7 +33,6 @@ import java.lang.reflect.Type;
 import java.util.HashSet;
 import java.util.Set;
 
-
 /**
  * @author Sachin Nimbal
  * @version 1.0.0
@@ -45,14 +44,17 @@ import java.util.Set;
 @Component
 public class CrudXServiceAutoConfiguration implements BeanDefinitionRegistryPostProcessor, ApplicationContextAware {
 
-    protected ApplicationContext applicationContext;
-    private final Set<String> processedEntities = new HashSet<>();
-    private static final Set<Class<?>> discoveredSQLEntities = new HashSet<>();
     private static final String RESET = "\u001B[0m";
     private static final String BOLD = "\u001B[1m";
+    private static final String RED = "\u001B[31m";
     private static final String GREEN = "\u001B[32m";
     private static final String CYAN = "\u001B[36m";
     private static final String WHITE = "\u001B[37m";
+    private static final String YELLOW = "\u001B[33m";
+
+    protected ApplicationContext applicationContext;
+    private final Set<String> processedEntities = new HashSet<>();
+    private static final Set<Class<?>> discoveredSQLEntities = new HashSet<>();
 
     @Autowired
     private Environment environment;
@@ -203,16 +205,40 @@ public class CrudXServiceAutoConfiguration implements BeanDefinitionRegistryPost
         @PostConstruct
         protected void init() {
             if (entityManager == null) {
-                throw new IllegalStateException(
-                        "EntityManager not available. Please add 'spring-boot-starter-data-jpa' " +
-                                "dependency and appropriate database driver to your project."
-                );
+                String errorMsg = buildEntityManagerErrorMessage();
+                System.out.println(errorMsg);
+                System.exit(1); // Exit immediately
             }
             if (entityClass != null) {
                 log.debug("SQL Entity class pre-configured: {}", entityClass.getSimpleName());
             } else {
                 super.init();
             }
+        }
+
+        private String buildEntityManagerErrorMessage() {
+            return "\n" +
+                    RED + "===============================================\n" + RESET +
+                    RED + BOLD + "   ENTITYMANAGER NOT AVAILABLE\n" + RESET +
+                    RED + "===============================================\n" + RESET +
+                    RED + "EntityManager bean is not available!\n" + RESET +
+                    "\n" +
+                    YELLOW + "This usually means:\n" + RESET +
+                    "  1. JPA dependency is missing\n" +
+                    "  2. Database driver is not configured\n" +
+                    "  3. Database connection failed\n" +
+                    "\n" +
+                    CYAN + "Required dependencies:\n" + RESET +
+                    GREEN + "  → spring-boot-starter-data-jpa\n" + RESET +
+                    GREEN + "  → Database driver (MySQL/PostgreSQL)\n" + RESET +
+                    "\n" +
+                    CYAN + "Configuration required:\n" + RESET +
+                    "  spring.datasource.url=jdbc:mysql://localhost:3306/db\n" +
+                    "  spring.datasource.username=root\n" +
+                    "  spring.datasource.password=password\n" +
+                    "  spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver\n" +
+                    RED + "===============================================\n" + RESET +
+                    RED + BOLD + "Application startup aborted.\n" + RESET;
         }
     }
 
@@ -230,10 +256,9 @@ public class CrudXServiceAutoConfiguration implements BeanDefinitionRegistryPost
         @PostConstruct
         protected void init() {
             if (mongoTemplate == null) {
-                throw new IllegalStateException(
-                        "MongoTemplate not available. Please add 'spring-boot-starter-data-mongodb' " +
-                                "dependency and configure MongoDB connection in application.yml"
-                );
+                String errorMsg = buildMongoTemplateErrorMessage();
+                System.out.println(errorMsg);
+                System.exit(1); // Exit immediately
             }
             if (entityClass != null) {
                 log.debug("MongoDB Entity class pre-configured: {}", entityClass.getSimpleName());
@@ -241,9 +266,34 @@ public class CrudXServiceAutoConfiguration implements BeanDefinitionRegistryPost
                 super.init();
             }
         }
+
+        private String buildMongoTemplateErrorMessage() {
+            return "\n" +
+                    RED + "===============================================\n" + RESET +
+                    RED + BOLD + "   MONGOTEMPLATE NOT AVAILABLE\n" + RESET +
+                    RED + "===============================================\n" + RESET +
+                    RED + "MongoTemplate bean is not available!\n" + RESET +
+                    "\n" +
+                    YELLOW + "This usually means:\n" + RESET +
+                    "  1. MongoDB dependency is missing\n" +
+                    "  2. MongoDB connection is not configured\n" +
+                    "  3. MongoDB server is not reachable\n" +
+                    "\n" +
+                    CYAN + "Required dependency:\n" + RESET +
+                    GREEN + "  → spring-boot-starter-data-mongodb\n" + RESET +
+                    "\n" +
+                    CYAN + "Configuration required:\n" + RESET +
+                    "  spring.data.mongodb.uri=mongodb://localhost:27017/dbname\n" +
+                    "\n" +
+                    CYAN + "OR (alternative format):\n" + RESET +
+                    "  spring.data.mongodb.host=localhost\n" +
+                    "  spring.data.mongodb.port=27017\n" +
+                    "  spring.data.mongodb.database=dbname\n" +
+                    RED + "===============================================\n" + RESET +
+                    RED + BOLD + "Application startup aborted.\n" + RESET;
+        }
     }
 
-    // CRITICAL: Only register these beans if JPA classes are available
     @Bean
     @ConditionalOnClass(name = "jakarta.persistence.EntityManager")
     public org.springframework.boot.autoconfigure.orm.jpa.HibernatePropertiesCustomizer hibernatePropertiesCustomizer() {

@@ -6,9 +6,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.FieldError;
+import org.springframework.web.HttpMediaTypeNotAcceptableException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
@@ -281,7 +283,6 @@ public class CrudXGlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> handleGlobalException(
             Exception ex, WebRequest request) {
         // Gracefully handle client disconnects (broken pipe errors)
-        // Using class name check to avoid hard dependency on specific exception types
         String exceptionClassName = ex.getClass().getSimpleName();
         String exceptionMessage = ex.getMessage() != null ? ex.getMessage() : "";
         if ("AsyncRequestNotUsableException".equals(exceptionClassName) ||
@@ -289,13 +290,29 @@ public class CrudXGlobalExceptionHandler {
                 exceptionMessage.contains("Broken pipe") ||
                 exceptionMessage.contains("Connection reset") ||
                 (ex.getCause() != null && ex.getCause().toString().contains("ClientAbortException"))) {
-
             log.debug("Client disconnected before response completed: {}", ex.getMessage());
-            return null; // Client is gone, no response needed
+            return null;
         }
+
+        // Handle HttpMediaTypeNotAcceptableException specifically
+        if (ex instanceof HttpMediaTypeNotAcceptableException) {
+            log.warn("Client requested unsupported media type: {}", ex.getMessage());
+            return ResponseEntity
+                    .status(HttpStatus.NOT_ACCEPTABLE)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(ApiResponse.error(
+                            "Unsupported media type requested. This API only supports application/json",
+                            HttpStatus.NOT_ACCEPTABLE,
+                            "MEDIA_TYPE_NOT_ACCEPTABLE",
+                            "Please set Accept header to 'application/json'"
+                    ));
+        }
+
         log.error("Unexpected error occurred", ex);
 
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+        return ResponseEntity
+                .status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .contentType(MediaType.APPLICATION_JSON)
                 .body(ApiResponse.error(
                         "An unexpected error occurred. Please contact support if the problem persists",
                         HttpStatus.INTERNAL_SERVER_ERROR,
