@@ -34,7 +34,6 @@ public class CrudXBannerConfiguration implements ApplicationListener<Application
     @Override
     public void onApplicationEvent(ApplicationReadyEvent event) {
         printDatabaseInfo();
-        printStartupTime();
     }
 
     private void printDatabaseInfo() {
@@ -74,13 +73,6 @@ public class CrudXBannerConfiguration implements ApplicationListener<Application
         }
 
         return String.format("http://%s:%s%s/crudx/performance/dashboard", host, port, contextPath);
-    }
-
-    private void printStartupTime() {
-        long end = System.currentTimeMillis();
-        double durationSec = (end - STARTUP_TIME) / 1000.0;
-        logInfo(String.format(YELLOW + BOLD + ">> Application started in %.3f seconds" + RESET, durationSec));
-        logInfo("");
     }
 
     private void logInfo(String message) {
