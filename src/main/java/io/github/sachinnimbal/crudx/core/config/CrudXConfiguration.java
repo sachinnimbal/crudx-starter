@@ -3,10 +3,10 @@ package io.github.sachinnimbal.crudx.core.config;
 import io.github.sachinnimbal.crudx.core.exception.CrudXGlobalExceptionHandler;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.domain.EntityScan;
 import org.springframework.boot.autoconfigure.orm.jpa.HibernatePropertiesCustomizer;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
@@ -16,7 +16,6 @@ import org.springframework.data.jpa.repository.config.EnableJpaAuditing;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.data.mongodb.config.EnableMongoAuditing;
 import org.springframework.data.mongodb.repository.config.EnableMongoRepositories;
-
 
 /**
  * @author Sachin Nimbal
@@ -34,6 +33,11 @@ import org.springframework.data.mongodb.repository.config.EnableMongoRepositorie
         CrudXGlobalExceptionHandler.class,
         CrudXPerformanceConfiguration.class
 })
+@EnableAutoConfiguration(exclude = {
+        org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration.class,
+        org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration.class,
+        org.springframework.boot.autoconfigure.jdbc.DataSourceTransactionManagerAutoConfiguration.class
+})
 public class CrudXConfiguration {
 
     private static final String RESET = "\u001B[0m";
@@ -48,14 +52,14 @@ public class CrudXConfiguration {
 
     public CrudXConfiguration(Environment environment) {
         this.environment = environment;
-        logFrameworkInitialization();
+        frameworkInitialization();
     }
 
-    private void logFrameworkInitialization() {
-        log.info(CYAN + "========================================" + RESET);
-        log.info(BOLD + WHITE + "  CRUDX Framework Initialization" + RESET);
-        log.info(GREEN + "  Zero-Boilerplate Service Generation" + RESET);
-        log.info(CYAN + "========================================" + RESET);
+    private void frameworkInitialization() {
+        logInfo(CYAN + "========================================" + RESET);
+        logInfo(BOLD + WHITE + "  CRUDX Framework Initialization" + RESET);
+        logInfo(GREEN + "  Zero-Boilerplate Service Generation" + RESET);
+        logInfo(CYAN + "========================================" + RESET);
     }
 
     @PostConstruct
@@ -66,10 +70,11 @@ public class CrudXConfiguration {
         boolean hasSqlConfig = sqlUrl != null && !sqlUrl.trim().isEmpty();
         boolean hasMongoConfig = mongoUri != null && !mongoUri.trim().isEmpty();
 
+        // CRITICAL: Exit if no database configuration found
         if (!hasSqlConfig && !hasMongoConfig) {
             String errorMessage = buildNoDatabaseConfigError();
-            System.err.println(errorMessage);
-            throw new IllegalStateException("No database configuration found. Please configure at least one database.");
+            logError(errorMessage);
+            System.exit(1); // Exit immediately with error code
         }
     }
 
@@ -94,7 +99,16 @@ public class CrudXConfiguration {
         msg.append("\n");
         msg.append(WHITE + "Add these to your application.properties or application.yml\n" + RESET);
         msg.append(RED + "================================================\n" + RESET);
+        msg.append(RED + BOLD + "Application startup aborted.\n" + RESET);
         return msg.toString();
+    }
+
+    private void logInfo(String message) {
+        System.out.println(message);
+    }
+
+    private void logError(String message) {
+        System.out.println(message);
     }
 
     @Configuration
@@ -116,14 +130,18 @@ public class CrudXConfiguration {
         private void logMongoConfiguration() {
             String mongoUri = environment.getProperty("spring.data.mongodb.uri");
 
-            log.info(CYAN + "----------------------------------------" + RESET);
-            log.info(BOLD + WHITE + "  MongoDB Configuration Active" + RESET);
-            log.info(CYAN + "----------------------------------------" + RESET);
-            log.info(GREEN + "  [OK] MongoTemplate configured" + RESET);
-            log.info(GREEN + "  [OK] MongoDB Auditing enabled" + RESET);
-            log.info(GREEN + "  [OK] MongoDB Repositories enabled" + RESET);
-            log.info(CYAN + "  Connection: " + RESET + maskMongoUri(mongoUri));
-            log.info(CYAN + "----------------------------------------" + RESET);
+            logInfo(CYAN + "----------------------------------------" + RESET);
+            logInfo(BOLD + WHITE + "  MongoDB Configuration Active" + RESET);
+            logInfo(CYAN + "----------------------------------------" + RESET);
+            logInfo(GREEN + "  [OK] MongoTemplate configured" + RESET);
+            logInfo(GREEN + "  [OK] MongoDB Auditing enabled" + RESET);
+            logInfo(GREEN + "  [OK] MongoDB Repositories enabled" + RESET);
+            logInfo(CYAN + "  Connection: " + RESET + maskMongoUri(mongoUri));
+            logInfo(CYAN + "----------------------------------------" + RESET);
+        }
+
+        private void logInfo(String message) {
+            System.out.println(message);
         }
 
         private String maskMongoUri(String uri) {
@@ -156,15 +174,19 @@ public class CrudXConfiguration {
             String datasourceUrl = environment.getProperty("spring.datasource.url");
             String databaseType = detectDatabaseType(datasourceUrl);
 
-            log.info(CYAN + "----------------------------------------" + RESET);
-            log.info(BOLD + WHITE + "  JPA/SQL Configuration Active" + RESET);
-            log.info(CYAN + "----------------------------------------" + RESET);
-            log.info(GREEN + "  [OK] EntityManager configured" + RESET);
-            log.info(GREEN + "  [OK] JPA Auditing enabled" + RESET);
-            log.info(GREEN + "  [OK] JPA Repositories enabled" + RESET);
-            log.info(CYAN + "  Database: " + RESET + databaseType);
-            log.info(CYAN + "  URL: " + RESET + truncate(maskPassword(datasourceUrl), 50));
-            log.info(CYAN + "----------------------------------------" + RESET);
+            logInfo(CYAN + "----------------------------------------" + RESET);
+            logInfo(BOLD + WHITE + "  JPA/SQL Configuration Active" + RESET);
+            logInfo(CYAN + "----------------------------------------" + RESET);
+            logInfo(GREEN + "  [OK] EntityManager configured" + RESET);
+            logInfo(GREEN + "  [OK] JPA Auditing enabled" + RESET);
+            logInfo(GREEN + "  [OK] JPA Repositories enabled" + RESET);
+            logInfo(CYAN + "  Database: " + RESET + databaseType);
+            logInfo(CYAN + "  URL: " + RESET + truncate(maskPassword(datasourceUrl), 50));
+            logInfo(CYAN + "----------------------------------------" + RESET);
+        }
+
+        private void logInfo(String message) {
+            System.out.println(message);
         }
 
         @Bean
@@ -186,12 +208,12 @@ public class CrudXConfiguration {
         }
 
         private void logHibernateConfiguration(String ddlAuto) {
-            log.info(CYAN + "----------------------------------------" + RESET);
-            log.info(BOLD + WHITE + "  Hibernate DDL Configuration" + RESET);
-            log.info(CYAN + "----------------------------------------" + RESET);
-            log.info(CYAN + "  DDL Mode: " + RESET + YELLOW + ddlAuto + RESET);
-            log.info(CYAN + "  Action: " + RESET + getSchemaActionDescription(ddlAuto));
-            log.info(CYAN + "----------------------------------------" + RESET);
+            logInfo(CYAN + "----------------------------------------" + RESET);
+            logInfo(BOLD + WHITE + "  Hibernate DDL Configuration" + RESET);
+            logInfo(CYAN + "----------------------------------------" + RESET);
+            logInfo(CYAN + "  DDL Mode: " + RESET + YELLOW + ddlAuto + RESET);
+            logInfo(CYAN + "  Action: " + RESET + getSchemaActionDescription(ddlAuto));
+            logInfo(CYAN + "----------------------------------------" + RESET);
         }
 
         private String getSchemaActionDescription(String ddlAuto) {
