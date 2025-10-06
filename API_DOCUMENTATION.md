@@ -1,4 +1,4 @@
-# CrudX Framework - Complete API Documentation
+# CrudX Framework -  API Documentation
 
 Comprehensive API reference for all CrudX framework features, annotations, and endpoints.
 
