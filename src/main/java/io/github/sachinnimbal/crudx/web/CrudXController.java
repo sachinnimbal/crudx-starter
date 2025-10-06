@@ -135,6 +135,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     public ResponseEntity<ApiResponse<BatchResult<T>>> createBatch(
             @RequestBody List<T> entities,
             @RequestParam(required = false, defaultValue = "true") boolean skipDuplicates) {
+
         long startTime = System.currentTimeMillis();
 
         try {
@@ -144,37 +145,119 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                 throw new IllegalArgumentException("Entity list cannot be null or empty");
             }
 
-            // Check if trying to create more than threshold
-            if (entities.size() > LARGE_DATASET_THRESHOLD) {
-                log.warn("Large creation request detected ({} entities). Auto-limiting to {} for safety",
-                        entities.size(), LARGE_DATASET_THRESHOLD);
-
-                // Limit to threshold
-                List<T> limitedEntities = entities.subList(0, LARGE_DATASET_THRESHOLD);
-                int notProcessedCount = entities.size() - LARGE_DATASET_THRESHOLD;
-
-                // Service handles duplicate checking and creation
-                BatchResult<T> result = crudService.createBatch(limitedEntities, skipDuplicates);
-
-                // Add the size-limit skips
-                result.setSkippedCount(result.getSkippedCount() + notProcessedCount);
-                result.addSkippedReason(String.format("Creation limited to %d records for safety. " +
-                                "%d entities were not processed. Use multiple batch requests for large creations.",
-                        LARGE_DATASET_THRESHOLD, notProcessedCount));
-
-                long executionTime = System.currentTimeMillis() - startTime;
-
-                log.info("Batch creation completed with limitations: {} created, {} skipped | Time taken: {} ms",
-                        result.getCreatedEntities().size(), result.getSkippedCount(), executionTime);
-
-                return ResponseEntity.status(HttpStatus.CREATED)
-                        .body(ApiResponse.success(result,
-                                String.format("Batch creation completed with limitations: %d created, %d skipped",
-                                        result.getCreatedEntities().size(), result.getSkippedCount()),
-                                HttpStatus.CREATED, executionTime));
+            // Maximum limit - 100,000 records (1 Lakh)
+            final int MAX_BATCH_SIZE = 100000;
+            if (entities.size() > MAX_BATCH_SIZE) {
+                throw new IllegalArgumentException(
+                        String.format("Batch size exceeds maximum limit of %d (1 Lakh). Current size: %d. " +
+                                        "Please split your request into multiple batches.",
+                                MAX_BATCH_SIZE, entities.size())
+                );
             }
 
-            // Process normal batch creation - service handles everything
+            // Optimal chunk size for memory efficiency - tested for best performance
+            // 500 records per chunk balances memory usage and database round trips
+            final int OPTIMAL_CHUNK_SIZE = 500;
+
+            // Always use chunking for batches > 100 to maintain consistent performance
+            if (entities.size() > 100) {
+                log.info("Processing batch of {} entities in chunks of {} (Memory-optimized mode)",
+                        entities.size(), OPTIMAL_CHUNK_SIZE);
+
+                BatchResult<T> combinedResult = new BatchResult<>();
+                List<T> allCreated = new ArrayList<>((int)(entities.size() * 0.9)); // Pre-size for efficiency
+                int totalSkipped = 0;
+                List<String> allSkippedReasons = new ArrayList<>();
+
+                int totalChunks = (entities.size() + OPTIMAL_CHUNK_SIZE - 1) / OPTIMAL_CHUNK_SIZE;
+                int chunkNumber = 0;
+
+                // Process in chunks with progress tracking
+                for (int i = 0; i < entities.size(); i += OPTIMAL_CHUNK_SIZE) {
+                    chunkNumber++;
+                    int end = Math.min(i + OPTIMAL_CHUNK_SIZE, entities.size());
+
+                    // Create new list to avoid memory leaks from subList
+                    List<T> chunk = new ArrayList<>(entities.subList(i, end));
+
+                    long chunkStart = System.currentTimeMillis();
+                    log.debug("Processing chunk {}/{}: records {}-{}",
+                            chunkNumber, totalChunks, i + 1, end);
+
+                    try {
+                        BatchResult<T> chunkResult = crudService.createBatch(chunk, skipDuplicates);
+
+                        // Merge results
+                        allCreated.addAll(chunkResult.getCreatedEntities());
+                        totalSkipped += chunkResult.getSkippedCount();
+
+                        if (chunkResult.getSkippedReasons() != null && !chunkResult.getSkippedReasons().isEmpty()) {
+                            allSkippedReasons.addAll(chunkResult.getSkippedReasons());
+                        }
+
+                        long chunkTime = System.currentTimeMillis() - chunkStart;
+                        log.debug("Chunk {}/{} completed: {} created, {} skipped | Time: {} ms",
+                                chunkNumber, totalChunks,
+                                chunkResult.getCreatedEntities().size(),
+                                chunkResult.getSkippedCount(),
+                                chunkTime);
+
+                    } catch (Exception chunkError) {
+                        log.error("Error processing chunk {}/{} (records {}-{}): {}",
+                                chunkNumber, totalChunks, i + 1, end, chunkError.getMessage());
+
+                        // Continue with next chunk if skipDuplicates=true
+                        if (!skipDuplicates) {
+                            throw chunkError;
+                        }
+
+                        totalSkipped += (end - i);
+                        allSkippedReasons.add(String.format("Chunk %d/%d (records %d-%d) failed: %s",
+                                chunkNumber, totalChunks, i + 1, end, chunkError.getMessage()));
+                    } finally {
+                        // Explicitly clear chunk to help GC
+                        chunk.clear();
+                    }
+
+                    // Progress logging every 10 chunks or for large batches
+                    if (chunkNumber % 10 == 0 || entities.size() > 10000) {
+                        double progress = (double) end / entities.size() * 100;
+                        long elapsed = System.currentTimeMillis() - startTime;
+                        long estimated = (long) (elapsed / progress * 100);
+                        log.info("Progress: {}/{} records ({}%) | Elapsed: {} ms | Estimated total: {} ms",
+                                end, entities.size(), String.format("%.1f", progress), elapsed, estimated);
+                    }
+                }
+
+                // Build combined result
+                combinedResult.setCreatedEntities(allCreated);
+                combinedResult.setSkippedCount(totalSkipped);
+                if (!allSkippedReasons.isEmpty()) {
+                    combinedResult.setSkippedReasons(allSkippedReasons);
+                }
+
+                long executionTime = System.currentTimeMillis() - startTime;
+                double recordsPerSecond = (allCreated.size() * 1000.0) / executionTime;
+
+                String message;
+                if (combinedResult.hasSkipped()) {
+                    message = String.format(
+                            "Batch creation completed: %d created, %d skipped (duplicates/errors) | " +
+                                    "Processed in %d chunks | Performance: %.0f records/sec",
+                            allCreated.size(), totalSkipped, totalChunks, recordsPerSecond);
+                } else {
+                    message = String.format(
+                            "%d entities created successfully | Processed in %d chunks | Performance: %.0f records/sec",
+                            allCreated.size(), totalChunks, recordsPerSecond);
+                }
+
+                log.info("{} | Total time: {} ms", message, executionTime);
+
+                return ResponseEntity.status(HttpStatus.CREATED)
+                        .body(ApiResponse.success(combinedResult, message, HttpStatus.CREATED, executionTime));
+            }
+
+            // For very small batches (≤ 100), process without chunking
             BatchResult<T> result = crudService.createBatch(entities, skipDuplicates);
 
             long executionTime = System.currentTimeMillis() - startTime;
@@ -198,7 +281,8 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             throw e;
         } catch (DuplicateEntityException e) {
             long executionTime = System.currentTimeMillis() - startTime;
-            log.error("Duplicate entity in batch (skipDuplicates=false): {} | Time taken: {} ms", e.getMessage(), executionTime);
+            log.error("Duplicate entity in batch (skipDuplicates=false): {} | Time taken: {} ms",
+                    e.getMessage(), executionTime);
             throw e;
         } catch (Exception e) {
             long executionTime = System.currentTimeMillis() - startTime;

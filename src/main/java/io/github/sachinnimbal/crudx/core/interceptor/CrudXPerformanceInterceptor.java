@@ -105,7 +105,7 @@ public class CrudXPerformanceInterceptor implements HandlerInterceptor {
                 }
             }
 
-            // Calculate ACCURATE per-thread memory allocation
+            // Calculate memory allocation
             Long memoryDeltaKb = null;
             if (startMemory != null && threadMXBean instanceof com.sun.management.ThreadMXBean sunThreadMXBean) {
                 try {
@@ -113,14 +113,22 @@ public class CrudXPerformanceInterceptor implements HandlerInterceptor {
                     long endMemory = sunThreadMXBean.getThreadAllocatedBytes(threadId);
                     long allocatedBytes = endMemory - startMemory;
 
-                    // Convert to KB (should be realistic now: 50-500KB for most operations)
+                    // Convert to KB
                     memoryDeltaKb = allocatedBytes / 1024;
 
-                    // Sanity check: if > 50MB, something is wrong with measurement
-                    if (memoryDeltaKb > 51200) {
-                        log.warn("Abnormally high memory allocation detected: {} KB for {} {}",
-                                memoryDeltaKb, method, endpoint);
-                        memoryDeltaKb = null; // Don't record suspicious values
+                    // For 100K batches: Allow up to 1.5GB before warning
+                    if (memoryDeltaKb > 1536000) { // 1.5GB in KB
+                        log.warn("Very high memory allocation: {} MB for {} {} - " +
+                                        "Large batch operation detected",
+                                memoryDeltaKb / 1024, method, endpoint);
+                    }
+
+                    // Only reject completely unrealistic values (> 3GB suggests measurement error)
+                    if (memoryDeltaKb > 3145728) { // 3GB in KB
+                        log.error("Unrealistic memory value: {} MB for {} {} - " +
+                                        "Measurement error, setting to null",
+                                memoryDeltaKb / 1024, method, endpoint);
+                        memoryDeltaKb = null;
                     }
                 } catch (Exception e) {
                     log.debug("Error measuring thread memory allocation", e);

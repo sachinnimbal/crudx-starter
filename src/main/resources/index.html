@@ -343,7 +343,13 @@
                     </div>
                     <div>
                         <h1 class="text-2xl font-bold">CrudX Performance</h1>
-                        <p class="text-xs" style="color: var(--text-muted);">v1.0.0 • by <a href="https://www.linkedin.com/in/sachin-nimbal/" target="_blank" class="text-indigo-400 hover:text-indigo-300 transition-colors">Sachin Nimbal</a></p>
+                        <p class="text-xs" style="color: var(--text-muted);">
+                            <span id="dynamicVersion">v1.0.0</span> • by
+                            <a href="https://www.linkedin.com/in/sachin-nimbal/" target="_blank"
+                               class="text-indigo-400 hover:text-indigo-300 transition-colors">
+                                Sachin Nimbal
+                            </a>
+                        </p>
                     </div>
                 </div>
             </div>
@@ -692,6 +698,13 @@ public class EmployeeController extends CrudXController&lt;Employee, Long&gt; { 
     let nestedPagination = {};
     let metadataInfo = null;
 
+    function safeMemoryValue(value) {
+        if (value === null || value === undefined || !isFinite(value) || value < 0) {
+            return null;
+        }
+        return value;
+    }
+
     async function loadMetadata() {
         try {
             const response = await fetch(`${API_BASE}/metadata`);
@@ -750,10 +763,15 @@ public class EmployeeController extends CrudXController&lt;Employee, Long&gt; { 
     function updateMetadataDisplay() {
         if (!metadataInfo) return;
 
-        const versionText = document.querySelector('header p.text-xs');
-        if (versionText && metadataInfo.version && metadataInfo.authorName && metadataInfo.authorLinkedin) {
-            versionText.innerHTML = `v${metadataInfo.version} • by <a href="${metadataInfo.authorLinkedin}" target="_blank" class="text-indigo-400 hover:text-indigo-300 transition-colors">${metadataInfo.authorName}</a>`;
-        }
+    const versionText = document.querySelector('header p.text-xs');
+      if (versionText && metadataInfo.version && metadataInfo.authorName && metadataInfo.authorLinkedin) {
+        versionText.innerHTML = `
+          v${metadataInfo.projectVersion || metadataInfo.version} • by
+          <a href="${metadataInfo.authorLinkedin}" target="_blank"
+             class="text-indigo-400 hover:text-indigo-300 transition-colors">
+            ${metadataInfo.authorName}
+          </a>`;
+      }
 
         const modalVersion = document.getElementById('modalVersion');
         if (modalVersion) modalVersion.textContent = metadataInfo.version || 'N/A';
@@ -889,7 +907,8 @@ public class EmployeeController extends CrudXController&lt;Employee, Long&gt; { 
         document.getElementById('successRate').textContent = (data.successRate || 0).toFixed(1);
         document.getElementById('successBar').style.width = (data.successRate || 0) + '%';
         document.getElementById('avgTime').textContent = (data.avgExecutionTimeMs || 0).toFixed(0);
-        document.getElementById('avgMemory').textContent = formatMemory(data.avgMemoryKb || 0);
+        const avgMem = safeMemoryValue(data.avgMemoryKb);
+        document.getElementById('avgMemory').textContent = avgMem !== null ? formatMemory(avgMem) : 'N/A';
     }
 
     function updateCharts(summary, metrics) {
@@ -1100,15 +1119,21 @@ public class EmployeeController extends CrudXController&lt;Employee, Long&gt; { 
                                     <div class="space-y-2 text-sm">
                                         <div class="flex justify-between">
                                             <span style="color: var(--text-secondary);">Average:</span>
-                                            <span class="font-semibold" style="color: var(--text-primary);">${stats.avgMemoryKb ? formatMemory(stats.avgMemoryKb) : 'N/A'}</span>
+                                            <span class="font-semibold" style="color: var(--text-primary);">
+                                                ${safeMemoryValue(stats.avgMemoryKb) !== null ? formatMemory(stats.avgMemoryKb) : 'N/A'}
+                                            </span>
                                         </div>
                                         <div class="flex justify-between">
                                             <span style="color: var(--text-secondary);">Min:</span>
-                                            <span class="text-green-400 font-semibold">${stats.minMemoryKb ? formatMemory(stats.minMemoryKb) : 'N/A'}</span>
+                                            <span class="text-green-400 font-semibold">
+                                                ${safeMemoryValue(stats.minMemoryKb) !== null ? formatMemory(stats.minMemoryKb) : 'N/A'}
+                                            </span>
                                         </div>
                                         <div class="flex justify-between">
                                             <span style="color: var(--text-secondary);">Max:</span>
-                                            <span class="text-red-400 font-semibold">${stats.maxMemoryKb ? formatMemory(stats.maxMemoryKb) : 'N/A'}</span>
+                                            <span class="text-red-400 font-semibold">
+                                                ${safeMemoryValue(stats.maxMemoryKb) !== null ? formatMemory(stats.maxMemoryKb) : 'N/A'}
+                                            </span>
                                         </div>
                                     </div>
                                 </div>

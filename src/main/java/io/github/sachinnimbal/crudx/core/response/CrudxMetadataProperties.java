@@ -1,4 +1,4 @@
-package io.github.sachinnimbal.crudx.core.config;
+package io.github.sachinnimbal.crudx.core.response;
 
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -34,5 +34,6 @@ public class CrudxMetadataProperties {
     public static class Project {
         private String artifact;
         private String group;
+        private String version;
     }
 }
