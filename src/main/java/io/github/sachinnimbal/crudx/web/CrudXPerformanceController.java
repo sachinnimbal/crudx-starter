@@ -56,41 +56,23 @@ public class CrudXPerformanceController {
         this.properties = properties;
     }
 
-    @GetMapping("/summary")
-    public ResponseEntity<ApiResponse<PerformanceSummary>> getSummary() {
+    @GetMapping("/dashboard-data")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> getDashboardData() {
         PerformanceSummary summary = tracker.getSummary();
-        return ResponseEntity.ok(ApiResponse.success(summary, "Performance summary retrieved"));
-    }
-
-    @GetMapping("/metrics")
-    public ResponseEntity<ApiResponse<List<PerformanceMetric>>> getMetrics() {
         List<PerformanceMetric> metrics = tracker.getMetrics();
-        return ResponseEntity.ok(ApiResponse.success(metrics,
-                String.format("Retrieved %d metrics", metrics.size())));
-    }
 
-    @GetMapping("/metrics/endpoint")
-    public ResponseEntity<ApiResponse<List<PerformanceMetric>>> getMetricsByEndpoint(
-            @RequestParam String endpoint) {
-        List<PerformanceMetric> metrics = tracker.getMetricsByEndpoint(endpoint);
-        return ResponseEntity.ok(ApiResponse.success(metrics,
-                String.format("Retrieved %d metrics for endpoint: %s", metrics.size(), endpoint)));
+        Map<String, Object> dashboardData = new HashMap<>();
+        dashboardData.put("summary", summary);
+        dashboardData.put("metrics", metrics);
+
+        return ResponseEntity.ok(ApiResponse.success(dashboardData,
+                "Dashboard data retrieved"));
     }
 
     @DeleteMapping("/metrics")
     public ResponseEntity<ApiResponse<Void>> clearMetrics() {
         tracker.clearMetrics();
         return ResponseEntity.ok(ApiResponse.success(null, "All metrics cleared"));
-    }
-
-    @GetMapping("/config")
-    public ResponseEntity<ApiResponse<CrudXPerformanceProperties>> getConfig() {
-        return ResponseEntity.ok(ApiResponse.success(properties, "Performance configuration"));
-    }
-
-    @GetMapping("/health")
-    public ResponseEntity<ApiResponse<String>> health() {
-        return ResponseEntity.ok(ApiResponse.success("OK", "Performance monitoring is active"));
     }
 
     @GetMapping(value = "/dashboard", produces = MediaType.TEXT_HTML_VALUE)

@@ -1278,24 +1278,22 @@ public class EmployeeController extends CrudXController&lt;Employee, Long&gt; { 
                 document.getElementById('content').classList.add('hidden');
             }
 
-            const [summaryRes, metricsRes] = await Promise.all([
-                fetch(`${API_BASE}/summary`),
-                fetch(`${API_BASE}/metrics`)
-            ]);
+            // Single API call instead of two
+            const response = await fetch(`${API_BASE}/dashboard-data`);
+            const result = await response.json();
 
-            const summary = await summaryRes.json();
-            const metrics = await metricsRes.json();
+            if (result.success) {
+                const { summary, metrics } = result.data;
 
-            if (summary.success && metrics.success) {
-                metricsData = metrics.data;
-                allEndpointStats = Object.entries(summary.data.endpointStats || {}).map(([key, stats]) => ({
+                metricsData = metrics;
+                allEndpointStats = Object.entries(summary.endpointStats || {}).map(([key, stats]) => ({
                     key,
                     ...stats
                 }));
                 filteredEndpointStats = [...allEndpointStats];
 
-                updateKPIs(summary.data);
-                updateCharts(summary.data, metrics.data);
+                updateKPIs(summary);
+                updateCharts(summary, metrics);
                 sortEndpoints();
 
                 if (!silent) {
