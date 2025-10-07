@@ -251,8 +251,8 @@ public class Employee extends CrudXMySQLEntity<Long> {
 # Create multiple entities (skip duplicates)
 POST /api/employees/batch?skipDuplicates=true
 [
-  {"name": "John", "email": "john@example.com"},
-  {"name": "Jane", "email": "jane@example.com"}
+  {"name": "crudx", "email": "crudx@example.com"},
+  {"name": "crud", "email": "crud@example.com"}
 ]
 
 # Response includes created and skipped counts
@@ -261,7 +261,7 @@ POST /api/employees/batch?skipDuplicates=true
   "data": {
     "createdEntities": [...],
     "skippedCount": 2,
-    "skippedReasons": ["Duplicate email: john@example.com", ...]
+    "skippedReasons": ["Duplicate email: crudx@example.com", ...]
   }
 }
 ```
