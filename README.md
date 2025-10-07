@@ -1,4 +1,4 @@
-# CrudX Framework
+# CrudX SpringBoot Framework
 
 [![Maven Central](https://img.shields.io/maven-central/v/io.github.sachinnimbal/crudx-starter.svg)](https://search.maven.org/artifact/io.github.sachinnimbal/crudx-starter)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
