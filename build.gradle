@@ -16,13 +16,15 @@ java {
     }
     withSourcesJar()
     withJavadocJar()
-    tasks.withType(Jar) {
-        manifest {
-            attributes(
-                    'Implementation-Title': project.name,
-                    'Implementation-Version': project.version,
-                    'Implementation-Vendor': 'Sachin Nimbal'
-            )
+    tasks.withType(Jar).tap {
+        configureEach {
+            manifest {
+                attributes(
+                        'Implementation-Title': project.name,
+                        'Implementation-Version': project.version,
+                        'Implementation-Vendor': 'Sachin Nimbal'
+                )
+            }
         }
     }
 }
