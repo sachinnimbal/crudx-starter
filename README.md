@@ -1,7 +1,7 @@
 # CrudX Framework
 
 [![Maven Central](https://img.shields.io/maven-central/v/io.github.sachinnimbal/crudx-starter.svg)](https://search.maven.org/artifact/io.github.sachinnimbal/crudx-starter)
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Java](https://img.shields.io/badge/Java-17+-orange.svg)](https://www.oracle.com/java/)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.x-brightgreen.svg)](https://spring.io/projects/spring-boot)
 
@@ -530,7 +530,7 @@ Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md)
 
 ## 📄 License
 
-CrudX is Apache 2.0 licensed. See [LICENSE](LICENSE) for details.
+CrudX is Apache 2.0 licensed. See [LICENSE]([LICENSE](https://github.com/sachinnimbal/crudx-starter/blob/main/LICENSE)) for details.
 
 ---
 
