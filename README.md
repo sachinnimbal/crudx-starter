@@ -530,8 +530,8 @@ Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md)
 
 ## 📄 License
 
-CrudX is Apache 2.0 licensed. See [LICENSE]([LICENSE](https://github.com/sachinnimbal/crudx-starter/blob/main/LICENSE)) for details.
-
+CrudX is licensed under the [Apache License 2.0](https://github.com/sachinnimbal/crudx-starter/blob/main/LICENSE).  
+See the LICENSE file for full details.
 ---
 
 ## 👨‍💻 Author
