@@ -143,6 +143,16 @@ publishing {
             name = "localRepo"
             url = layout.buildDirectory.dir("repo")
         }
+
+        // Central Portal Snapshots (NEW)
+        maven {
+            name = "CentralPortalSnapshots"
+            url = uri("https://central.sonatype.com/repository/maven-snapshots/")
+            credentials {
+                username = project.findProperty("mavenCentralUsername") ?: System.getenv("MAVEN_CENTRAL_USERNAME")
+                password = project.findProperty("mavenCentralPassword") ?: System.getenv("MAVEN_CENTRAL_PASSWORD")
+            }
+        }
     }
 }
 
@@ -157,11 +167,14 @@ signing {
     sign publishing.publications.mavenJava
 }
 
+// Snapshots don't need to be signed for Sonatype
 gradle.taskGraph.whenReady { graph ->
     tasks.withType(Sign).configureEach {
         onlyIf {
-            graph.hasTask(":publishAllPublicationsToCentralPortal") ||
-                    project.hasProperty("forceSigning")
+            !version.toString().endsWith("-SNAPSHOT") && (
+                    graph.hasTask(":publishAllPublicationsToCentralPortal") ||
+                            project.hasProperty("forceSigning")
+            )
         }
     }
 }
@@ -170,7 +183,8 @@ nmcp {
     publishAllProjectsProbablyBreakingProjectIsolation {
         username = project.findProperty("mavenCentralUsername") ?: System.getenv("MAVEN_CENTRAL_USERNAME")
         password = project.findProperty("mavenCentralPassword") ?: System.getenv("MAVEN_CENTRAL_PASSWORD")
-        publicationType = "AUTOMATIC"
+        // Snapshots typically use USER_MANAGED, releases use AUTOMATIC
+        publicationType = version.toString().endsWith("-SNAPSHOT") ? "USER_MANAGED" : "AUTOMATIC"
     }
 }
 
@@ -178,4 +192,31 @@ tasks.register("publishLocal") {
     group = "publishing"
     description = "Publish to local build repo and Maven local"
     dependsOn("publishToMavenLocal", "publishMavenJavaPublicationToLocalRepoRepository")
+}
+
+tasks.register("publishSnapshot") {
+    group = "publishing"
+    description = "Publish snapshot version to Central Portal"
+    dependsOn("publishMavenJavaPublicationToCentralPortalSnapshotsRepository")
+    doFirst {
+        if (!version.toString().endsWith("-SNAPSHOT")) {
+            throw new GradleException("Version must end with -SNAPSHOT to publish as snapshot")
+        }
+    }
+}
+
+tasks.register("checkCredentials") {
+    group = "help"
+    description = "Check if Maven Central credentials are configured"
+    doLast {
+        def username = project.findProperty("mavenCentralUsername") ?: System.getenv("MAVEN_CENTRAL_USERNAME")
+        def password = project.findProperty("mavenCentralPassword") ?: System.getenv("MAVEN_CENTRAL_PASSWORD")
+
+        println "Username configured: ${username != null && !username.toString().isEmpty()}"
+        println "Password configured: ${password != null && !password.toString().isEmpty()}"
+
+        if (username) {
+            println "Username starts with: ${username.toString().substring(0, Math.min(4, username.toString().length()))}..."
+        }
+    }
 }
