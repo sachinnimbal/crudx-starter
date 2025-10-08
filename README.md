@@ -509,19 +509,6 @@ crudx:
 
 ---
 
-## 🛣️ Roadmap
-
-- [ ] GraphQL support
-- [ ] Redis caching layer
-- [ ] Advanced search/filtering DSL
-- [ ] API versioning support
-- [ ] OpenAPI 3.0 documentation generation
-- [ ] Spring Security integration helpers
-- [ ] Multi-tenancy support
-- [ ] Event sourcing capabilities
-
----
-
 ## 🤝 Contributing
 
 Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md) for details.
