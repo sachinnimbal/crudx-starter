@@ -118,6 +118,9 @@ publishing {
                     developerConnection = 'scm:git:ssh://github.com/sachinnimbal/crudx-starter.git'
                     url = 'https://github.com/sachinnimbal/crudx-starter'
                 }
+
+                properties.put("keywords", "crud, springboot, spring-boot-starter, spring-framework, database, multi-database, mysql, postgresql, mongodb, rest-api, framework, crudx, crud-api, automatic-endpoint-generator, java-library, developer-tools, opensource")
+                properties.put("inceptionYear", "2025")
             }
 
             versionMapping {
