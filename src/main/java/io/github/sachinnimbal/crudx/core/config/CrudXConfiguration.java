@@ -287,11 +287,7 @@ public class CrudXConfiguration {
         }
     }
 
-    /**
- * @author Sachin Nimbal
- * @see <a href="https://www.linkedin.com/in/sachin-nimbal/">LinkedIn Profile</a>
- */
-@Configuration
+    @Configuration
     @ConditionalOnProperty(prefix = "spring.datasource", name = "url")
     @EnableJpaRepositories(basePackages = {
             "io.github.sachinnimbal.crudx",
