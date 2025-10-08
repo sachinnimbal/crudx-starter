@@ -1,3 +1,19 @@
+/*
+ * Copyright 2025 Sachin Nimbal
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package io.github.sachinnimbal.crudx.web;
 
 import io.github.sachinnimbal.crudx.core.config.CrudXPerformanceProperties;
@@ -21,12 +37,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-
 /**
  * @author Sachin Nimbal
- * @version 1.0.0
- * @since 2025
- * @Contact: <a href="mailto:sachinnimbal9@gmail.com">sachinnimbal9@gmail.com</a>
  * @see <a href="https://www.linkedin.com/in/sachin-nimbal/">LinkedIn Profile</a>
  */
 @Slf4j
@@ -44,41 +56,23 @@ public class CrudXPerformanceController {
         this.properties = properties;
     }
 
-    @GetMapping("/summary")
-    public ResponseEntity<ApiResponse<PerformanceSummary>> getSummary() {
+    @GetMapping("/dashboard-data")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> getDashboardData() {
         PerformanceSummary summary = tracker.getSummary();
-        return ResponseEntity.ok(ApiResponse.success(summary, "Performance summary retrieved"));
-    }
-
-    @GetMapping("/metrics")
-    public ResponseEntity<ApiResponse<List<PerformanceMetric>>> getMetrics() {
         List<PerformanceMetric> metrics = tracker.getMetrics();
-        return ResponseEntity.ok(ApiResponse.success(metrics,
-                String.format("Retrieved %d metrics", metrics.size())));
-    }
 
-    @GetMapping("/metrics/endpoint")
-    public ResponseEntity<ApiResponse<List<PerformanceMetric>>> getMetricsByEndpoint(
-            @RequestParam String endpoint) {
-        List<PerformanceMetric> metrics = tracker.getMetricsByEndpoint(endpoint);
-        return ResponseEntity.ok(ApiResponse.success(metrics,
-                String.format("Retrieved %d metrics for endpoint: %s", metrics.size(), endpoint)));
+        Map<String, Object> dashboardData = new HashMap<>();
+        dashboardData.put("summary", summary);
+        dashboardData.put("metrics", metrics);
+
+        return ResponseEntity.ok(ApiResponse.success(dashboardData,
+                "Dashboard data retrieved"));
     }
 
     @DeleteMapping("/metrics")
     public ResponseEntity<ApiResponse<Void>> clearMetrics() {
         tracker.clearMetrics();
         return ResponseEntity.ok(ApiResponse.success(null, "All metrics cleared"));
-    }
-
-    @GetMapping("/config")
-    public ResponseEntity<ApiResponse<CrudXPerformanceProperties>> getConfig() {
-        return ResponseEntity.ok(ApiResponse.success(properties, "Performance configuration"));
-    }
-
-    @GetMapping("/health")
-    public ResponseEntity<ApiResponse<String>> health() {
-        return ResponseEntity.ok(ApiResponse.success("OK", "Performance monitoring is active"));
     }
 
     @GetMapping(value = "/dashboard", produces = MediaType.TEXT_HTML_VALUE)

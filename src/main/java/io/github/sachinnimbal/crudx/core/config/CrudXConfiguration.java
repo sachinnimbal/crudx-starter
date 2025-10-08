@@ -1,9 +1,25 @@
+/*
+ * Copyright 2025 Sachin Nimbal
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package io.github.sachinnimbal.crudx.core.config;
 
 import io.github.sachinnimbal.crudx.core.exception.CrudXGlobalExceptionHandler;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.domain.EntityScan;
 import org.springframework.boot.autoconfigure.orm.jpa.HibernatePropertiesCustomizer;
@@ -19,9 +35,6 @@ import org.springframework.data.mongodb.repository.config.EnableMongoRepositorie
 
 /**
  * @author Sachin Nimbal
- * @version 1.0.0
- * @since 2025
- * @Contact: <a href="mailto:sachinnimbal9@gmail.com">sachinnimbal9@gmail.com</a>
  * @see <a href="https://www.linkedin.com/in/sachin-nimbal/">LinkedIn Profile</a>
  */
 @Slf4j
@@ -32,11 +45,6 @@ import org.springframework.data.mongodb.repository.config.EnableMongoRepositorie
         CrudXServiceAutoConfiguration.class,
         CrudXGlobalExceptionHandler.class,
         CrudXPerformanceConfiguration.class
-})
-@EnableAutoConfiguration(exclude = {
-        org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration.class,
-        org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration.class,
-        org.springframework.boot.autoconfigure.jdbc.DataSourceTransactionManagerAutoConfiguration.class
 })
 public class CrudXConfiguration {
 
@@ -67,37 +75,161 @@ public class CrudXConfiguration {
         String sqlUrl = environment.getProperty("spring.datasource.url");
         String mongoUri = environment.getProperty("spring.data.mongodb.uri");
 
-        boolean hasSqlConfig = sqlUrl != null && !sqlUrl.trim().isEmpty();
-        boolean hasMongoConfig = mongoUri != null && !mongoUri.trim().isEmpty();
+        boolean hasSqlConfig = isConfigured(sqlUrl);
+        boolean hasMongoConfig = isConfigured(mongoUri);
 
-        // CRITICAL: Exit if no database configuration found
-        if (!hasSqlConfig && !hasMongoConfig) {
-            String errorMessage = buildNoDatabaseConfigError();
+        // Check if ANY database driver is available
+        boolean hasMySQLDriver = isClassPresent("com.mysql.cj.jdbc.Driver");
+        boolean hasPostgresDriver = isClassPresent("org.postgresql.Driver");
+        boolean hasMongoDriver = isClassPresent("com.mongodb.MongoClientSettings");
+
+        boolean hasAnyDriver = hasMySQLDriver || hasPostgresDriver || hasMongoDriver;
+
+        // CRITICAL: Exit if no drivers at all
+        if (!hasAnyDriver) {
+            String errorMessage = buildNoDriverError();
             logError(errorMessage);
-            System.exit(1); // Exit immediately with error code
+            System.exit(1);
+        }
+
+        // CRITICAL: Exit if drivers exist but no configuration
+        if (!hasSqlConfig && !hasMongoConfig) {
+            String errorMessage = buildNoDatabaseConfigError(hasMySQLDriver, hasPostgresDriver, hasMongoDriver);
+            logError(errorMessage);
+            System.exit(1);
+        }
+
+        // Warn if SQL is configured but no SQL driver available
+        if (hasSqlConfig && !hasMySQLDriver && !hasPostgresDriver) {
+            String errorMessage = buildSqlDriverMissingError(sqlUrl);
+            logError(errorMessage);
+            System.exit(1);
+        }
+
+        // Warn if MongoDB is configured but driver not available
+        if (hasMongoConfig && !hasMongoDriver) {
+            String errorMessage = buildMongoDriverMissingError();
+            logError(errorMessage);
+            System.exit(1);
         }
     }
 
-    private String buildNoDatabaseConfigError() {
+    private boolean isClassPresent(String className) {
+        try {
+            Class.forName(className, false, getClass().getClassLoader());
+            return true;
+        } catch (ClassNotFoundException e) {
+            return false;
+        }
+    }
+
+    private boolean isConfigured(String value) {
+        return value != null && !value.trim().isEmpty();
+    }
+
+    private String buildNoDriverError() {
+        StringBuilder msg = new StringBuilder();
+        msg.append("\n");
+        msg.append(RED + "================================================\n" + RESET);
+        msg.append(RED + BOLD + "     NO DATABASE DRIVER FOUND\n" + RESET);
+        msg.append(RED + "================================================\n" + RESET);
+        msg.append(RED + "No database drivers detected in classpath!\n" + RESET);
+        msg.append("\n");
+        msg.append(YELLOW + "Add at least one database driver dependency:\n" + RESET);
+        msg.append("\n");
+        msg.append(GREEN + "For MySQL:\n" + RESET);
+        msg.append("  Gradle: runtimeOnly 'com.mysql:mysql-connector-j:8.3.0'\n");
+        msg.append("  Maven:  <artifactId>mysql-connector-j</artifactId>\n");
+        msg.append("\n");
+        msg.append(GREEN + "For PostgreSQL:\n" + RESET);
+        msg.append("  Gradle: runtimeOnly 'org.postgresql:postgresql:42.7.3'\n");
+        msg.append("  Maven:  <artifactId>postgresql</artifactId>\n");
+        msg.append("\n");
+        msg.append(GREEN + "For MongoDB:\n" + RESET);
+        msg.append("  Gradle: implementation 'org.springframework.boot:spring-boot-starter-data-mongodb'\n");
+        msg.append("  Maven:  <artifactId>spring-boot-starter-data-mongodb</artifactId>\n");
+        msg.append(RED + "================================================\n" + RESET);
+        msg.append(RED + BOLD + "Application startup aborted.\n" + RESET);
+        return msg.toString();
+    }
+
+    private String buildNoDatabaseConfigError(boolean hasMySQL, boolean hasPostgres, boolean hasMongo) {
         StringBuilder msg = new StringBuilder();
         msg.append("\n");
         msg.append(RED + "================================================\n" + RESET);
         msg.append(RED + BOLD + "     DATABASE CONFIGURATION ERROR\n" + RESET);
         msg.append(RED + "================================================\n" + RESET);
-        msg.append(RED + "No database configuration found!\n" + RESET);
+        msg.append(RED + "Database drivers found but no configuration!\n" + RESET);
         msg.append("\n");
-        msg.append(YELLOW + "Please configure at least one database:\n" + RESET);
+        msg.append(CYAN + "Available drivers:\n" + RESET);
+        if (hasMySQL) msg.append(GREEN + "  ✓ MySQL\n" + RESET);
+        if (hasPostgres) msg.append(GREEN + "  ✓ PostgreSQL\n" + RESET);
+        if (hasMongo) msg.append(GREEN + "  ✓ MongoDB\n" + RESET);
         msg.append("\n");
-        msg.append(GREEN + "For SQL (MySQL/PostgreSQL):\n" + RESET);
-        msg.append("  spring.datasource.url=jdbc:mysql://localhost:3306/mydb\n");
-        msg.append("  spring.datasource.username=root\n");
-        msg.append("  spring.datasource.password=yourpassword\n");
-        msg.append("  spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver\n");
+        msg.append(YELLOW + "Configure at least one database:\n" + RESET);
         msg.append("\n");
-        msg.append(GREEN + "For MongoDB:\n" + RESET);
-        msg.append("  spring.data.mongodb.uri=mongodb://localhost:27017/mydb\n");
-        msg.append("\n");
+
+        if (hasMySQL || hasPostgres) {
+            msg.append(GREEN + "For SQL (MySQL/PostgreSQL):\n" + RESET);
+            msg.append("  spring.datasource.url=jdbc:mysql://localhost:3306/mydb\n");
+            msg.append("  spring.datasource.username=root\n");
+            msg.append("  spring.datasource.password=yourpassword\n");
+            msg.append("  spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver\n");
+            msg.append("\n");
+        }
+
+        if (hasMongo) {
+            msg.append(GREEN + "For MongoDB:\n" + RESET);
+            msg.append("  spring.data.mongodb.uri=mongodb://localhost:27017/mydb\n");
+            msg.append("\n");
+        }
+
         msg.append(WHITE + "Add these to your application.properties or application.yml\n" + RESET);
+        msg.append(RED + "================================================\n" + RESET);
+        msg.append(RED + BOLD + "Application startup aborted.\n" + RESET);
+        return msg.toString();
+    }
+
+    private String buildSqlDriverMissingError(String url) {
+        StringBuilder msg = new StringBuilder();
+        msg.append("\n");
+        msg.append(RED + "================================================\n" + RESET);
+        msg.append(RED + BOLD + "     SQL DRIVER MISSING\n" + RESET);
+        msg.append(RED + "================================================\n" + RESET);
+        msg.append(RED + "SQL database configured but driver not found!\n" + RESET);
+        msg.append("\n");
+        msg.append(CYAN + "Configured URL: " + maskPassword(url) + "\n" + RESET);
+        msg.append("\n");
+        msg.append(YELLOW + "Add the appropriate SQL driver:\n" + RESET);
+        msg.append("\n");
+        msg.append(GREEN + "For MySQL:\n" + RESET);
+        msg.append("  Gradle: runtimeOnly 'com.mysql:mysql-connector-j:8.3.0'\n");
+        msg.append("\n");
+        msg.append(GREEN + "For PostgreSQL:\n" + RESET);
+        msg.append("  Gradle: runtimeOnly 'org.postgresql:postgresql:42.7.3'\n");
+        msg.append(RED + "================================================\n" + RESET);
+        msg.append(RED + BOLD + "Application startup aborted.\n" + RESET);
+        return msg.toString();
+    }
+
+    private String buildMongoDriverMissingError() {
+        StringBuilder msg = new StringBuilder();
+        msg.append("\n");
+        msg.append(RED + "================================================\n" + RESET);
+        msg.append(RED + BOLD + "     MONGODB DRIVER MISSING\n" + RESET);
+        msg.append(RED + "================================================\n" + RESET);
+        msg.append(RED + "MongoDB configured but driver not found!\n" + RESET);
+        msg.append("\n");
+        msg.append(YELLOW + "Add MongoDB driver:\n" + RESET);
+        msg.append("\n");
+        msg.append(GREEN + "Gradle:\n" + RESET);
+        msg.append("  implementation 'org.springframework.boot:spring-boot-starter-data-mongodb'\n");
+        msg.append("\n");
+        msg.append(GREEN + "Maven:\n" + RESET);
+        msg.append("  <dependency>\n");
+        msg.append("    <groupId>org.springframework.boot</groupId>\n");
+        msg.append("    <artifactId>spring-boot-starter-data-mongodb</artifactId>\n");
+        msg.append("  </dependency>\n");
         msg.append(RED + "================================================\n" + RESET);
         msg.append(RED + BOLD + "Application startup aborted.\n" + RESET);
         return msg.toString();
@@ -109,6 +241,11 @@ public class CrudXConfiguration {
 
     private void logError(String message) {
         System.out.println(message);
+    }
+
+    private String maskPassword(String url) {
+        if (url == null) return "null";
+        return url.replaceAll(":[^:@]+@", ":****@");
     }
 
     @Configuration
@@ -150,6 +287,10 @@ public class CrudXConfiguration {
         }
     }
 
+    /**
+     * CRITICAL: Only enable JPA when datasource.url is explicitly configured
+     * This prevents JPA from trying to initialize when only MongoDB is used
+     */
     @Configuration
     @ConditionalOnProperty(prefix = "spring.datasource", name = "url")
     @EnableJpaRepositories(basePackages = {
@@ -177,7 +318,8 @@ public class CrudXConfiguration {
             logInfo(CYAN + "----------------------------------------" + RESET);
             logInfo(BOLD + WHITE + "  JPA/SQL Configuration Active" + RESET);
             logInfo(CYAN + "----------------------------------------" + RESET);
-            logInfo(GREEN + "  [OK] EntityManager configured" + RESET);
+            logInfo(GREEN + "  [OK] DataSource will be auto-configured" + RESET);
+            logInfo(GREEN + "  [OK] EntityManager will be created" + RESET);
             logInfo(GREEN + "  [OK] JPA Auditing enabled" + RESET);
             logInfo(GREEN + "  [OK] JPA Repositories enabled" + RESET);
             logInfo(CYAN + "  Database: " + RESET + databaseType);
@@ -190,6 +332,7 @@ public class CrudXConfiguration {
         }
 
         @Bean
+        @ConditionalOnMissingBean
         public HibernatePropertiesCustomizer hibernateDDLCustomizer() {
             return (hibernateProperties) -> {
                 String ddlAuto = environment.getProperty(

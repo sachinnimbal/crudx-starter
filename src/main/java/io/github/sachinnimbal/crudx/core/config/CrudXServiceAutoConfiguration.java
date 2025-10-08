@@ -1,3 +1,19 @@
+/*
+ * Copyright 2025 Sachin Nimbal
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package io.github.sachinnimbal.crudx.core.config;
 
 import io.github.sachinnimbal.crudx.core.model.CrudXBaseEntity;
@@ -35,9 +51,6 @@ import java.util.Set;
 
 /**
  * @author Sachin Nimbal
- * @version 1.0.0
- * @since 2025
- * @Contact: <a href="mailto:sachinnimbal9@gmail.com">sachinnimbal9@gmail.com</a>
  * @see <a href="https://www.linkedin.com/in/sachin-nimbal/">LinkedIn Profile</a>
  */
 @Slf4j
@@ -197,6 +210,9 @@ public class CrudXServiceAutoConfiguration implements BeanDefinitionRegistryPost
         @Autowired(required = false)
         protected EntityManager entityManager;
 
+        @Autowired
+        private Environment environment;
+
         public DynamicSQLService(Class<T> entityClass) {
             this.entityClass = entityClass;
         }
@@ -204,11 +220,24 @@ public class CrudXServiceAutoConfiguration implements BeanDefinitionRegistryPost
         @Override
         @PostConstruct
         protected void init() {
-            if (entityManager == null) {
+            // Check if SQL is actually configured
+            String sqlUrl = environment.getProperty("spring.datasource.url");
+            boolean isSqlConfigured = sqlUrl != null && !sqlUrl.trim().isEmpty();
+
+            // Only fail if SQL is configured but EntityManager is not available
+            if (isSqlConfigured && entityManager == null) {
                 String errorMsg = buildEntityManagerErrorMessage();
                 System.out.println(errorMsg);
-                System.exit(1); // Exit immediately
+                System.exit(1);
             }
+
+            // If SQL is not configured, just skip initialization silently
+            if (!isSqlConfigured) {
+                log.debug("SQL not configured - skipping SQL service initialization for {}",
+                        entityClass != null ? entityClass.getSimpleName() : "unknown");
+                return;
+            }
+
             if (entityClass != null) {
                 log.debug("SQL Entity class pre-configured: {}", entityClass.getSimpleName());
             } else {
@@ -221,22 +250,26 @@ public class CrudXServiceAutoConfiguration implements BeanDefinitionRegistryPost
                     RED + "===============================================\n" + RESET +
                     RED + BOLD + "   ENTITYMANAGER NOT AVAILABLE\n" + RESET +
                     RED + "===============================================\n" + RESET +
-                    RED + "EntityManager bean is not available!\n" + RESET +
+                    RED + "SQL database is configured but EntityManager\n" + RESET +
+                    RED + "bean is not available!\n" + RESET +
                     "\n" +
                     YELLOW + "This usually means:\n" + RESET +
-                    "  1. JPA dependency is missing\n" +
-                    "  2. Database driver is not configured\n" +
+                    "  1. spring-boot-starter-data-jpa is missing\n" +
+                    "  2. Database driver is not in classpath\n" +
                     "  3. Database connection failed\n" +
+                    "  4. Database server is not running\n" +
                     "\n" +
                     CYAN + "Required dependencies:\n" + RESET +
                     GREEN + "  → spring-boot-starter-data-jpa\n" + RESET +
                     GREEN + "  → Database driver (MySQL/PostgreSQL)\n" + RESET +
                     "\n" +
-                    CYAN + "Configuration required:\n" + RESET +
-                    "  spring.datasource.url=jdbc:mysql://localhost:3306/db\n" +
-                    "  spring.datasource.username=root\n" +
-                    "  spring.datasource.password=password\n" +
-                    "  spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver\n" +
+                    CYAN + "Verify your configuration:\n" + RESET +
+                    "  spring.datasource.url=" +
+                    environment.getProperty("spring.datasource.url") + "\n" +
+                    "  spring.datasource.driver-class-name=" +
+                    environment.getProperty("spring.datasource.driver-class-name") + "\n" +
+                    "\n" +
+                    YELLOW + "Check database server is running!\n" + RESET +
                     RED + "===============================================\n" + RESET +
                     RED + BOLD + "Application startup aborted.\n" + RESET;
         }
@@ -248,6 +281,9 @@ public class CrudXServiceAutoConfiguration implements BeanDefinitionRegistryPost
         @Autowired(required = false)
         protected MongoTemplate mongoTemplate;
 
+        @Autowired
+        private Environment environment;
+
         public DynamicMongoService(Class<T> entityClass) {
             this.entityClass = entityClass;
         }
@@ -255,11 +291,24 @@ public class CrudXServiceAutoConfiguration implements BeanDefinitionRegistryPost
         @Override
         @PostConstruct
         protected void init() {
-            if (mongoTemplate == null) {
+            // Check if MongoDB is actually configured
+            String mongoUri = environment.getProperty("spring.data.mongodb.uri");
+            boolean isMongoConfigured = mongoUri != null && !mongoUri.trim().isEmpty();
+
+            // Only fail if MongoDB is configured but MongoTemplate is not available
+            if (isMongoConfigured && mongoTemplate == null) {
                 String errorMsg = buildMongoTemplateErrorMessage();
                 System.out.println(errorMsg);
-                System.exit(1); // Exit immediately
+                System.exit(1);
             }
+
+            // If MongoDB is not configured, just skip initialization silently
+            if (!isMongoConfigured) {
+                log.debug("MongoDB not configured - skipping MongoDB service initialization for {}",
+                        entityClass != null ? entityClass.getSimpleName() : "unknown");
+                return;
+            }
+
             if (entityClass != null) {
                 log.debug("MongoDB Entity class pre-configured: {}", entityClass.getSimpleName());
             } else {
@@ -272,20 +321,25 @@ public class CrudXServiceAutoConfiguration implements BeanDefinitionRegistryPost
                     RED + "===============================================\n" + RESET +
                     RED + BOLD + "   MONGOTEMPLATE NOT AVAILABLE\n" + RESET +
                     RED + "===============================================\n" + RESET +
-                    RED + "MongoTemplate bean is not available!\n" + RESET +
+                    RED + "MongoDB is configured but MongoTemplate\n" + RESET +
+                    RED + "bean is not available!\n" + RESET +
                     "\n" +
                     YELLOW + "This usually means:\n" + RESET +
-                    "  1. MongoDB dependency is missing\n" +
-                    "  2. MongoDB connection is not configured\n" +
-                    "  3. MongoDB server is not reachable\n" +
+                    "  1. spring-boot-starter-data-mongodb is missing\n" +
+                    "  2. MongoDB connection failed\n" +
+                    "  3. MongoDB server is not running\n" +
+                    "  4. MongoDB URI is incorrect\n" +
                     "\n" +
                     CYAN + "Required dependency:\n" + RESET +
                     GREEN + "  → spring-boot-starter-data-mongodb\n" + RESET +
                     "\n" +
-                    CYAN + "Configuration required:\n" + RESET +
-                    "  spring.data.mongodb.uri=mongodb://localhost:27017/dbname\n" +
+                    CYAN + "Verify your configuration:\n" + RESET +
+                    "  spring.data.mongodb.uri=" +
+                    environment.getProperty("spring.data.mongodb.uri") + "\n" +
                     "\n" +
-                    CYAN + "OR (alternative format):\n" + RESET +
+                    YELLOW + "Check MongoDB server is running at the configured URI!\n" + RESET +
+                    "\n" +
+                    CYAN + "Alternative format:\n" + RESET +
                     "  spring.data.mongodb.host=localhost\n" +
                     "  spring.data.mongodb.port=27017\n" +
                     "  spring.data.mongodb.database=dbname\n" +

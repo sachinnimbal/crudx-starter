@@ -1,4 +1,6 @@
 # src/main/resources/META-INF/spring.factories
+org.springframework.boot.env.EnvironmentPostProcessor=\
+    io.github.sachinnimbal.crudx.core.config.CrudXSmartExcludeInitializer
 org.springframework.context.ApplicationContextInitializer=\
     io.github.sachinnimbal.crudx.core.config.CrudXDatabaseInitializer
 org.springframework.boot.autoconfigure.EnableAutoConfiguration=\

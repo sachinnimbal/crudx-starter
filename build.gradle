@@ -16,13 +16,15 @@ java {
     }
     withSourcesJar()
     withJavadocJar()
-    tasks.withType(Jar) {
-        manifest {
-            attributes(
-                    'Implementation-Title': project.name,
-                    'Implementation-Version': project.version,
-                    'Implementation-Vendor': 'Sachin Nimbal'
-            )
+    tasks.withType(Jar).tap {
+        configureEach {
+            manifest {
+                attributes(
+                        'Implementation-Title': project.name,
+                        'Implementation-Version': project.version,
+                        'Implementation-Vendor': 'Sachin Nimbal'
+                )
+            }
         }
     }
 }
@@ -81,101 +83,4 @@ tasks.withType(JavaCompile).configureEach {
 tasks.withType(Javadoc).configureEach {
     options.encoding = 'UTF-8'
     options.addBooleanOption('Xdoclint:none', true)
-}
-
-publishing {
-    publications {
-        mavenJava(MavenPublication) {
-            from components.java
-
-            artifactId = 'crudx-starter'
-
-            pom {
-                name = 'CRUDX Starter'
-                description = project.description
-                url = 'https://github.com/sachinnimbal/crudx-starter'
-
-                licenses {
-                    license {
-                        name = 'The Apache License, Version 2.0'
-                        url = 'https://www.apache.org/licenses/LICENSE-2.0.txt'
-                        distribution = 'repo'
-                    }
-                }
-
-                developers {
-                    developer {
-                        id = 'sachinnimbal'
-                        name = 'Sachin Nimbal'
-                        email = 'sachinnimbal9@gmail.com'
-                    }
-                }
-
-                scm {
-                    connection = 'scm:git:git://github.com/sachinnimbal/crudx-starter.git'
-                    developerConnection = 'scm:git:ssh://github.com/sachinnimbal/crudx-starter.git'
-                    url = 'https://github.com/sachinnimbal/crudx-starter'
-                }
-            }
-
-            versionMapping {
-                usage('java-api') {
-                    fromResolutionOf('runtimeClasspath')
-                }
-                usage('java-runtime') {
-                    fromResolutionResult()
-                }
-            }
-        }
-    }
-
-    repositories {
-        maven {
-            name = "GitHubPackages"
-            url = uri("https://maven.pkg.github.com/sachinnimbal/crudx-starter")
-            credentials {
-                username = project.findProperty("gpr.user") ?: System.getenv("GITHUB_ACTOR")
-                password = project.findProperty("gpr.key") ?: System.getenv("GITHUB_TOKEN")
-            }
-        }
-
-        maven {
-            name = "localRepo"
-            url = layout.buildDirectory.dir("repo")
-        }
-    }
-}
-
-signing {
-    def signingKey = project.findProperty("signingKey")
-    def signingPassword = project.findProperty("signingPassword")
-
-    if (signingKey && signingPassword) {
-        useInMemoryPgpKeys(signingKey as String, signingPassword as String)
-    }
-
-    sign publishing.publications.mavenJava
-}
-
-gradle.taskGraph.whenReady { graph ->
-    tasks.withType(Sign).configureEach {
-        onlyIf {
-            graph.hasTask(":publishAllPublicationsToCentralPortal") ||
-                    project.hasProperty("forceSigning")
-        }
-    }
-}
-
-nmcp {
-    publishAllProjectsProbablyBreakingProjectIsolation {
-        username = project.findProperty("mavenCentralUsername") ?: System.getenv("MAVEN_CENTRAL_USERNAME")
-        password = project.findProperty("mavenCentralPassword") ?: System.getenv("MAVEN_CENTRAL_PASSWORD")
-        publicationType = "AUTOMATIC"
-    }
-}
-
-tasks.register("publishLocal") {
-    group = "publishing"
-    description = "Publish to local build repo and Maven local"
-    dependsOn("publishToMavenLocal", "publishMavenJavaPublicationToLocalRepoRepository")
 }

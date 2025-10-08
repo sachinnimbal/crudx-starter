@@ -77,6 +77,6 @@ Thumbs.db
 .env
 gradle.properties
 author.gradle
-publishing.gradle
+publish.gradle
 *.gpg
 *.asc
