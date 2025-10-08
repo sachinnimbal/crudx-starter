@@ -886,7 +886,7 @@ A: Check:
 
 ### Contact
 
-- **Email**: sachinnimbal@gmail.com
+- **Email**: sachinnimbal9@gmail.com
 - **LinkedIn**: [Sachin Nimbal](https://www.linkedin.com/in/sachin-nimbal/)
 
 ---
