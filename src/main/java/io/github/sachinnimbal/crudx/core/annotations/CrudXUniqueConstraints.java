@@ -19,8 +19,45 @@ package io.github.sachinnimbal.crudx.core.annotations;
 import java.lang.annotation.*;
 
 /**
+ * Container annotation for multiple {@link CrudXUniqueConstraint} annotations.
+ *
+ * <p><b>Usage Example:</b></p>
+ *
+ * <pre>
+ * // Correct way to define multiple unique constraints
+ * {@literal @}CrudXUniqueConstraints({
+ *     {@literal @}CrudXUniqueConstraint(
+ *         fields = {"email"},
+ *         message = "Email already registered"
+ *     ),
+ *     {@literal @}CrudXUniqueConstraint(
+ *         fields = {"username"},
+ *         message = "Username already taken"
+ *     ),
+ *     {@literal @}CrudXUniqueConstraint(
+ *         fields = {"phoneNumber"},
+ *         message = "Phone number already registered"
+ *     )
+ * })
+ * public class User extends CrudXMongoEntity&lt;String&gt; {
+ *     private String email;
+ *     private String username;
+ *     private String phoneNumber;
+ * }
+ * </pre>
+ *
+ * <p><b>Compile-Time Validation:</b></p>
+ * If you try to use multiple {@code @CrudXUniqueConstraint} annotations without this container:
+ * <pre>
+ * // ❌ WRONG - Will cause compile error
+ * {@literal @}CrudXUniqueConstraint(fields = {"email"})
+ * {@literal @}CrudXUniqueConstraint(fields = {"username"})
+ * public class User extends CrudXMongoEntity&lt;String&gt; {
+ *     // Compiler will suggest using @CrudXUniqueConstraints
+ * }
+ * </pre>
+ *
  * @author Sachin Nimbal
- * @see <a href="https://www.linkedin.com/in/sachin-nimbal/">LinkedIn Profile</a>
  */
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)

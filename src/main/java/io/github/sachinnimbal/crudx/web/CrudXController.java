@@ -16,9 +16,13 @@
 
 package io.github.sachinnimbal.crudx.web;
 
+import io.github.sachinnimbal.crudx.core.enums.DatabaseType;
 import io.github.sachinnimbal.crudx.core.exception.DuplicateEntityException;
 import io.github.sachinnimbal.crudx.core.exception.EntityNotFoundException;
 import io.github.sachinnimbal.crudx.core.model.CrudXBaseEntity;
+import io.github.sachinnimbal.crudx.core.model.CrudXMongoEntity;
+import io.github.sachinnimbal.crudx.core.model.CrudXMySQLEntity;
+import io.github.sachinnimbal.crudx.core.model.CrudXPostgreSQLEntity;
 import io.github.sachinnimbal.crudx.core.response.ApiResponse;
 import io.github.sachinnimbal.crudx.core.response.BatchResult;
 import io.github.sachinnimbal.crudx.core.response.PageResponse;
@@ -42,9 +46,100 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+import static io.github.sachinnimbal.crudx.core.enums.DatabaseType.*;
+
 /**
+ * Base REST controller providing zero-boilerplate CRUD operations.
+ *
+ * <p><b>Usage Examples:</b></p>
+ *
+ * <pre>
+ * // Example 1: Simple controller with all default endpoints
+ * {@literal @}RestController
+ * {@literal @}RequestMapping("/api/users")
+ * public class UserController extends CrudXController&lt;User, String&gt; {
+ *     // No additional code needed - all CRUD endpoints are auto-generated
+ * }
+ *
+ * // Example 2: Controller with lifecycle hooks
+ * {@literal @}RestController
+ * {@literal @}RequestMapping("/api/products")
+ * public class ProductController extends CrudXController&lt;Product, Long&gt; {
+ *
+ *     {@literal @}Override
+ *     protected void beforeCreate(Product product) {
+ *         // Custom logic before creating product
+ *         product.setSku(generateSku());
+ *     }
+ *
+ *     {@literal @}Override
+ *     protected void afterCreate(Product product) {
+ *         // Send notification after product creation
+ *         notificationService.sendProductCreated(product);
+ *     }
+ *
+ *     {@literal @}Override
+ *     protected void beforeDelete(Long id, Product product) {
+ *         // Check if product can be deleted
+ *         if (product.hasActiveOrders()) {
+ *             throw new IllegalStateException("Cannot delete product with active orders");
+ *         }
+ *     }
+ * }
+ *
+ * // Example 3: Controller with custom endpoints
+ * {@literal @}RestController
+ * {@literal @}RequestMapping("/api/orders")
+ * public class OrderController extends CrudXController&lt;Order, String&gt; {
+ *
+ *     {@literal @}Autowired
+ *     private PaymentService paymentService;
+ *
+ *     // Custom endpoint in addition to CRUD operations
+ *     {@literal @}PostMapping("/{id}/pay")
+ *     public ResponseEntity&lt;ApiResponse&lt;Order&gt;&gt; processPayment(
+ *             {@literal @}PathVariable String id,
+ *             {@literal @}RequestBody PaymentRequest payment) {
+ *
+ *         Order order = crudService.findById(id);
+ *         paymentService.process(order, payment);
+ *
+ *         return ResponseEntity.ok(ApiResponse.success(order, "Payment processed"));
+ *     }
+ * }
+ * </pre>
+ *
+ * <p><b>Available Lifecycle Hooks:</b></p>
+ * <ul>
+ *   <li>{@code beforeCreate(T entity)} - Called before entity creation</li>
+ *   <li>{@code afterCreate(T entity)} - Called after entity creation</li>
+ *   <li>{@code beforeCreateBatch(List<T> entities)} - Called before batch creation</li>
+ *   <li>{@code afterCreateBatch(List<T> entities)} - Called after batch creation</li>
+ *   <li>{@code beforeUpdate(ID id, Map updates, T existing)} - Called before update</li>
+ *   <li>{@code afterUpdate(T updated, T old)} - Called after update</li>
+ *   <li>{@code beforeDelete(ID id, T entity)} - Called before deletion</li>
+ *   <li>{@code afterDelete(ID id, T deleted)} - Called after deletion</li>
+ *   <li>{@code beforeDeleteBatch(List<ID> ids)} - Called before batch deletion</li>
+ *   <li>{@code afterDeleteBatch(List<ID> ids)} - Called after batch deletion</li>
+ * </ul>
+ *
+ * <p><b>Auto-generated Endpoints:</b></p>
+ * <ul>
+ *   <li>POST / - Create single entity</li>
+ *   <li>POST /batch - Create multiple entities</li>
+ *   <li>GET /{id} - Get entity by ID</li>
+ *   <li>GET / - Get all entities (with sorting)</li>
+ *   <li>GET /paged - Get paginated entities</li>
+ *   <li>PATCH /{id} - Update entity</li>
+ *   <li>DELETE /{id} - Delete entity</li>
+ *   <li>DELETE /batch - Delete multiple entities</li>
+ *   <li>GET /count - Count all entities</li>
+ *   <li>GET /exists/{id} - Check if entity exists</li>
+ * </ul>
+ *
+ * @param <T> the entity type
+ * @param <ID> the ID type
  * @author Sachin Nimbal
- * @see <a href="https://www.linkedin.com/in/sachin-nimbal/">LinkedIn Profile</a>
  */
 @Slf4j
 public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends Serializable> {
@@ -70,9 +165,11 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                     "Could not resolve entity class for controller: " + getClass().getSimpleName()
             );
         }
-
+        // Determine DatabaseType based on entity class lineage
+        DatabaseType databaseType = getDatabaseType();
+        // Use entity name + database type for bean name
         String serviceBeanName = Character.toLowerCase(entityClass.getSimpleName().charAt(0)) +
-                entityClass.getSimpleName().substring(1) + "Service";
+                entityClass.getSimpleName().substring(1) + "Service" + databaseType.name().toLowerCase();
 
         try {
             @SuppressWarnings("unchecked")
@@ -92,6 +189,20 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                             ". Ensure entity extends CrudXJPAEntity or CrudXMongoEntity", e
             );
         }
+    }
+
+    private DatabaseType getDatabaseType() {
+        DatabaseType databaseType;
+        if (CrudXMongoEntity.class.isAssignableFrom(entityClass)) {
+            databaseType = MONGODB;
+        } else if (CrudXPostgreSQLEntity.class.isAssignableFrom(entityClass)) {
+            databaseType = POSTGRESQL;
+        } else if (CrudXMySQLEntity.class.isAssignableFrom(entityClass)) {
+            databaseType = MYSQL;
+        } else {
+            throw new IllegalStateException("Unknown entity database type for class: " + entityClass.getSimpleName());
+        }
+        return databaseType;
     }
 
     @SuppressWarnings("unchecked")

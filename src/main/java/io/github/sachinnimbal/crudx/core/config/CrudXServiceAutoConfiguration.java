@@ -16,6 +16,7 @@
 
 package io.github.sachinnimbal.crudx.core.config;
 
+import io.github.sachinnimbal.crudx.core.enums.DatabaseType;
 import io.github.sachinnimbal.crudx.core.model.CrudXBaseEntity;
 import io.github.sachinnimbal.crudx.core.model.CrudXMongoEntity;
 import io.github.sachinnimbal.crudx.core.model.CrudXMySQLEntity;
@@ -48,6 +49,8 @@ import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.util.HashSet;
 import java.util.Set;
+
+import static io.github.sachinnimbal.crudx.core.enums.DatabaseType.*;
 
 /**
  * @author Sachin Nimbal
@@ -102,8 +105,8 @@ public class CrudXServiceAutoConfiguration implements BeanDefinitionRegistryPost
                         String entityKey = entityInfo.entityClass.getName();
 
                         if (!processedEntities.contains(entityKey)) {
-                            if (entityInfo.databaseType == DatabaseType.MYSQL ||
-                                    entityInfo.databaseType == DatabaseType.POSTGRESQL) {
+                            if (entityInfo.databaseType == MYSQL ||
+                                    entityInfo.databaseType == POSTGRESQL) {
                                 discoveredSQLEntities.add(entityInfo.entityClass);
                             }
 
@@ -159,11 +162,11 @@ public class CrudXServiceAutoConfiguration implements BeanDefinitionRegistryPost
 
     private DatabaseType detectDatabaseType(Class<?> entityClass) {
         if (CrudXMySQLEntity.class.isAssignableFrom(entityClass)) {
-            return DatabaseType.MYSQL;
+            return MYSQL;
         } else if (CrudXPostgreSQLEntity.class.isAssignableFrom(entityClass)) {
-            return DatabaseType.POSTGRESQL;
+            return POSTGRESQL;
         } else if (CrudXMongoEntity.class.isAssignableFrom(entityClass)) {
-            return DatabaseType.MONGODB;
+            return MONGODB;
         }
         return null;
     }
@@ -406,10 +409,6 @@ public class CrudXServiceAutoConfiguration implements BeanDefinitionRegistryPost
         };
     }
 
-    private enum DatabaseType {
-        MYSQL, POSTGRESQL, MONGODB
-    }
-
     private static class EntityInfo {
         final Class<?> entityClass;
         final Class<?> idClass;
@@ -420,12 +419,13 @@ public class CrudXServiceAutoConfiguration implements BeanDefinitionRegistryPost
             this.entityClass = entityClass;
             this.idClass = idClass;
             this.databaseType = databaseType;
-            this.serviceBeanName = generateServiceBeanName(entityClass);
+            this.serviceBeanName = generateServiceBeanName(entityClass, databaseType);
         }
 
-        private static String generateServiceBeanName(Class<?> entityClass) {
+        private static String generateServiceBeanName(Class<?> entityClass, DatabaseType databaseType) {
             String simpleName = entityClass.getSimpleName();
-            return Character.toLowerCase(simpleName.charAt(0)) + simpleName.substring(1) + "Service";
+            return Character.toLowerCase(simpleName.charAt(0)) + simpleName.substring(1)
+                    + "Service" + databaseType.name().toLowerCase();
         }
     }
 

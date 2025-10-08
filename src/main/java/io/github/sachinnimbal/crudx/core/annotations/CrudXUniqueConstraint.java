@@ -19,8 +19,43 @@ package io.github.sachinnimbal.crudx.core.annotations;
 import java.lang.annotation.*;
 
 /**
+ * Annotation to mark a single unique constraint on entity fields.
+ *
+ * <p><b>Usage Examples:</b></p>
+ *
+ * <pre>
+ * // Example 1: Single field unique constraint
+ * {@literal @}CrudXUniqueConstraint(fields = {"email"})
+ * public class User extends CrudXMongoEntity&lt;String&gt; {
+ *     private String email;
+ * }
+ *
+ * // Example 2: Custom error message
+ * {@literal @}CrudXUniqueConstraint(
+ *     fields = {"username"},
+ *     message = "Username already exists. Please choose a different username."
+ * )
+ * public class User extends CrudXMongoEntity&lt;String&gt; {
+ *     private String username;
+ * }
+ *
+ * // Example 3: Composite unique constraint
+ * {@literal @}CrudXUniqueConstraint(fields = {"firstName", "lastName", "dateOfBirth"})
+ * public class Person extends CrudXMySQLEntity&lt;Long&gt; {
+ *     private String firstName;
+ *     private String lastName;
+ *     private LocalDate dateOfBirth;
+ * }
+ * </pre>
+ *
+ * <p><b>Important Notes:</b></p>
+ * <ul>
+ *   <li>For multiple constraints, use {@link CrudXUniqueConstraints} instead</li>
+ *   <li>Constraints are validated before insert/update operations</li>
+ *   <li>Throws {@code DuplicateEntityException} if constraint is violated</li>
+ * </ul>
+ *
  * @author Sachin Nimbal
- * @see <a href="https://www.linkedin.com/in/sachin-nimbal/">LinkedIn Profile</a>
  */
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)

@@ -287,10 +287,6 @@ public class CrudXConfiguration {
         }
     }
 
-    /**
-     * CRITICAL: Only enable JPA when datasource.url is explicitly configured
-     * This prevents JPA from trying to initialize when only MongoDB is used
-     */
     @Configuration
     @ConditionalOnProperty(prefix = "spring.datasource", name = "url")
     @EnableJpaRepositories(basePackages = {

@@ -25,6 +25,7 @@ import org.springframework.http.HttpStatus;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import static io.github.sachinnimbal.crudx.core.util.TimeUtils.formatExecutionTime;
 
 /**
  * @author Sachin Nimbal
@@ -118,28 +119,6 @@ public class ApiResponse<T> {
                 .status(HttpStatus.NOT_FOUND.name())
                 .timestamp(LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME))
                 .build();
-    }
-
-    private static String formatExecutionTime(long milliseconds) {
-        if (milliseconds < 1000) {
-            // Less than 1 second
-            return milliseconds + " ms";
-        } else if (milliseconds < 60000) {
-            // Less than 1 minute
-            double seconds = milliseconds / 1000.0;
-            return String.format("%.2fs (%d ms)", seconds, milliseconds);
-        } else if (milliseconds < 3600000) {
-            // Less than 1 hour
-            long minutes = milliseconds / 60000;
-            long seconds = (milliseconds % 60000) / 1000;
-            return String.format("%dm %ds (%d ms)", minutes, seconds, milliseconds);
-        } else {
-            // 1 hour or more
-            long hours = milliseconds / 3600000;
-            long minutes = (milliseconds % 3600000) / 60000;
-            long seconds = (milliseconds % 60000) / 1000;
-            return String.format("%dh %dm %ds (%d ms)", hours, minutes, seconds, milliseconds);
-        }
     }
 
     @Data
