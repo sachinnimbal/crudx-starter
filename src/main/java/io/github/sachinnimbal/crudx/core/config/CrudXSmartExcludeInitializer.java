@@ -14,10 +14,8 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Smart auto-configuration exclusion based on database configuration
- * Excludes JPA/DataSource configs when only MongoDB is configured
- *
  * @author Sachin Nimbal
+ * @see <a href="https://www.linkedin.com/in/sachin-nimbal/">LinkedIn Profile</a>
  */
 @Slf4j
 public class CrudXSmartExcludeInitializer implements EnvironmentPostProcessor {

@@ -16,9 +16,13 @@
 
 package io.github.sachinnimbal.crudx.web;
 
+import io.github.sachinnimbal.crudx.core.enums.DatabaseType;
 import io.github.sachinnimbal.crudx.core.exception.DuplicateEntityException;
 import io.github.sachinnimbal.crudx.core.exception.EntityNotFoundException;
 import io.github.sachinnimbal.crudx.core.model.CrudXBaseEntity;
+import io.github.sachinnimbal.crudx.core.model.CrudXMongoEntity;
+import io.github.sachinnimbal.crudx.core.model.CrudXMySQLEntity;
+import io.github.sachinnimbal.crudx.core.model.CrudXPostgreSQLEntity;
 import io.github.sachinnimbal.crudx.core.response.ApiResponse;
 import io.github.sachinnimbal.crudx.core.response.BatchResult;
 import io.github.sachinnimbal.crudx.core.response.PageResponse;
@@ -41,6 +45,8 @@ import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+
+import static io.github.sachinnimbal.crudx.core.enums.DatabaseType.*;
 
 /**
  * @author Sachin Nimbal
@@ -70,9 +76,11 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                     "Could not resolve entity class for controller: " + getClass().getSimpleName()
             );
         }
-
+        // Determine DatabaseType based on entity class lineage
+        DatabaseType databaseType = getDatabaseType();
+        // Use entity name + database type for bean name
         String serviceBeanName = Character.toLowerCase(entityClass.getSimpleName().charAt(0)) +
-                entityClass.getSimpleName().substring(1) + "Service";
+                entityClass.getSimpleName().substring(1) + "Service" + databaseType.name().toLowerCase();
 
         try {
             @SuppressWarnings("unchecked")
@@ -93,6 +101,21 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             );
         }
     }
+
+    private DatabaseType getDatabaseType() {
+        DatabaseType databaseType;
+        if (CrudXMongoEntity.class.isAssignableFrom(entityClass)) {
+            databaseType = MONGODB;
+        } else if (CrudXPostgreSQLEntity.class.isAssignableFrom(entityClass)) {
+            databaseType = POSTGRESQL;
+        } else if (CrudXMySQLEntity.class.isAssignableFrom(entityClass)) {
+            databaseType = MYSQL;
+        } else {
+            throw new IllegalStateException("Unknown entity database type for class: " + entityClass.getSimpleName());
+        }
+        return databaseType;
+    }
+
 
     @SuppressWarnings("unchecked")
     private void resolveGenericTypes() {
