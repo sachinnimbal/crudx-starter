@@ -528,17 +528,37 @@ Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md)
 
 ---
 
-## 📄 License
-
-CrudX is licensed under the [Apache License 2.0](https://github.com/sachinnimbal/crudx-starter/blob/main/LICENSE).  
-See the LICENSE file for full details.
----
-
 ## 👨‍💻 Author
 
 **Sachin Nimbal**
 - LinkedIn: [linkedin.com/in/sachin-nimbal](https://www.linkedin.com/in/sachin-nimbal/)
 - Email: sachinnimbal9@gmail.com
+
+---
+
+## 🧩 Framework Dependencies & Acknowledgements
+
+CrudX is built on top of proven, production-grade open-source libraries to deliver a seamless, zero-boilerplate CRUD experience.
+
+**Core Dependencies**
+- Spring Boot (Web, Validation, AOP, Auto Configuration)
+- Spring Context & Transaction Management
+- Jackson (for JSON serialization)
+- SLF4J (for logging)
+- Thymeleaf (for internal dashboard / UI)
+- Lombok (for boilerplate reduction)
+
+**Optional Integrations**
+- Spring Data JPA (MySQL / PostgreSQL)
+- Spring Data MongoDB
+- Jakarta Persistence API
+
+**Testing Stack**
+- Spring Boot Test
+- Testcontainers (MySQL, PostgreSQL, MongoDB)
+- JUnit 5
+
+> 💡 Special thanks to the Spring, Jackson, Lombok, and Testcontainers communities for their open-source contributions.
 
 ---
 
@@ -548,4 +568,5 @@ If CrudX helps your project, please give it a star! ⭐
 
 ---
 
-**Made with ❤️ by Sachin Nimbal**
+Built and maintained with ❤️ by [Sachin Nimbal](https://github.com/sachinnimbal)  
+Licensed under the [Apache License 2.0](https://github.com/sachinnimbal/crudx-starter/blob/main/LICENSE)
