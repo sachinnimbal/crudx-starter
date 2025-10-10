@@ -345,6 +345,11 @@
             color: #0f172a;
             border: 1px solid #e2e8f0;
         }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
@@ -445,75 +450,105 @@
                 </button>
             </div>
 
-            <!-- Author + Version -->
             <div class="space-y-6">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <!-- Left: Author Profile -->
-                    <div
-                            class="card rounded-xl p-6 shadow-lg border border-gray-800/40 transition-all hover:shadow-xl hover:-translate-y-1"
-                    >
-                        <div class="flex items-center gap-4 mb-4">
-                            <div
-                                    class="w-16 h-16 rounded-full flex items-center justify-center text-white text-xl font-bold shadow-inner"
-                                    style="background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));"
-                            >
-                                SN
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+
+                    <!-- Profile Card -->
+                    <div class="max-w-sm mx-auto md:mx-0 bg-white/5 rounded-2xl p-6 shadow-lg border border-gray-700/40 hover:shadow-xl transition-all hover:-translate-y-1 backdrop-blur-md">
+
+                        <!-- LinkedIn Badge Container (hidden initially) -->
+                        <div id="linkedinBadgeContainer" class="linkedin-badge-container" style="display: none; justify-content: center; align-items: center;">
+                            <div id="linkedinBadge" class="badge-base LI-profile-badge" data-locale="en_US" data-size="large" data-theme="dark" data-type="VERTICAL" data-vanity="sachin-nimbal" data-version="v1">
+                                <a class="badge-base__link LI-simple-link" href="https://in.linkedin.com/in/sachin-nimbal?trk=profile-badge">Sachin Nimbal</a>
+                            </div>
+                        </div>
+
+                        <!-- Default Profile (shown by default) -->
+                        <div id="fallback-profile">
+                            <!-- Profile Header -->
+                            <div class="flex flex-col items-center text-center space-y-4">
+                                <!-- Avatar -->
+                                <div class="w-28 h-28 rounded-full flex items-center justify-center text-white text-2xl font-bold shadow-inner" style="background: linear-gradient(135deg, var(--accent-primary, #6366F1), var(--accent-secondary, #8B5CF6));">
+                                    SN
+                                </div>
+
+                                <!-- Info -->
+                                <div>
+                                    <h2 class="text-lg font-semibold" style="color: var(--text-primary, #fff);">
+                                        Sachin Nimbal
+                                    </h2>
+                                    <p class="text-sm text-gray-400">Full Stack Developer</p>
+                                </div>
+                            </div>
+
+                            <!-- Divider -->
+                            <div class="my-5 border-t border-gray-700/40"></div>
+
+                            <!-- Contact Buttons -->
+                            <div class="flex justify-center gap-3">
+                                <!-- Gmail -->
+                                <a href="mailto:sachinnimbal9@gmail.com" class="flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium text-white hover:opacity-90 transition-all" style="background-color: #D93025;">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+                                    </svg>
+                                    <span>Contact</span>
+                                </a>
+
+                                <!-- LinkedIn -->
+                                <a href="https://www.linkedin.com/in/sachin-nimbal/" target="_blank" rel="noopener noreferrer" class="flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium text-white hover:opacity-90 transition-all" style="background-color: #0A66C2;">
+                                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                                        <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452z"/>
+                                    </svg>
+                                    <span>Connect</span>
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- LinkedIn Badge Script -->
+                    <script src="https://platform.linkedin.com/badges/js/profile.js" async defer type="text/javascript"></script>
+
+                    <!-- Right: CrudX Introduction -->
+                    <div class="md:col-span-2 card rounded-xl p-6 shadow-lg border border-gray-800/40 transition-all hover:shadow-xl hover:-translate-y-1">
+                        <div class="flex items-start gap-3 mb-3">
+                            <div class="p-2 rounded-lg bg-indigo-500/20">
+                                <svg class="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor"
+                                     viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                          d="M13 16h-1v-4h-1m1-4h.01M12 20a8 8 0 100-16 8 8 0 000 16z"/>
+                                </svg>
                             </div>
                             <div>
-                                <p
-                                        id="modalAuthorName"
-                                        class="font-bold text-lg"
-                                        style="color: var(--text-primary);"
-                                >
-                                    Sachin Nimbal
-                                </p>
-                                <p class="text-sm" style="color: var(--text-secondary);">
-                                    Full Stack Developer
+                                <h4 class="font-semibold mb-1" style="color: var(--text-primary);">
+                                    Discover CrudX Starter 🚀
+                                </h4>
+                                <p class="text-sm leading-relaxed" style="color: var(--text-muted);">
+                                    <strong>CrudX Starter</strong> is a lightweight, high-performance Spring Boot framework built to simplify CRUD operations
+                                    across multiple databases. It eliminates repetitive configurations and enables rapid development using a clean, modular architecture.
                                 </p>
                             </div>
                         </div>
 
-                        <div class="flex flex-wrap items-center gap-3">
-                            <!-- Gmail Contact -->
-                            <a
-                                    href="mailto:sachinnimbal9@gmail.com"
-                                    class="flex items-center gap-2 rounded-full px-4 py-1.5 font-medium text-white transition-all duration-200 hover:opacity-90"
-                                    style="background-color: #D93025; border: 1px solid #D93025;"
-                            >
-                                <svg
-                                        class="w-4 h-4"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        viewBox="0 0 24 24"
-                                >
-                                    <path
-                                            stroke-linecap="round"
-                                            stroke-linejoin="round"
-                                            stroke-width="2"
-                                            d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
-                                    />
-                                </svg>
-                                <span>Contact</span>
-                            </a>
+                        <div class="mt-4 text-sm leading-relaxed" style="color: var(--text-secondary);">
+                            CrudX provides <strong>auto-configuration</strong> for both SQL and NoSQL databases, <strong>audit tracking</strong>, and a ready-to-use
+                            repository layer — all while keeping your codebase minimal and maintainable.
+                            Start building scalable CRUD systems faster and smarter.
+                        </div>
 
-                            <!-- LinkedIn Connect -->
-                            <a
-                                    href="https://www.linkedin.com/in/sachin-nimbal/"
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    class="flex items-center gap-2 rounded-full px-4 py-1.5 font-medium text-white transition-all duration-200 hover:opacity-90"
-                                    style="background-color: #0A66C2; border: 1px solid #0A66C2;"
-                            >
-                                <svg
-                                        class="w-4 h-4"
-                                        fill="currentColor"
-                                        viewBox="0 0 24 24"
-                                >
-                                    <path
-                                            d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452z"
-                                    />
+                        <div class="mt-4">
+                            <a href="https://github.com/sachinnimbal/crudx-starter"
+                               target="_blank"
+                               class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-full text-white transition-all duration-200 hover:opacity-90"
+                               style="background-color: var(--accent-primary); border: 1px solid var(--accent-primary);">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                          d="M13 7l5 5m0 0l-5 5m5-5H6"/>
                                 </svg>
-                                <span>Connect</span>
+                                <span>Get Started</span>
+                            </a>
+                            <a href="https://github.com/sachinnimbal/crudx-starter/issues"
+                               target="_blank"
+                               class="ml-3 text-sm text-indigo-400 hover:text-indigo-300 underline">
+                                Report an Issue
                             </a>
                         </div>
                     </div>
@@ -711,26 +746,19 @@
                             </div>
                         </div>
                     </div>
+
                     <div class="card rounded-xl p-4 transition-transform">
                         <div class="flex items-start gap-3">
-                            <div class="p-2 rounded-lg" style="background: rgba(79, 70, 229, 0.2);">
-                                <svg class="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor"
-                                     viewBox="0 0 24 24">
+                            <div class="p-2 rounded-lg" style="background: rgba(59, 130, 246, 0.2);">
+                                <svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                          d="M13 16h-1v-4h-1m1-4h.01M12 20a8 8 0 100-16 8 8 0 000 16z"/>
+                                          d="M3 7a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-6l-4 4v-4H5a2 2 0 01-2-2V7z"/>
                                 </svg>
                             </div>
                             <div>
-                                <h4 class="font-semibold mb-1" style="color: var(--text-primary);">
-                                    Start Exploring 🚀
-                                </h4>
+                                <h4 class="font-semibold mb-1" style="color: var(--text-primary);">In-Built Swagger UI</h4>
                                 <p class="text-xs" style="color: var(--text-muted);">
-                                    Begin using <strong>CrudX Starter</strong> and discover its power firsthand.
-                                    If you encounter any issues, feel free to raise them
-                                    <a href="https://github.com/sachinnimbal/crudx-starter/issues" target="_blank"
-                                       class="text-indigo-400 hover:text-indigo-300 underline transition-colors">
-                                        here
-                                    </a>.
+                                    Integrated <strong>Swagger UI</strong> for instant API testing — no setup needed.
                                 </p>
                             </div>
                         </div>
@@ -1963,6 +1991,30 @@ public class EmployeeController extends CrudXController&lt;Employee, Long&gt; { 
     loadMetadata();
     loadData();
     startAutoRefresh();
+</script>
+
+<script>
+    // Check LinkedIn badge loading with interval
+    let checkCount = 0;
+    const maxChecks = 20; // Check for 2 seconds (20 * 100ms)
+
+    const checkLinkedInBadge = setInterval(function() {
+        checkCount++;
+        const badge = document.querySelector('.LI-profile-badge');
+        const fallback = document.getElementById('fallback-profile');
+        const badgeContainer = document.getElementById('linkedinBadgeContainer');
+
+        // Check if badge has loaded (has iframe or multiple children)
+        if (badge && badge.children.length > 1) {
+            // Badge loaded successfully
+            clearInterval(checkLinkedInBadge);
+            fallback.style.display = 'none';
+            badgeContainer.style.display = 'flex';
+        } else if (checkCount >= maxChecks) {
+            // Stop checking after max attempts - keep default profile
+            clearInterval(checkLinkedInBadge);
+        }
+    }, 100); // Check every 100ms
 </script>
 </body>
 </html>

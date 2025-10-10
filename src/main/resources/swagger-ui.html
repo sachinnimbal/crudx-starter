@@ -22,6 +22,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CrudX API Documentation</title>
+    <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" type="text/css" href="/swagger-ui/swagger-ui.css">
     <style>
         :root {
@@ -34,93 +35,31 @@
             --border-color: #3d2963;
             --accent-primary: #e879f9;
             --accent-secondary: #a855f7;
+            --accent-tertiary: #f97316;
         }
 
         .light-mode {
             --bg-primary: #f8fafc;
             --bg-secondary: #ffffff;
             --bg-tertiary: #f1f5f9;
-            --text-primary: #000000;
-            --text-secondary: #1e293b;
-            --text-muted: #475569;
+            --text-primary: #0f172a;
+            --text-secondary: #334155;
+            --text-muted: #64748b;
             --border-color: #e2e8f0;
             --accent-primary: #8b5cf6;
             --accent-secondary: #6366f1;
+            --accent-tertiary: #f97316;
         }
 
         body {
-            margin: 0;
             background: var(--bg-primary);
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-            transition: background-color 0.3s ease, color 0.3s ease;
-        }
-
-        /* Custom Header */
-        .custom-header {
-            background: var(--bg-secondary);
-            padding: 1rem 2rem;
-            border-bottom: 2px solid var(--accent-primary);
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
+            color: var(--text-primary);
             transition: all 0.3s ease;
         }
 
         /* Hide header only when embedded in iframe */
         .in-iframe .custom-header {
             display: none;
-        }
-
-        .custom-header .logo {
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-        }
-
-        .custom-header .logo-icon {
-            width: 40px;
-            height: 40px;
-            background: linear-gradient(135deg, var(--accent-secondary), var(--accent-primary));
-            border-radius: 8px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-weight: bold;
-            font-size: 20px;
-            box-shadow: 0 4px 12px rgba(139, 92, 246, 0.4);
-        }
-
-        .custom-header h1 {
-            margin: 0;
-            color: var(--text-primary);
-            font-size: 24px;
-            font-weight: 700;
-        }
-
-        .custom-header p {
-            margin: 4px 0 0 0;
-            color: var(--text-muted);
-            font-size: 14px;
-        }
-
-        .btn-dashboard {
-            padding: 10px 20px;
-            border-radius: 8px;
-            font-weight: 600;
-            text-decoration: none;
-            background: linear-gradient(135deg, var(--accent-secondary), var(--accent-primary));
-            color: white;
-            transition: all 0.3s ease;
-            font-size: 14px;
-            border: none;
-            cursor: pointer;
-            box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
-        }
-
-        .btn-dashboard:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 20px rgba(139, 92, 246, 0.5);
         }
 
         /* Hide Swagger default topbar */
@@ -797,25 +736,50 @@
         .light-mode .swagger-ui .opblock:hover {
             box-shadow: 0 4px 12px rgba(139, 92, 246, 0.15);
         }
+
+        .btn-dashboard {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            transition: all 0.3s ease;
+        }
+
+        .light-mode .btn-dashboard {
+            background: #f1f5f9;
+            color: #0f172a;
+            border: 1px solid #e2e8f0;
+        }
+
     </style>
 </head>
 <body>
-<div class="custom-header">
-    <div class="logo">
-        <div class="logo-icon">
-            <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                  d="M13 10V3L4 14h7v7l9-11h-7z"/>
-        </svg></div>
-        <div>
-            <h1>CrudX API Documentation</h1>
-            <p>Auto-generated REST APIs • Zero Boilerplate</p>
+<header class="sticky top-0 z-40 border-b custom-header" style="background: var(--bg-secondary); border-color: var(--border-color);">
+    <div class="max-w-7xl mx-auto px-6 py-4">
+        <div class="flex items-center justify-between">
+            <div class="flex items-center gap-6">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center shadow-lg">
+                        <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                        </svg>
+                    </div>
+                    <div>
+                        <h1 class="text-2xl font-bold">CrudX API Documentation</h1>
+                        <p class="text-xs" style="color: var(--text-muted);">
+                            Auto-generated REST APIs • Zero Boilerplate
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-4">
+                <button onclick="goToDashboard()" class="btn-dashboard px-4 py-2 rounded-lg text-sm font-medium">
+                    ← Back to Dashboard
+                </button>
+            </div>
         </div>
     </div>
-    <div>
-        <a href="/crudx/performance/dashboard" class="btn-dashboard">← Back to Dashboard</a>
-    </div>
-</div>
+</header>
 
 <div id="swagger-ui"></div>
 
@@ -863,6 +827,10 @@
                 }
             }
         });
+    }
+
+    function goToDashboard() {
+        window.location.href = '/crudx/performance/dashboard';
     }
 
     // Initialize theme on load

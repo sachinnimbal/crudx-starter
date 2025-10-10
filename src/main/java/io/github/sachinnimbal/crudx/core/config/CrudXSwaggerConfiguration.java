@@ -56,7 +56,7 @@ public class CrudXSwaggerConfiguration {
         return new OpenAPI()
                 .info(new Info()
                         .title("CrudX Framework API")
-                        .description("Auto-generated REST APIs by CrudX Framework - Zero Boilerplate CRUD Operations")
+                        .description("CRUDX | The Next-Gen Multi-Database CRUD Framework for Spring Boot.")
                         .version(version)
                         .contact(new Contact()
                                 .name("CrudX Framework")
@@ -64,7 +64,7 @@ public class CrudXSwaggerConfiguration {
                                 .url("https://github.com/sachinnimbal/crudx-starter"))
                         .license(new License()
                                 .name("Apache 2.0")
-                                .url("https://www.apache.org/licenses/LICENSE-2.0")))
+                                .url("https://github.com/sachinnimbal/crudx-starter/blob/main/LICENSE")))
                 .servers(List.of(
                         new Server()
                                 .url(serverUrl)
