@@ -22,6 +22,7 @@ import io.github.sachinnimbal.crudx.core.metrics.CrudXPerformanceTracker;
 import io.github.sachinnimbal.crudx.core.metrics.PerformanceMetric;
 import io.github.sachinnimbal.crudx.core.metrics.PerformanceSummary;
 import io.github.sachinnimbal.crudx.core.response.ApiResponse;
+import io.swagger.v3.oas.annotations.Hidden;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -88,6 +89,7 @@ public class CrudXPerformanceController {
                 .body(html);
     }
 
+    @Hidden
     @GetMapping("/metadata")
     public ResponseEntity<?> getMetadata() {
         CrudxMetadataProperties.Author author = metadataProperties.getAuthor();
@@ -105,5 +107,33 @@ public class CrudXPerformanceController {
         metadata.put("artifact", project.getArtifact());
         metadata.put("projectVersion", project.getVersion());
         return ResponseEntity.ok(ApiResponse.success(metadata, "Metadata retrieved"));
+    }
+
+    @Hidden
+    @GetMapping(value = "/api-docs", produces = MediaType.TEXT_HTML_VALUE)
+    public ResponseEntity<String> swaggerUI() throws IOException {
+        Resource resource = new ClassPathResource("swagger-ui.html");
+        String html = new String(resource.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+
+        // Replace placeholders
+        html = html.replace("${API_BASE}", properties.getDashboardPath());
+
+        return ResponseEntity.ok()
+                .contentType(MediaType.TEXT_HTML)
+                .body(html);
+    }
+
+    @Hidden
+    @GetMapping(value = "/endpoints", produces = MediaType.TEXT_HTML_VALUE)
+    public ResponseEntity<String> endpointsTable() throws IOException {
+        Resource resource = new ClassPathResource("endpoints.html");
+        String html = new String(resource.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+
+        // Replace placeholder with actual API path if needed
+        html = html.replace("${API_BASE}", properties.getDashboardPath());
+
+        return ResponseEntity.ok()
+                .contentType(MediaType.TEXT_HTML)
+                .body(html);
     }
 }

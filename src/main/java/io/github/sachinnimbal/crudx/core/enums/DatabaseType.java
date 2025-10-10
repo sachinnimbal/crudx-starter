@@ -16,7 +16,6 @@
 
 package io.github.sachinnimbal.crudx.core.enums;
 
-
 /**
  * @author Sachin Nimbal
  * @see <a href="https://www.linkedin.com/in/sachin-nimbal/">LinkedIn Profile</a>

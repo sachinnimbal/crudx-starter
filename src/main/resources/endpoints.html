@@ -1,0 +1,997 @@
+<!--
+
+ * Copyright 2025 Sachin Nimbal
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ 
+-->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CrudX Endpoint Performance</title>
+    <style>
+        :root {
+            --bg-primary: #0a0118;
+            --bg-secondary: #1a0f2e;
+            --bg-tertiary: #2d1b4e;
+            --text-primary: #ffffff;
+            --text-secondary: #e0d4f7;
+            --text-muted: #9d8bb5;
+            --border-color: #3d2963;
+            --accent-primary: #e879f9;
+            --accent-secondary: #a855f7;
+        }
+
+        .light-mode {
+            --bg-primary: #f8fafc;
+            --bg-secondary: #ffffff;
+            --bg-tertiary: #f1f5f9;
+            --text-primary: #0f172a;
+            --text-secondary: #334155;
+            --text-muted: #64748b;
+            --border-color: #e2e8f0;
+            --accent-primary: #8b5cf6;
+            --accent-secondary: #6366f1;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            transition: all 0.3s ease;
+        }
+
+        /* Custom Header */
+        .custom-header {
+            background: var(--bg-secondary);
+            padding: 1rem 2rem;
+            border-bottom: 2px solid var(--accent-primary);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            transition: all 0.3s ease;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .in-iframe .custom-header {
+            display: none;
+        }
+
+        .custom-header .logo {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .custom-header .logo-icon {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, var(--accent-secondary), var(--accent-primary));
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 20px;
+            box-shadow: 0 4px 12px rgba(139, 92, 246, 0.4);
+        }
+
+        .custom-header h1 {
+            margin: 0;
+            color: var(--text-primary);
+            font-size: 24px;
+            font-weight: 700;
+        }
+
+        .custom-header p {
+            margin: 4px 0 0 0;
+            color: var(--text-muted);
+            font-size: 14px;
+        }
+
+        .btn-dashboard {
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: 600;
+            text-decoration: none;
+            background: linear-gradient(135deg, var(--accent-secondary), var(--accent-primary));
+            color: white;
+            transition: all 0.3s ease;
+            font-size: 14px;
+            border: none;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
+        }
+
+        .btn-dashboard:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(139, 92, 246, 0.5);
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        .card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .light-mode .card {
+            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.08);
+        }
+
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+            align-items: center;
+        }
+
+        .search-input, select {
+            padding: 0.75rem 1rem;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            font-size: 14px;
+            transition: all 0.2s ease;
+        }
+
+        .search-input {
+            flex: 1;
+            min-width: 250px;
+        }
+
+        .search-input:focus, select:focus {
+            outline: none;
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1);
+        }
+
+        .badge {
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            border: 1px solid;
+        }
+
+        .table-wrapper {
+            overflow-x: auto;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        thead tr {
+            background: var(--bg-tertiary);
+            border-bottom: 2px solid var(--border-color);
+        }
+
+        th {
+            padding: 1rem;
+            text-align: left;
+            font-size: 0.875rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        tbody tr {
+            border-bottom: 1px solid var(--border-color);
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+
+        tbody tr:hover {
+            background: var(--bg-tertiary);
+            transform: translateX(4px);
+        }
+
+        td {
+            padding: 1rem;
+            color: var(--text-secondary);
+        }
+
+        .details-row {
+            display: none;
+            background: var(--bg-primary);
+        }
+
+        .details-row.open {
+            display: table-row;
+        }
+
+        .details-content {
+            max-height: 0;
+            overflow: hidden;
+            opacity: 0;
+            transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease;
+        }
+
+        .details-row.open .details-content {
+            max-height: 2000px;
+            opacity: 1;
+        }
+
+        .chevron-icon {
+            transition: transform 0.3s ease;
+        }
+
+        .chevron-icon.rotated {
+            transform: rotate(180deg);
+        }
+
+        .metric-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .metric-box {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            padding: 1rem;
+            border-radius: 8px;
+        }
+
+        .metric-label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+
+        .metric-value {
+            font-size: 1rem;
+            color: var(--text-primary);
+            font-weight: 700;
+        }
+
+        .status-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 0.5rem;
+        }
+
+        .pagination-container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 1.5rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .pagination-buttons {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .pagination-btn {
+            min-width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid var(--border-color);
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-weight: 500;
+        }
+
+        .pagination-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            border-color: var(--accent-primary);
+            box-shadow: 0 4px 12px rgba(139, 92, 246, 0.25);
+        }
+
+        .pagination-btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+
+        .pagination-btn.active {
+            background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+            border-color: transparent;
+            color: white;
+        }
+
+        .pagination-info {
+            color: var(--text-muted);
+            font-size: 0.875rem;
+        }
+
+        .pagination-info span {
+            color: var(--text-secondary);
+            font-weight: 600;
+        }
+
+        .nested-pagination {
+            background: var(--bg-tertiary);
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+            margin-top: 1rem;
+            border: 1px solid var(--border-color);
+        }
+
+        .loading {
+            text-align: center;
+            padding: 4rem 2rem;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 48px;
+            height: 48px;
+            border: 4px solid var(--border-color);
+            border-top-color: var(--accent-primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        ::-webkit-scrollbar {
+            width: 12px;
+            height: 12px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg-secondary);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border-color);
+            border-radius: 6px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--accent-primary);
+        }
+    </style>
+</head>
+<body>
+<div class="custom-header">
+    <div class="logo">
+        <div class="logo-icon">
+            <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M13 10V3L4 14h7v7l9-11h-7z"/>
+            </svg>
+        </div>
+        <div>
+            <h1>Endpoint Performance Analytics</h1>
+            <p>Real-time monitoring and metrics</p>
+        </div>
+    </div>
+    <div>
+        <a href="/crudx/performance/dashboard" class="btn-dashboard">← Back to Dashboard</a>
+    </div>
+</div>
+
+<div class="container">
+    <div class="card">
+        <div class="controls">
+            <input type="text" id="searchInput" class="search-input" placeholder="Search endpoints..." onkeyup="filterEndpoints()">
+            <select id="sortSelect" onchange="sortEndpoints()">
+                <option value="calls">Sort by Calls</option>
+                <option value="avgTime">Sort by Avg Time</option>
+                <option value="successRate">Sort by Success Rate</option>
+                <option value="memory">Sort by Memory</option>
+            </select>
+            <select id="itemsPerPageSelect" onchange="changeItemsPerPage()">
+                <option value="10" selected>10 per page</option>
+                <option value="20">20 per page</option>
+                <option value="50">50 per page</option>
+                <option value="100">100 per page</option>
+            </select>
+        </div>
+
+        <div id="loading" class="loading">
+            <div class="spinner"></div>
+            <p style="margin-top: 1rem; color: var(--text-muted);">Loading endpoint data...</p>
+        </div>
+
+        <div id="content" style="display: none;">
+            <div style="margin-bottom: 1rem; color: var(--text-muted); font-size: 0.875rem;">
+                Showing <span id="showingCount" style="font-weight: 600; color: var(--text-secondary);">0</span> of
+                <span id="totalCount" style="font-weight: 600; color: var(--text-secondary);">0</span> endpoints
+            </div>
+
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                    <tr>
+                        <th>Method</th>
+                        <th>Endpoint</th>
+                        <th style="text-align: center;">Calls</th>
+                        <th style="text-align: center;">Avg Time</th>
+                        <th style="text-align: center;">Success Rate</th>
+                        <th style="text-align: center;"></th>
+                    </tr>
+                    </thead>
+                    <tbody id="tableBody"></tbody>
+                </table>
+            </div>
+
+            <div id="pagination" class="pagination-container"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const API_BASE = '/crudx/performance';
+    let allEndpoints = [];
+    let filteredEndpoints = [];
+    let allMetrics = [];
+    let currentPage = 1;
+    let itemsPerPage = 10;
+    let expandedRows = {};
+    let nestedPagination = {};
+
+    function syncTheme() {
+        const isInIframe = window.parent !== window;
+        if (isInIframe) {
+            document.body.classList.add('in-iframe');
+        }
+
+        const savedTheme = localStorage.getItem('theme');
+        if (savedTheme === 'light') {
+            document.body.classList.add('light-mode');
+        }
+
+        if (isInIframe) {
+            window.addEventListener('message', function(event) {
+                if (event.data.type === 'themeChange') {
+                    if (event.data.theme === 'light') {
+                        document.body.classList.add('light-mode');
+                        localStorage.setItem('theme', 'light');
+                    } else {
+                        document.body.classList.remove('light-mode');
+                        localStorage.setItem('theme', 'dark');
+                    }
+                }
+            });
+        }
+         // Watch for storage changes (when theme changes in parent window)
+        window.addEventListener('storage', function(e) {
+            if (e.key === 'theme') {
+                if (e.newValue === 'light') {
+                    document.body.classList.add('light-mode');
+                } else {
+                    document.body.classList.remove('light-mode');
+                }
+            }
+        });
+    }
+
+    function getMethodBadge(method) {
+        const badges = {
+            'GET': 'bg-green-500/20 text-green-400 border-green-500/30',
+            'POST': 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+            'PUT': 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
+            'PATCH': 'bg-purple-500/20 text-purple-400 border-purple-500/30',
+            'DELETE': 'bg-red-500/20 text-red-400 border-red-500/30'
+        };
+        return badges[method] || 'bg-slate-600';
+    }
+
+    function formatMemory(kb) {
+        if (!kb && kb !== 0) return 'N/A';
+        if (kb < 1024) return kb.toFixed(0) + ' KB';
+        return (kb / 1024).toFixed(2) + ' MB';
+    }
+
+    async function loadData() {
+        try {
+            const response = await fetch(`${API_BASE}/dashboard-data`);
+            const result = await response.json();
+
+            if (result.success) {
+                const { summary, metrics } = result.data;
+                allMetrics = metrics;
+                allEndpoints = Object.entries(summary.endpointStats || {}).map(([key, stats]) => ({
+                    key,
+                    ...stats
+                }));
+                filteredEndpoints = [...allEndpoints];
+
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('content').style.display = 'block';
+
+                sortEndpoints();
+            }
+        } catch (error) {
+            document.getElementById('loading').innerHTML = `
+                <p style="color: #ef4444;">Failed to load data: ${error.message}</p>
+            `;
+        }
+    }
+
+    function filterEndpoints() {
+        const search = document.getElementById('searchInput').value.toLowerCase();
+
+        if (search === '') {
+            filteredEndpoints = [...allEndpoints];
+        } else {
+            filteredEndpoints = allEndpoints.filter(stats =>
+                stats.endpoint.toLowerCase().includes(search) ||
+                stats.method.toLowerCase().includes(search) ||
+                (stats.entityName && stats.entityName.toLowerCase().includes(search))
+            );
+        }
+
+        currentPage = 1;
+        sortEndpoints();
+    }
+
+    function sortEndpoints() {
+        const sortBy = document.getElementById('sortSelect').value;
+
+        filteredEndpoints.sort((a, b) => {
+            switch(sortBy) {
+                case 'calls':
+                    return b.totalCalls - a.totalCalls;
+                case 'avgTime':
+                    return b.avgExecutionTimeMs - a.avgExecutionTimeMs;
+                case 'successRate':
+                    const rateA = a.totalCalls > 0 ? ((a.totalCalls - a.failedCalls) / a.totalCalls * 100) : 0;
+                    const rateB = b.totalCalls > 0 ? ((b.totalCalls - b.failedCalls) / b.totalCalls * 100) : 0;
+                    return rateB - rateA;
+                case 'memory':
+                    return (b.avgMemoryKb || 0) - (a.avgMemoryKb || 0);
+                default:
+                    return 0;
+            }
+        });
+
+        updateTable();
+    }
+
+    function changeItemsPerPage() {
+        itemsPerPage = parseInt(document.getElementById('itemsPerPageSelect').value);
+        currentPage = 1;
+        updateTable();
+    }
+
+    function toggleDetails(key) {
+        const detailsRow = document.getElementById(`details-${key}`);
+        const chevron = document.getElementById(`chevron-${key}`);
+
+        document.querySelectorAll('.details-row.open').forEach(row => {
+            if (row.id !== `details-${key}`) {
+                row.classList.remove('open');
+                const otherKey = row.id.replace('details-', '');
+                const otherChevron = document.getElementById(`chevron-${otherKey}`);
+                if (otherChevron) otherChevron.classList.remove('rotated');
+                delete expandedRows[otherKey];
+            }
+        });
+
+        if (detailsRow.classList.contains('open')) {
+            detailsRow.classList.remove('open');
+            chevron.classList.remove('rotated');
+            delete expandedRows[key];
+        } else {
+            detailsRow.classList.add('open');
+            chevron.classList.add('rotated');
+            expandedRows[key] = true;
+            if (!nestedPagination[key]) {
+                nestedPagination[key] = { currentPage: 1, itemsPerPage: 5 };
+            }
+            updateNestedPagination(key);
+        }
+    }
+
+    function updateTable() {
+        const tbody = document.getElementById('tableBody');
+        tbody.innerHTML = '';
+
+        document.getElementById('totalCount').textContent = filteredEndpoints.length;
+
+        if (filteredEndpoints.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 3rem; color: var(--text-muted);">No endpoints found</td></tr>`;
+            document.getElementById('showingCount').textContent = '0';
+            document.getElementById('pagination').innerHTML = '';
+            return;
+        }
+
+        const totalPages = Math.ceil(filteredEndpoints.length / itemsPerPage);
+        const start = (currentPage - 1) * itemsPerPage;
+        const end = Math.min(start + itemsPerPage, filteredEndpoints.length);
+        const pageStats = filteredEndpoints.slice(start, end);
+
+        document.getElementById('showingCount').textContent = pageStats.length;
+
+        pageStats.forEach((stats) => {
+            const successRate = stats.totalCalls > 0 ?
+                ((stats.totalCalls - stats.failedCalls) / stats.totalCalls * 100).toFixed(1) : 0;
+            const safeKey = stats.key.replace(/[^a-zA-Z0-9]/g, '_');
+
+            const row = document.createElement('tr');
+            row.onclick = () => toggleDetails(safeKey);
+            row.innerHTML = `
+                <td>
+                    <span class="badge ${getMethodBadge(stats.method)}" style="
+                        ${stats.method === 'GET' ? 'background: #10b981; background: rgba(16, 185, 129, 0.2); color: #10b981; border-color: rgba(16, 185, 129, 0.3);' : ''}
+                        ${stats.method === 'POST' ? 'background: rgba(59, 130, 246, 0.2); color: #3b82f6; border-color: rgba(59, 130, 246, 0.3);' : ''}
+                        ${stats.method === 'PUT' ? 'background: rgba(245, 158, 11, 0.2); color: #f59e0b; border-color: rgba(245, 158, 11, 0.3);' : ''}
+                        ${stats.method === 'PATCH' ? 'background: rgba(168, 85, 247, 0.2); color: #a855f7; border-color: rgba(168, 85, 247, 0.3);' : ''}
+                        ${stats.method === 'DELETE' ? 'background: rgba(239, 68, 68, 0.2); color: #ef4444; border-color: rgba(239, 68, 68, 0.3);' : ''}
+                    ">
+                        ${stats.method}
+                    </span>
+                </td>
+                <td>
+                    <div style="font-weight: 500; color: var(--text-primary);">${stats.endpoint}</div>
+                    ${stats.entityName ? `<div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">${stats.entityName}</div>` : ''}
+                </td>
+                <td style="text-align: center;">
+                    <span style="font-weight: 600; color: var(--text-primary);">${stats.totalCalls}</span>
+                </td>
+                <td style="text-align: center;">
+                    <span class="badge" style="
+                        ${stats.avgExecutionTimeMs < 50 ? 'background: rgba(16, 185, 129, 0.2); color: #10b981;' : ''}
+                        ${stats.avgExecutionTimeMs >= 50 && stats.avgExecutionTimeMs < 200 ? 'background: rgba(245, 158, 11, 0.2); color: #f59e0b;' : ''}
+                        ${stats.avgExecutionTimeMs >= 200 ? 'background: rgba(239, 68, 68, 0.2); color: #ef4444;' : ''}
+                    ">
+                        ${stats.avgExecutionTimeMs.toFixed(0)}ms
+                    </span>
+                </td>
+                <td style="text-align: center;">
+                    <span style="font-weight: 700; ${successRate >= 95 ? 'color: #10b981;' : successRate >= 80 ? 'color: #f59e0b;' : 'color: #ef4444;'}">
+                        ${successRate}%
+                    </span>
+                </td>
+                <td style="text-align: center;">
+                    <svg id="chevron-${safeKey}" class="chevron-icon" style="width: 20px; height: 20px; color: var(--text-muted); display: inline-block;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                    </svg>
+                </td>
+            `;
+            tbody.appendChild(row);
+
+            const detailsRow = document.createElement('tr');
+            detailsRow.id = `details-${safeKey}`;
+            detailsRow.className = `details-row ${expandedRows[safeKey] ? 'open' : ''}`;
+            detailsRow.innerHTML = `
+                <td colspan="6" style="padding: 0;">
+                    <div class="details-content" style="padding: 1.5rem; border-top: 1px solid var(--border-color);">
+                        <div class="metric-grid">
+                            <div class="metric-box">
+                                <div class="metric-label">Avg Response</div>
+                                <div class="metric-value">${stats.avgExecutionTimeMs.toFixed(0)}ms</div>
+                            </div>
+                            <div class="metric-box">
+                                <div class="metric-label">Min Response</div>
+                                <div class="metric-value" style="color: #10b981;">${stats.minExecutionTimeMs || 0}ms</div>
+                            </div>
+                            <div class="metric-box">
+                                <div class="metric-label">Max Response</div>
+                                <div class="metric-value" style="color: #ef4444;">${stats.maxExecutionTimeMs}ms</div>
+                            </div>
+                            <div class="metric-box">
+                                <div class="metric-label">Avg Memory</div>
+                                <div class="metric-value">${formatMemory(stats.avgMemoryKb)}</div>
+                            </div>
+                            <div class="metric-box">
+                                <div class="metric-label">Total Calls</div>
+                                <div class="metric-value">${stats.totalCalls}</div>
+                            </div>
+                            <div class="metric-box">
+                                <div class="metric-label">Failed Calls</div>
+                                <div class="metric-value" style="color: #ef4444;">${stats.failedCalls}</div>
+                            </div>
+                        </div>
+                        <div style="margin-top: 1rem;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+                                <div style="font-weight: 700; font-size: 0.875rem; color: var(--text-primary);">RECENT REQUESTS</div>
+                                <select id="nestedItemsPerPage-${safeKey}" onchange="changeNestedItemsPerPage('${safeKey}')" style="padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-tertiary); color: var(--text-primary); font-size: 0.75rem;">
+                                    <option value="5">5 per page</option>
+                                    <option value="10">10 per page</option>
+                                    <option value="20">20 per page</option>
+                                </select>
+                            </div>
+                            <div id="recentRequests-${safeKey}"></div>
+                            <div id="nestedPagination-${safeKey}"></div>
+                        </div>
+                    </div>
+                </td>
+            `;
+            tbody.appendChild(detailsRow);
+
+            if (expandedRows[safeKey]) {
+                setTimeout(() => {
+                    const chevronEl = document.getElementById(`chevron-${safeKey}`);
+                    if (chevronEl) chevronEl.classList.add('rotated');
+                    updateNestedPagination(safeKey);
+                }, 10);
+            }
+        });
+
+        renderPagination(totalPages);
+    }
+
+    function changeNestedItemsPerPage(key) {
+        const select = document.getElementById(`nestedItemsPerPage-${key}`);
+        nestedPagination[key].itemsPerPage = parseInt(select.value);
+        nestedPagination[key].currentPage = 1;
+        updateNestedPagination(key);
+    }
+
+    function updateNestedPagination(key) {
+        const stats = filteredEndpoints.find(s => s.key.replace(/[^a-zA-Z0-9]/g, '_') === key);
+        if (!stats) return;
+
+        const filtered = allMetrics
+            .filter(m => m.endpoint === stats.endpoint && m.method === stats.method)
+            .reverse();
+
+        if (!nestedPagination[key]) {
+            nestedPagination[key] = { currentPage: 1, itemsPerPage: 5 };
+        }
+
+        const { currentPage: page, itemsPerPage: perPage } = nestedPagination[key];
+        const totalItems = filtered.length;
+        const totalPages = Math.ceil(totalItems / perPage);
+        const start = (page - 1) * perPage;
+        const end = Math.min(start + perPage, totalItems);
+        const pageItems = filtered.slice(start, end);
+
+        const container = document.getElementById(`recentRequests-${key}`);
+        if (!container) return;
+
+        if (pageItems.length === 0) {
+            container.innerHTML = '<p style="color: var(--text-muted); font-size: 0.875rem;">No recent requests</p>';
+            document.getElementById(`nestedPagination-${key}`).innerHTML = '';
+            return;
+        }
+
+        container.innerHTML = pageItems.map(m => `
+            <div style="display: flex; align-items: center; justify-content: space-between; padding: 0.75rem; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-tertiary); margin-bottom: 0.5rem; font-size: 0.875rem;">
+                <div style="display: flex; align-items: center; gap: 0.75rem; flex: 1;">
+                    <span class="status-indicator" style="${m.success ? 'background: #10b981;' : 'background: #ef4444;'}"></span>
+                    <span style="color: var(--text-secondary);">${new Date(m.timestamp).toLocaleString()}</span>
+                    <span class="badge" style="
+                        ${m.executionTimeMs < 50 ? 'background: rgba(16, 185, 129, 0.2); color: #10b981; border-color: rgba(16, 185, 129, 0.3);' : ''}
+                        ${m.executionTimeMs >= 50 && m.executionTimeMs < 200 ? 'background: rgba(245, 158, 11, 0.2); color: #f59e0b; border-color: rgba(245, 158, 11, 0.3);' : ''}
+                        ${m.executionTimeMs >= 200 ? 'background: rgba(239, 68, 68, 0.2); color: #ef4444; border-color: rgba(239, 68, 68, 0.3);' : ''}
+                    ">${m.executionTimeMs}ms</span>
+                    ${m.memoryUsedKb ? `<span style="color: var(--text-muted);">${formatMemory(m.memoryUsedKb)}</span>` : ''}
+                </div>
+                ${m.errorType ? `<span style="color: #ef4444; font-size: 0.75rem; margin-left: 0.5rem;">${m.errorType}</span>` : ''}
+            </div>
+        `).join('');
+
+        renderNestedPagination(key, totalPages, totalItems);
+    }
+
+    function renderNestedPagination(key, totalPages, totalItems) {
+        const paginationDiv = document.getElementById(`nestedPagination-${key}`);
+        if (!paginationDiv) return;
+
+        if (totalPages <= 1) {
+            paginationDiv.innerHTML = '';
+            return;
+        }
+
+        const { currentPage } = nestedPagination[key];
+        const start = (currentPage - 1) * nestedPagination[key].itemsPerPage + 1;
+        const end = Math.min(currentPage * nestedPagination[key].itemsPerPage, totalItems);
+
+        let html = `
+            <div class="nested-pagination">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div style="font-size: 0.75rem; color: var(--text-muted);">
+                        Showing <span style="font-weight: 600; color: var(--text-secondary);">${start}-${end}</span> of <span style="font-weight: 600; color: var(--text-secondary);">${totalItems}</span>
+                    </div>
+                    <div style="display: flex; gap: 0.25rem;">
+                        <button onclick="changeNestedPage('${key}', 1)" ${currentPage === 1 ? 'disabled' : ''}
+                                class="pagination-btn" style="width: 32px; height: 32px; font-size: 0.75rem;">
+                            <svg style="width: 12px; height: 12px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+                            </svg>
+                        </button>
+                        <button onclick="changeNestedPage('${key}', ${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''}
+                                class="pagination-btn" style="width: 32px; height: 32px; font-size: 0.75rem;">
+                            <svg style="width: 12px; height: 12px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+                            </svg>
+                        </button>
+        `;
+
+        const maxButtons = 3;
+        let startPage = Math.max(1, currentPage - Math.floor(maxButtons / 2));
+        let endPage = Math.min(totalPages, startPage + maxButtons - 1);
+
+        if (endPage - startPage < maxButtons - 1) {
+            startPage = Math.max(1, endPage - maxButtons + 1);
+        }
+
+        for (let i = startPage; i <= endPage; i++) {
+            html += `
+                <button onclick="changeNestedPage('${key}', ${i})"
+                        class="pagination-btn ${currentPage === i ? 'active' : ''}"
+                        style="width: 32px; height: 32px; font-size: 0.75rem;">
+                    ${i}
+                </button>
+            `;
+        }
+
+        html += `
+                        <button onclick="changeNestedPage('${key}', ${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''}
+                                class="pagination-btn" style="width: 32px; height: 32px; font-size: 0.75rem;">
+                            <svg style="width: 12px; height: 12px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                            </svg>
+                        </button>
+                        <button onclick="changeNestedPage('${key}', ${totalPages})" ${currentPage === totalPages ? 'disabled' : ''}
+                                class="pagination-btn" style="width: 32px; height: 32px; font-size: 0.75rem;">
+                            <svg style="width: 12px; height: 12px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        paginationDiv.innerHTML = html;
+    }
+
+    function changeNestedPage(key, page) {
+        const stats = filteredEndpoints.find(s => s.key.replace(/[^a-zA-Z0-9]/g, '_') === key);
+        if (!stats) return;
+
+        const filtered = allMetrics.filter(m => m.endpoint === stats.endpoint && m.method === stats.method);
+        const totalPages = Math.ceil(filtered.length / nestedPagination[key].itemsPerPage);
+
+        if (page < 1 || page > totalPages) return;
+
+        nestedPagination[key].currentPage = page;
+        updateNestedPagination(key);
+    }
+
+    function renderPagination(totalPages) {
+        const paginationDiv = document.getElementById('pagination');
+
+        if (totalPages <= 1) {
+            paginationDiv.innerHTML = '';
+            return;
+        }
+
+        const start = (currentPage - 1) * itemsPerPage + 1;
+        const end = Math.min(currentPage * itemsPerPage, filteredEndpoints.length);
+
+        let html = `
+            <div class="pagination-info">
+                Showing <span>${start}-${end}</span> of <span>${filteredEndpoints.length}</span>
+            </div>
+            <div class="pagination-buttons">
+                <button onclick="changePage(1)" ${currentPage === 1 ? 'disabled' : ''} class="pagination-btn" title="First page">
+                    <svg style="width: 16px; height: 16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+                    </svg>
+                </button>
+                <button onclick="changePage(${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''} class="pagination-btn">
+                    <svg style="width: 16px; height: 16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+                    </svg>
+                </button>
+        `;
+
+        const maxButtons = 5;
+        let startPage = Math.max(1, currentPage - Math.floor(maxButtons / 2));
+        let endPage = Math.min(totalPages, startPage + maxButtons - 1);
+
+        if (endPage - startPage < maxButtons - 1) {
+            startPage = Math.max(1, endPage - maxButtons + 1);
+        }
+
+        if (startPage > 1) {
+            html += `<span style="padding: 0 0.5rem; color: var(--text-muted);">...</span>`;
+        }
+
+        for (let i = startPage; i <= endPage; i++) {
+            html += `
+                <button onclick="changePage(${i})" class="pagination-btn ${currentPage === i ? 'active' : ''}">
+                    ${i}
+                </button>
+            `;
+        }
+
+        if (endPage < totalPages) {
+            html += `<span style="padding: 0 0.5rem; color: var(--text-muted);">...</span>`;
+        }
+
+        html += `
+                <button onclick="changePage(${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''} class="pagination-btn">
+                    <svg style="width: 16px; height: 16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                    </svg>
+                </button>
+                <button onclick="changePage(${totalPages})" ${currentPage === totalPages ? 'disabled' : ''} class="pagination-btn" title="Last page">
+                    <svg style="width: 16px; height: 16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+                    </svg>
+                </button>
+            </div>
+        `;
+
+        paginationDiv.innerHTML = html;
+    }
+
+    function changePage(page) {
+        const totalPages = Math.ceil(filteredEndpoints.length / itemsPerPage);
+        if (page < 1 || page > totalPages) return;
+        currentPage = page;
+        expandedRows = {};
+        updateTable();
+    }
+
+    // Initialize with auto-sync
+    window.addEventListener('DOMContentLoaded', function() {
+        syncTheme();
+        loadData();
+
+        // Auto-refresh every 5 seconds to stay synced with dashboard
+        setInterval(() => {
+            if (!document.hidden) { // Only refresh when tab is visible
+                loadData();
+            }
+        }, 5000);
+
+        // Immediate refresh when tab becomes visible
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) {
+                loadData();
+            }
+        });
+    });
+</script>
+</body>
+</html>

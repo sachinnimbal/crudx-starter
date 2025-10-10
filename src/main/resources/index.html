@@ -1033,11 +1033,22 @@ public class EmployeeController extends CrudXController&lt;Employee, Long&gt; { 
                     <select id="itemsPerPageSelect" onchange="changeItemsPerPage()"
                             class="px-4 py-2 border rounded-lg text-sm transition-all"
                             style="background: var(--bg-tertiary); border-color: var(--border-color); color: var(--text-primary);">
+                        <option value="5" selected>5 per page</option>
                         <option value="10">10 per page</option>
-                        <option value="20" selected>20 per page</option>
+                        <option value="20">20 per page</option>
                         <option value="50">50 per page</option>
                         <option value="100">100 per page</option>
                     </select>
+                    <button onclick="openTableNewTab()"
+                            class="flex items-center gap-2 px-4 py-2 rounded-lg font-semibold transition-all text-white"
+                            style="background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));"
+                            title="Open in new tab">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+                        </svg>
+                        <span>Open</span>
+                    </button>
                 </div>
             </div>
 
@@ -1074,6 +1085,58 @@ public class EmployeeController extends CrudXController&lt;Employee, Long&gt; { 
             </div>
 
             <div id="pagination" class="pagination-container"></div>
+        </div>
+
+        <!-- API Documentation Explorer -->
+        <div class="card rounded-2xl shadow-xl overflow-hidden">
+            <div class="p-6 border-b" style="border-color: var(--border-color);">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-4">
+                        <div class="p-3 bg-indigo-500/20 rounded-xl">
+                            <svg class="w-8 h-8 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                      d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                            </svg>
+                        </div>
+                        <div>
+                            <h3 class="text-xl font-bold" style="color: var(--text-primary);">
+                                📖 API Documentation Explorer
+                            </h3>
+                            <p class="text-sm" style="color: var(--text-muted);">
+                                Interactive Swagger UI - Test your auto-generated APIs live
+                            </p>
+                        </div>
+                    </div>
+                    <button onclick="openSwaggerNewTab()"
+                            class="flex items-center gap-2 px-4 py-2 rounded-lg font-semibold transition-all text-white"
+                            style="background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));"
+                            title="Open in new tab">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+                        </svg>
+                        <span>Open in New Tab</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Embedded Swagger UI -->
+            <div class="swagger-container" style="background: var(--bg-primary);">
+                <iframe
+                        id="swaggerFrame"
+                        src="${API_BASE}/api-docs"
+                        style="width: 100%; height: 800px; border: none; display: block;"
+                        title="Swagger UI">
+                </iframe>
+            </div>
+
+            <!-- Loading State -->
+            <div id="swaggerLoading" class="flex items-center justify-center p-12" style="display: none;">
+                <div class="text-center">
+                    <div class="inline-block w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+                    <p style="color: var(--text-muted);">Loading API Documentation...</p>
+                </div>
+            </div>
         </div>
     </div>
 </main>
@@ -1147,6 +1210,15 @@ public class EmployeeController extends CrudXController&lt;Employee, Long&gt; { 
         const theme = document.body.classList.contains('light-mode') ? 'light' : 'dark';
         localStorage.setItem('theme', theme);
         updateChartsTheme();
+
+        // Notify Swagger iframe about theme change
+        const swaggerFrame = document.getElementById('swaggerFrame');
+        if (swaggerFrame && swaggerFrame.contentWindow) {
+            swaggerFrame.contentWindow.postMessage({
+                type: 'themeChange',
+                theme: theme
+            }, '*');
+        }
     }
 
     function loadTheme() {
@@ -1876,6 +1948,14 @@ public class EmployeeController extends CrudXController&lt;Employee, Long&gt; { 
         document.getElementById('errorText').textContent = message;
         document.getElementById('error').classList.remove('hidden');
         document.getElementById('loading').classList.add('hidden');
+    }
+
+    function openSwaggerNewTab() {
+        window.open(API_BASE + '/api-docs', '_blank');
+    }
+
+    function openTableNewTab() {
+        window.open(API_BASE + '/endpoints', '_blank');
     }
 
     // Initialize
