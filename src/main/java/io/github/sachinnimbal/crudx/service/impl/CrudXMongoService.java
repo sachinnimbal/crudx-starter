@@ -16,6 +16,7 @@
 
 package io.github.sachinnimbal.crudx.service.impl;
 
+import io.github.sachinnimbal.crudx.core.annotations.CrudXImmutable;
 import io.github.sachinnimbal.crudx.core.annotations.CrudXUniqueConstraint;
 import io.github.sachinnimbal.crudx.core.exception.DuplicateEntityException;
 import io.github.sachinnimbal.crudx.core.exception.EntityNotFoundException;
@@ -23,6 +24,8 @@ import io.github.sachinnimbal.crudx.core.model.CrudXMongoEntity;
 import io.github.sachinnimbal.crudx.core.response.BatchResult;
 import io.github.sachinnimbal.crudx.service.CrudXService;
 import jakarta.annotation.PostConstruct;
+import jakarta.validation.ConstraintViolation;
+import jakarta.validation.Validator;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.GenericTypeResolver;
@@ -39,9 +42,8 @@ import java.io.Serializable;
 import java.lang.reflect.Field;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * @author Sachin Nimbal
@@ -53,6 +55,9 @@ public abstract class CrudXMongoService<T extends CrudXMongoEntity<ID>, ID exten
 
     @Autowired
     protected MongoTemplate mongoTemplate;
+
+    @Autowired(required = false)
+    protected Validator validator;
 
     protected Class<T> entityClass;
 
@@ -285,7 +290,7 @@ public abstract class CrudXMongoService<T extends CrudXMongoEntity<ID>, ID exten
         log.debug("Updating MongoDB entity with ID: {}", id);
 
         T existingEntity = findById(id);
-
+        autoValidateUpdates(updates, existingEntity);
         Query query = new Query(Criteria.where("_id").is(id));
         Update update = new Update();
 
@@ -446,5 +451,85 @@ public abstract class CrudXMongoService<T extends CrudXMongoEntity<ID>, ID exten
 
     private String getEntityClassName() {
         return entityClass != null ? entityClass.getSimpleName() : "Unknown";
+    }
+
+    /**
+     * AUTO-VALIDATES using annotations - ZERO BOILERPLATE
+     */
+    private void autoValidateUpdates(Map<String, Object> updates, T entity) {
+        // 1. Smart default: Always protect these fields
+        List<String> autoProtectedFields = List.of(
+                "_id", "id",
+                "createdAt", "created_at",
+                "createdBy", "created_by"
+        );
+
+        for (String protectedField : autoProtectedFields) {
+            if (updates.containsKey(protectedField)) {
+                throw new IllegalArgumentException(
+                        "Cannot update protected field: " + protectedField
+                );
+            }
+        }
+
+        // 2. Check immutable fields and field existence
+        for (String fieldName : updates.keySet()) {
+            try {
+                Field field = getFieldFromClass(entityClass, fieldName);
+
+                if (field.isAnnotationPresent(CrudXImmutable.class)) {
+                    CrudXImmutable annotation = field.getAnnotation(CrudXImmutable.class);
+                    throw new IllegalArgumentException(
+                            String.format("Field '%s' is immutable: %s", fieldName, annotation.message())
+                    );
+                }
+
+            } catch (NoSuchFieldException e) {
+                throw new IllegalArgumentException("Field '" + fieldName + "' does not exist");
+            }
+        }
+
+        // 3. Apply updates temporarily
+        Map<String, Object> oldValues = new HashMap<>();
+        try {
+            for (Map.Entry<String, Object> entry : updates.entrySet()) {
+                Field field = null;
+                try {
+                    field = getFieldFromClass(entityClass, entry.getKey());
+                } catch (NoSuchFieldException e) {
+                    throw new RuntimeException(e);
+                }
+                field.setAccessible(true);
+                oldValues.put(entry.getKey(), field.get(entity));
+                field.set(entity, entry.getValue());
+            }
+
+            // 4. Validate using Bean Validation
+            if (validator != null) {
+                Set<ConstraintViolation<T>> violations = validator.validate(entity);
+                if (!violations.isEmpty()) {
+                    String errors = violations.stream()
+                            .map(v -> v.getPropertyPath() + ": " + v.getMessage())
+                            .collect(Collectors.joining(", "));
+                    throw new IllegalArgumentException("Validation failed: " + errors);
+                }
+            }
+
+        } catch (IllegalAccessException e) {
+            throw new RuntimeException(e);
+        } finally {
+            // Rollback temporary changes
+            oldValues.forEach((fieldName, oldValue) -> {
+                try {
+                    Field field = getFieldFromClass(entityClass, fieldName);
+                    field.setAccessible(true);
+                    field.set(entity, oldValue);
+                } catch (Exception e) {
+                    log.debug("Error rolling back", e);
+                }
+            });
+        }
+        // 5. Check unique constraints
+        validateUniqueConstraints(entity);
     }
 }
