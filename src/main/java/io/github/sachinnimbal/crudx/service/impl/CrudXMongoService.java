@@ -454,7 +454,7 @@ public abstract class CrudXMongoService<T extends CrudXMongoEntity<ID>, ID exten
     }
 
     /**
-     * AUTO-VALIDATES using annotations - ZERO BOILERPLATE
+     * AUTO-VALIDATES using annotations
      */
     private void autoValidateUpdates(Map<String, Object> updates, T entity) {
         // 1. Smart default: Always protect these fields
