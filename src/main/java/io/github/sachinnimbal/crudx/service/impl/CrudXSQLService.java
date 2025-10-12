@@ -16,6 +16,7 @@
 
 package io.github.sachinnimbal.crudx.service.impl;
 
+import io.github.sachinnimbal.crudx.core.annotations.CrudXImmutable;
 import io.github.sachinnimbal.crudx.core.annotations.CrudXUniqueConstraint;
 import io.github.sachinnimbal.crudx.core.exception.DuplicateEntityException;
 import io.github.sachinnimbal.crudx.core.exception.EntityNotFoundException;
@@ -26,6 +27,8 @@ import jakarta.annotation.PostConstruct;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.TypedQuery;
 import jakarta.persistence.criteria.*;
+import jakarta.validation.ConstraintViolation;
+import jakarta.validation.Validator;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.GenericTypeResolver;
@@ -39,9 +42,8 @@ import java.io.Serializable;
 import java.lang.reflect.Field;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * @author Sachin Nimbal
@@ -54,6 +56,9 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
 
     @Autowired(required = false)
     protected EntityManager entityManager;
+
+    @Autowired(required = false)
+    protected Validator validator;
 
     protected Class<T> entityClass;
 
@@ -338,7 +343,7 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
         long startTime = System.currentTimeMillis();
         log.debug("Updating SQL entity with ID: {}", id);
         T entity = findById(id);
-
+        autoValidateUpdates(updates, entity);
         updates.forEach((key, value) -> {
             if (!"id".equals(key)) {
                 try {
@@ -530,5 +535,86 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
 
     private String getEntityClassName() {
         return entityClass != null ? entityClass.getSimpleName() : "Unknown";
+    }
+
+    /**
+     * AUTO-VALIDATES using annotations
+     */
+    private void autoValidateUpdates(Map<String, Object> updates, T entity) {
+        // 1. Smart default: Always protect these fields (zero config needed)
+        List<String> autoProtectedFields = List.of(
+                "id",
+                "createdAt", "created_at",
+                "createdBy", "created_by"
+        );
+
+        for (String protectedField : autoProtectedFields) {
+            if (updates.containsKey(protectedField)) {
+                throw new IllegalArgumentException(
+                        "Cannot update protected field: " + protectedField
+                );
+            }
+        }
+
+        // 2. Check for immutable fields and field existence
+        for (String fieldName : updates.keySet()) {
+            try {
+                Field field = getFieldFromClass(entityClass, fieldName);
+
+                // Auto-check @CrudXImmutable
+                if (field.isAnnotationPresent(CrudXImmutable.class)) {
+                    CrudXImmutable annotation = field.getAnnotation(CrudXImmutable.class);
+                    throw new IllegalArgumentException(
+                            String.format("Field '%s' is immutable: %s", fieldName, annotation.message())
+                    );
+                }
+
+            } catch (NoSuchFieldException e) {
+                throw new IllegalArgumentException("Field '" + fieldName + "' does not exist");
+            }
+        }
+
+        // 3. Apply updates temporarily for validation
+        Map<String, Object> oldValues = new HashMap<>();
+        try {
+            for (Map.Entry<String, Object> entry : updates.entrySet()) {
+                Field field = null;
+                try {
+                    field = getFieldFromClass(entityClass, entry.getKey());
+                } catch (NoSuchFieldException e) {
+                    throw new RuntimeException(e);
+                }
+                field.setAccessible(true);
+                oldValues.put(entry.getKey(), field.get(entity));
+                field.set(entity, entry.getValue());
+            }
+
+            // 4. Auto-validate using Jakarta Bean Validation (@Email, @Size, etc.)
+            if (validator != null) {
+                Set<ConstraintViolation<T>> violations = validator.validate(entity);
+                if (!violations.isEmpty()) {
+                    String errors = violations.stream()
+                            .map(v -> v.getPropertyPath() + ": " + v.getMessage())
+                            .collect(Collectors.joining(", "));
+                    throw new IllegalArgumentException("Validation failed: " + errors);
+                }
+            }
+
+        } catch (IllegalAccessException e) {
+            throw new RuntimeException(e);
+        } finally {
+            // Always rollback temporary changes
+            oldValues.forEach((fieldName, oldValue) -> {
+                try {
+                    Field field = getFieldFromClass(entityClass, fieldName);
+                    field.setAccessible(true);
+                    field.set(entity, oldValue);
+                } catch (Exception e) {
+                    log.debug("Error rolling back", e);
+                }
+            });
+        }
+        // 5. Auto-check unique constraints
+        validateUniqueConstraints(entity);
     }
 }
