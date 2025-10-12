@@ -87,14 +87,14 @@ public class EmployeeController extends CrudXController<Employee, Long> { }
 
 ---
 
-## 📦 Installation
+## 📦 Installation (Upgrading from v1.0.0)
 
 ### Maven
 ```xml
 <dependency>
     <groupId>io.github.sachinnimbal</groupId>
     <artifactId>crudx-starter</artifactId>
-    <version>1.0.0</version>
+    <version>1.0.1</version> <!-- Update version -->
 </dependency>
 
 <!-- Add your database driver -->
@@ -108,7 +108,7 @@ public class EmployeeController extends CrudXController<Employee, Long> { }
 
 ### Gradle
 ```gradle
-implementation 'io.github.sachinnimbal:crudx-starter:1.0.0'
+implementation 'io.github.sachinnimbal:crudx-starter:1.0.1'
 
 // Add your database driver
 runtimeOnly 'com.mysql:mysql-connector-j:8.3.0'
@@ -506,6 +506,33 @@ crudx:
 - **[Help Guide](HELP.md)** - Common issues and solutions
 - **[Examples](https://github.com/sachinnimbal/crudx-examples)** - Sample projects
 - **[Wiki](https://github.com/sachinnimbal/crudx-examples/wiki)** - Detailed guides
+
+---
+
+## 📝 What's Next?
+
+### Coming in v1.1.0:
+- 🎯 **DTO Support** - Automatic Entity ↔ DTO mapping with complex nested objects
+- 🗄️ **Oracle Database Support** - Enterprise-grade database with sequence support
+- 🗄️ **SQL Server Support** - Microsoft SQL Server integration
+- 🗄️ **MariaDB Support** - MySQL-compatible high-performance database
+- 🧪 **Comprehensive Test Utilities** - Built-in testing helpers for unit & integration tests
+- 🔍 **Query Builder API** - Type-safe dynamic query construction
+
+### Coming in v1.2.0:
+- 🔐 **Built-in Authentication & Authorization** - JWT, OAuth2, Role-based access control
+- 📊 **Data Export** - CSV, Excel, PDF generation for reports
+- 🔍 **Advanced Search & Filtering** - Complex queries with multiple criteria
+- 🌐 **GraphQL Support** - Optional GraphQL API alongside REST
+- 📈 **Advanced Analytics** - Query statistics, slow query detection
+
+### Future Roadmap:
+- 🔄 **Event Sourcing Support** - Audit trails with event replay capability
+- 🚀 **Caching Layer** - Redis/Hazelcast integration for high-performance caching
+- 📱 **WebSocket Support** - Real-time data push capabilities
+- 🌍 **Multi-tenancy** - Built-in support for multi-tenant applications
+
+**Stay tuned for exciting updates!**
 
 ---
 
