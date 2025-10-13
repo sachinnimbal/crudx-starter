@@ -1,4 +1,4 @@
-CRUDX Framework
+CrudX Framework
 Copyright 2025 Sachin Nimbal
 
 This product includes software developed by
@@ -16,20 +16,37 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 
----
-
-### Third-Party Acknowledgements
+-------------------------------------------------------------
 
 This product includes or depends upon the following open-source software:
 
-- **Spring Boot Framework** — © VMware, Inc. (Apache License 2.0)  
-- **Spring Framework** — © VMware, Inc. (Apache License 2.0)  
-- **Spring Data JPA / MongoDB** — © VMware, Inc. (Apache License 2.0)  
-- **Project Lombok** — © The Project Lombok Authors (MIT License)  
-- **Jackson (FasterXML)** — © FasterXML, LLC (Apache License 2.0)  
-- **SLF4J** — © QOS.ch (MIT License)  
-- **Thymeleaf** — © The Thymeleaf Team (Apache License 2.0)  
-- **Testcontainers** — © Testcontainers.org (MIT License)  
-- **Jakarta Persistence API** — © Eclipse Foundation (EPL 2.0)
+Spring Boot Framework
+  © VMware, Inc. — Licensed under the Apache License 2.0
 
-All trademarks are property of their respective owners.
+Spring Framework
+  © VMware, Inc. — Licensed under the Apache License 2.0
+
+Spring Data JPA / MongoDB
+  © VMware, Inc. — Licensed under the Apache License 2.0
+
+Project Lombok
+  © The Project Lombok Authors — Licensed under the MIT License
+
+Jackson (FasterXML)
+  © FasterXML, LLC — Licensed under the Apache License 2.0
+
+SLF4J
+  © QOS.ch — Licensed under the MIT License
+
+Thymeleaf
+  © The Thymeleaf Team — Licensed under the Apache License 2.0
+
+Testcontainers
+  © Testcontainers.org — Licensed under the MIT License
+
+Jakarta Persistence API
+  © Eclipse Foundation — Licensed under the Eclipse Public License 2.0
+
+-------------------------------------------------------------
+
+All trademarks are the property of their respective owners.
