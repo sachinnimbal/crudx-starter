@@ -45,6 +45,7 @@ import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import static io.github.sachinnimbal.crudx.core.enums.DatabaseType.*;
 
@@ -85,6 +86,13 @@ import static io.github.sachinnimbal.crudx.core.enums.DatabaseType.*;
  *             throw new IllegalStateException("Cannot delete product with active orders");
  *         }
  *     }
+ *
+ *     {@literal @}Override
+ *     protected void afterDelete(Long id, Product deletedProduct) {
+ *         // Clean up related data after deletion
+ *         cacheService.invalidateProduct(id);
+ *         searchService.removeFromIndex(id);
+ *     }
  * }
  *
  * // Example 3: Controller with custom endpoints
@@ -121,6 +129,9 @@ import static io.github.sachinnimbal.crudx.core.enums.DatabaseType.*;
  *   <li>{@code afterDelete(ID id, T deleted)} - Called after deletion</li>
  *   <li>{@code beforeDeleteBatch(List<ID> ids)} - Called before batch deletion</li>
  *   <li>{@code afterDeleteBatch(List<ID> ids)} - Called after batch deletion</li>
+ *   <li>{@code afterFindById(T entity)} - Called after finding by ID</li>
+ *   <li>{@code afterFindAll(List<T> entities)} - Called after finding all</li>
+ *   <li>{@code afterFindPaged(PageResponse<T> pageResponse)} - Called after paged find</li>
  * </ul>
  *
  * <p><b>Auto-generated Endpoints:</b></p>
@@ -133,11 +144,12 @@ import static io.github.sachinnimbal.crudx.core.enums.DatabaseType.*;
  *   <li>PATCH /{id} - Update entity</li>
  *   <li>DELETE /{id} - Delete entity</li>
  *   <li>DELETE /batch - Delete multiple entities</li>
+ *   <li>DELETE /batch/force - Force delete without existence check</li>
  *   <li>GET /count - Count all entities</li>
  *   <li>GET /exists/{id} - Check if entity exists</li>
  * </ul>
  *
- * @param <T> the entity type
+ * @param <T>  the entity type
  * @param <ID> the ID type
  * @author Sachin Nimbal
  */
@@ -235,7 +247,9 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                 throw new IllegalArgumentException("Entity cannot be null");
             }
 
+            beforeCreate(entity);
             T created = crudService.create(entity);
+            afterCreate(created);
 
             long executionTime = System.currentTimeMillis() - startTime;
 
@@ -268,7 +282,8 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                 throw new IllegalArgumentException("Entity list cannot be null or empty");
             }
 
-            // Maximum limit - 100,000 records (1 Lakh)
+            beforeCreateBatch(entities);
+
             final int MAX_BATCH_SIZE = 100000;
             if (entities.size() > MAX_BATCH_SIZE) {
                 throw new IllegalArgumentException(
@@ -288,7 +303,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                         entities.size(), OPTIMAL_CHUNK_SIZE);
 
                 BatchResult<T> combinedResult = new BatchResult<>();
-                List<T> allCreated = new ArrayList<>((int)(entities.size() * 0.9)); // Pre-size for efficiency
+                List<T> allCreated = new ArrayList<>((int) (entities.size() * 0.9));
                 int totalSkipped = 0;
                 List<String> allSkippedReasons = new ArrayList<>();
 
@@ -359,6 +374,8 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                     combinedResult.setSkippedReasons(allSkippedReasons);
                 }
 
+                afterCreateBatch(allCreated);
+
                 long executionTime = System.currentTimeMillis() - startTime;
                 double recordsPerSecond = (allCreated.size() * 1000.0) / executionTime;
 
@@ -382,6 +399,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
             // For very small batches (≤ 100), process without chunking
             BatchResult<T> result = crudService.createBatch(entities, skipDuplicates);
+            afterCreateBatch(result.getCreatedEntities());
 
             long executionTime = System.currentTimeMillis() - startTime;
 
@@ -426,6 +444,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             }
 
             T entity = crudService.findById(id);
+            afterFindById(entity);
 
             if (entity == null) {
                 throw new EntityNotFoundException(entityClass.getSimpleName(), id);
@@ -483,6 +502,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
                 Page<T> springPage = crudService.findAll(pageable);
                 PageResponse<T> pageResponse = PageResponse.from(springPage);
+                afterFindPaged(pageResponse);
 
                 long executionTime = System.currentTimeMillis() - startTime;
 
@@ -513,6 +533,8 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                 log.info("No entities found");
                 throw new EntityNotFoundException("No " + entityClass.getSimpleName() + " entities found");
             }
+
+            afterFindAll(entities);
 
             long executionTime = System.currentTimeMillis() - startTime;
 
@@ -576,6 +598,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
             Page<T> springPage = crudService.findAll(pageable);
             PageResponse<T> pageResponse = PageResponse.from(springPage);
+            afterFindPaged(pageResponse);
 
             if (pageResponse.getTotalElements() == 0) {
                 log.info("No entities found for page request");
@@ -628,12 +651,16 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                 throw new IllegalArgumentException("Update data cannot be null or empty");
             }
 
+            T existingEntity = crudService.findById(id);
+            beforeUpdate(id, updates, existingEntity);
+            T oldEntity = cloneEntity(existingEntity);
             T updated = crudService.update(id, updates);
 
             if (updated == null) {
                 throw new EntityNotFoundException(entityClass.getSimpleName(), id);
             }
 
+            afterUpdate(updated, oldEntity);
             long executionTime = System.currentTimeMillis() - startTime;
 
             log.info("Entity updated successfully with ID: {} | Time taken: {} ms", id, executionTime);
@@ -718,11 +745,12 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                 throw new IllegalArgumentException("ID cannot be null");
             }
 
-            if (!crudService.existsById(id)) {
-                throw new EntityNotFoundException(entityClass.getSimpleName(), id);
-            }
-
-            crudService.delete(id);
+            // OPTIMIZED: Service returns entity before deleting (single DB hit)
+            T deletedEntity = crudService.delete(id);
+            // Call lifecycle hooks with the already-fetched entity
+            beforeDelete(id, deletedEntity);
+            // Note: Entity is already deleted by service at this point
+            afterDelete(id, deletedEntity);
 
             long executionTime = System.currentTimeMillis() - startTime;
 
@@ -755,37 +783,18 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                 throw new IllegalArgumentException("ID list cannot be null or empty");
             }
 
-            // If trying to delete more than the large dataset threshold, auto-limit
-            if (ids.size() > LARGE_DATASET_THRESHOLD) {
-                log.warn("Large deletion request detected ({} IDs). Auto-limiting to {} for safety",
-                        ids.size(), LARGE_DATASET_THRESHOLD);
+            beforeDeleteBatch(ids);
+            BatchResult<T> deletionResult = crudService.deleteBatch(ids);
+            List<ID> deletedIds = deletionResult.getCreatedEntities().stream()
+                    .map(T::getId)
+                    .collect(Collectors.toList());
+            afterDeleteBatch(deletedIds);
 
-                // Limit to threshold
-                List<ID> limitedIds = ids.subList(0, LARGE_DATASET_THRESHOLD);
-                int notProcessedCount = ids.size() - LARGE_DATASET_THRESHOLD;
-
-                // Service handles existence check and deletion
-                BatchResult<ID> result = crudService.deleteBatch(limitedIds);
-
-                // Add the size-limit skips
-                result.setSkippedCount(result.getSkippedCount() + notProcessedCount);
-                result.addSkippedReason(String.format("Deletion limited to %d records for safety. " +
-                                "%d IDs were not processed. Use multiple batch requests for large deletions.",
-                        LARGE_DATASET_THRESHOLD, notProcessedCount));
-
-                long executionTime = System.currentTimeMillis() - startTime;
-
-                log.info("Batch deletion completed with limitations: {} deleted, {} skipped | Time taken: {} ms",
-                        result.getCreatedEntities().size(), result.getSkippedCount(), executionTime);
-
-                return ResponseEntity.ok(ApiResponse.success(result,
-                        String.format("Batch deletion completed with limitations: %d deleted, %d skipped",
-                                result.getCreatedEntities().size(), result.getSkippedCount()),
-                        executionTime));
-            }
-
-            // Process normal batch deletion - service handles everything
-            BatchResult<ID> result = crudService.deleteBatch(ids);
+            // Convert to ID-based result for response
+            BatchResult<ID> result = new BatchResult<>();
+            result.setCreatedEntities(deletedIds);
+            result.setSkippedCount(deletionResult.getSkippedCount());
+            result.setSkippedReasons(deletionResult.getSkippedReasons());
 
             long executionTime = System.currentTimeMillis() - startTime;
 
@@ -821,7 +830,6 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                 throw new IllegalArgumentException("ID list cannot be null or empty");
             }
 
-            // Check if trying to delete more than threshold
             if (ids.size() > LARGE_DATASET_THRESHOLD) {
                 throw new IllegalArgumentException(
                         String.format("Cannot force delete more than %d records at once. " +
@@ -829,9 +837,13 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                                 LARGE_DATASET_THRESHOLD, ids.size()));
             }
 
+            // Call beforeDeleteBatch lifecycle hook
+            beforeDeleteBatch(ids);
+
             // Process in smaller batches to minimize memory footprint
             int batchSize = 100;
             int totalDeleted = 0;
+            List<ID> actuallyDeletedIds = new ArrayList<>();
 
             for (int i = 0; i < ids.size(); i += batchSize) {
                 int end = Math.min(i + batchSize, ids.size());
@@ -839,12 +851,16 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
                 crudService.deleteBatch(batchIds);
                 totalDeleted += batchIds.size();
+                actuallyDeletedIds.addAll(batchIds);
 
                 // Clear batch to allow GC
                 batchIds.clear();
 
                 log.debug("Force deleted batch {}/{} entities (memory optimized)", totalDeleted, ids.size());
             }
+
+            // Call afterDeleteBatch with all processed IDs
+            afterDeleteBatch(actuallyDeletedIds);
 
             long executionTime = System.currentTimeMillis() - startTime;
 
@@ -866,6 +882,8 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         }
     }
 
+    // ===== Utility Methods =====
+
     protected Class<T> getEntityClass() {
         return entityClass;
     }
@@ -874,56 +892,157 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         return idClass;
     }
 
+    @SuppressWarnings("unchecked")
+    private T cloneEntity(T entity) {
+        try {
+            return (T) org.springframework.beans.BeanUtils.instantiateClass(entityClass);
+        } catch (Exception e) {
+            log.warn("Could not clone entity for comparison", e);
+            return null;
+        }
+    }
+
     // ===== Lifecycle Hook Methods - Override these for custom logic =====
 
+    /**
+     * Called before creating a single entity.
+     * Override this method to add custom validation or data transformation.
+     *
+     * @param entity the entity about to be created
+     */
     protected void beforeCreate(T entity) {
         // Default: no-op - override in subclass
     }
 
+    /**
+     * Called after successfully creating a single entity.
+     * Override this method to trigger notifications, cache updates, etc.
+     *
+     * @param entity the newly created entity with generated ID
+     */
     protected void afterCreate(T entity) {
         // Default: no-op - override in subclass
     }
 
+    /**
+     * Called before creating a batch of entities.
+     * Override this method to add batch-level validation or preprocessing.
+     *
+     * @param entities the list of entities about to be created
+     */
     protected void beforeCreateBatch(List<T> entities) {
         // Default: no-op - override in subclass
     }
 
+    /**
+     * Called after successfully creating a batch of entities.
+     * Override this method for batch-level post-processing.
+     *
+     * @param entities the list of successfully created entities
+     */
     protected void afterCreateBatch(List<T> entities) {
         // Default: no-op - override in subclass
     }
 
+    /**
+     * Called before updating an entity.
+     * Override this method to add custom validation or modify update data.
+     *
+     * @param id the ID of the entity being updated
+     * @param updates the map of field updates
+     * @param existingEntity the current state of the entity
+     */
     protected void beforeUpdate(ID id, Map<String, Object> updates, T existingEntity) {
         // Default: no-op - override in subclass
     }
 
+    /**
+     * Called after successfully updating an entity.
+     * Override this method to track changes, send notifications, etc.
+     *
+     * @param updatedEntity the entity after update
+     * @param oldEntity the entity before update (may be null if cloning failed)
+     */
     protected void afterUpdate(T updatedEntity, T oldEntity) {
         // Default: no-op - override in subclass
     }
 
-    protected void beforeDelete(ID id, T entity) {
+    /**
+     * Called AFTER the entity is deleted but BEFORE the transaction commits.
+     * The entity parameter contains the entity state before deletion.
+     *
+     * NOTE: The entity is already deleted from the database at this point.
+     * This hook is for post-deletion operations like logging, cache invalidation,
+     * or triggering external events. If you need to PREVENT deletion, consider
+     * using a custom validation endpoint before calling delete.
+     *
+     * @param id the ID of the entity that was deleted
+     * @param deletedEntity the entity as it existed before deletion
+     */
+    protected void beforeDelete(ID id, T deletedEntity) {
         // Default: no-op - override in subclass
     }
 
+    /**
+     * Called after successfully deleting a single entity.
+     * Override this method to clean up related data, invalidate caches, etc.
+     *
+     * NOTE: The deletedEntity parameter contains the entity as it existed
+     * before deletion, giving you access to all fields for cleanup operations.
+     *
+     * @param id the ID of the deleted entity
+     * @param deletedEntity the entity that was deleted (state before deletion)
+     */
     protected void afterDelete(ID id, T deletedEntity) {
         // Default: no-op - override in subclass
     }
 
+    /**
+     * Called before deleting a batch of entities.
+     * Override this method to add batch deletion validation.
+     *
+     * @param ids the list of IDs about to be deleted
+     */
     protected void beforeDeleteBatch(List<ID> ids) {
         // Default: no-op - override in subclass
     }
 
-    protected void afterDeleteBatch(List<ID> ids) {
+    /**
+     * Called after successfully deleting a batch of entities.
+     * Override this method for batch-level cleanup operations.
+     *
+     * @param deletedIds the list of IDs that were successfully deleted
+     */
+    protected void afterDeleteBatch(List<ID> deletedIds) {
         // Default: no-op - override in subclass
     }
 
+    /**
+     * Called after successfully finding an entity by ID.
+     * Override this method to add post-fetch processing.
+     *
+     * @param entity the entity that was found
+     */
     protected void afterFindById(T entity) {
         // Default: no-op - override in subclass
     }
 
+    /**
+     * Called after successfully finding all entities.
+     * Override this method to add post-fetch processing for full lists.
+     *
+     * @param entities the list of entities that were found
+     */
     protected void afterFindAll(List<T> entities) {
         // Default: no-op - override in subclass
     }
 
+    /**
+     * Called after successfully finding a page of entities.
+     * Override this method to add post-fetch processing for paginated results.
+     *
+     * @param pageResponse the page response containing the entities
+     */
     protected void afterFindPaged(PageResponse<T> pageResponse) {
         // Default: no-op - override in subclass
     }

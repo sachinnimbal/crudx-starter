@@ -46,11 +46,11 @@ public interface CrudXService<T extends CrudXBaseEntity<ID>, ID extends Serializ
 
     T update(ID id, Map<String, Object> updates);
 
-    void delete(ID id);
+    T delete(ID id);
 
     long count();
 
     boolean existsById(ID id);
 
-    BatchResult<ID> deleteBatch(List<ID> ids);
+    BatchResult<T> deleteBatch(List<ID> ids);
 }
