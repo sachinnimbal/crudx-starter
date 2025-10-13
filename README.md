@@ -534,29 +534,50 @@ Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md)
 
 ---
 
-## 🧩 Framework Dependencies & Acknowledgements
+### 🧩 Framework Dependencies & Acknowledgements
 
-CrudX is built on top of proven, production-grade open-source libraries to deliver a seamless, zero-boilerplate CRUD experience.
+**CrudX** is built on top of proven, production-grade open-source libraries to deliver a seamless, zero-boilerplate CRUD experience.
 
-**Core Dependencies**
-- Spring Boot (Web, Validation, AOP, Auto Configuration)
-- Spring Context & Transaction Management
-- Jackson (for JSON serialization)
-- SLF4J (for logging)
-- Thymeleaf (for internal dashboard / UI)
-- Lombok (for boilerplate reduction)
+---
 
-**Optional Integrations**
-- Spring Data JPA (MySQL / PostgreSQL)
-- Spring Data MongoDB
-- Jakarta Persistence API
+#### ⚙️ Core Dependencies
 
-**Testing Stack**
-- Spring Boot Test
-- Testcontainers (MySQL, PostgreSQL, MongoDB)
-- JUnit 5
+* **Spring Boot Web** — REST endpoints and embedded Tomcat server
+* **Spring Boot Auto Configuration** — automatic component configuration
+* **Spring Context & Transaction Management** — DI and transaction support
+* **Spring Validation & AOP** — request validation and cross-cutting concerns
+* **Jackson (Databind + JSR310)** — JSON serialization with Java Time API support
+* **SLF4J** — unified logging abstraction
+* **Thymeleaf** — built-in internal dashboard / UI rendering
+* **Lombok** — boilerplate reduction via annotations
 
-> 💡 Special thanks to the Spring, Jackson, Lombok, and Testcontainers communities for their open-source contributions.
+---
+
+#### 🌐 API Documentation
+
+* **Springdoc OpenAPI (v2.3.0)** — auto-generates Swagger UI and OpenAPI specs
+
+---
+
+#### 🧩 Optional Integrations
+
+* **Spring Data JPA** — relational persistence (MySQL, PostgreSQL)
+* **Spring Data MongoDB** — NoSQL persistence support
+* **Jakarta Persistence API** — JPA standard annotations and API
+* **MySQL & PostgreSQL Drivers** — database connectivity
+
+---
+
+#### 🧪 Testing Stack
+
+* **Spring Boot Test** — integration testing support
+* **JUnit 5** — modern unit testing framework
+* **Testcontainers (MySQL, PostgreSQL, MongoDB)** — lightweight, containerized DB testing
+* **Springdoc (Test)** — validate API documentation during test phase
+
+---
+
+💡 *Special thanks to the Spring, Jackson, Lombok, Springdoc, and Testcontainers communities for their open-source contributions that make CrudX possible.*
 
 ---
 
