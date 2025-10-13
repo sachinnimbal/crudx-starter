@@ -513,8 +513,6 @@ crudx:
 
 ### Coming in v1.0.2:
 - 🎯 **DTO Support** - Automatic Entity ↔ DTO mapping with complex nested objects
-- 🗄️ **Oracle Database Support** - Enterprise-grade database with sequence support
-- 🗄️ **MariaDB Support** - MySQL-compatible high-performance database
 
 **Stay tuned for exciting updates!**
 
