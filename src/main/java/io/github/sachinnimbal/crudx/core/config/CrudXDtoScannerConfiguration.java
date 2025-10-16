@@ -1,12 +1,11 @@
 package io.github.sachinnimbal.crudx.core.config;
 
-import io.github.sachinnimbal.crudx.core.annotations.dto.*;
-import io.github.sachinnimbal.crudx.core.enums.Direction;
-import io.github.sachinnimbal.crudx.core.enums.OperationType;
-import io.github.sachinnimbal.crudx.dto.generator.DtoMapperGenerator;
-import io.github.sachinnimbal.crudx.dto.mapper.GeneratedMapper;
-import io.github.sachinnimbal.crudx.dto.registry.DtoRegistry;
-import io.github.sachinnimbal.crudx.dto.registry.GeneratedMapperRegistry;
+import io.github.sachinnimbal.crudx.core.annotations.dto.CrudXRequestDto;
+import io.github.sachinnimbal.crudx.core.annotations.dto.CrudXResponseDto;
+import io.github.sachinnimbal.crudx.dto.generator.CrudXMapperGenerator;
+import io.github.sachinnimbal.crudx.dto.mapper.CrudXEntityMapper;
+import io.github.sachinnimbal.crudx.dto.registry.CrudXDtoRegistry;
+import io.github.sachinnimbal.crudx.dto.registry.CrudXMapperRegistry;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -18,15 +17,12 @@ import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 import org.springframework.core.type.classreading.CachingMetadataReaderFactory;
 import org.springframework.core.type.classreading.MetadataReader;
 
+import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Objects;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/**
- * Optimized scanner that generates ONE mapper file per Entity-DTO pair
- * (instead of multiple files per operation)
- */
 @Slf4j
 @Configuration
 @ConditionalOnProperty(prefix = "crudx.dto", name = "enabled", havingValue = "true", matchIfMissing = true)
@@ -36,36 +32,35 @@ public class CrudXDtoScannerConfiguration {
     private ApplicationContext applicationContext;
 
     @Autowired(required = false)
-    private DtoRegistry dtoRegistry;
+    private CrudXDtoRegistry crudXDtoRegistry;
 
     @Autowired(required = false)
-    private DtoMapperGenerator mapperGenerator;
+    private CrudXMapperGenerator mapperGenerator;
 
     @Autowired(required = false)
-    private GeneratedMapperRegistry mapperRegistry;
+    private CrudXMapperRegistry mapperRegistry;
 
     @Autowired(required = false)
     private CrudXDtoProperties properties;
 
     @PostConstruct
     public void scanAndGenerateMappers() {
-        if (dtoRegistry == null || mapperGenerator == null) {
+        if (crudXDtoRegistry == null || mapperGenerator == null) {
             log.debug("DTO components not available - skipping DTO scanning");
             return;
         }
 
         long startTime = System.currentTimeMillis();
 
-        // Use Set to track unique entity-DTO pairs (avoid duplicates)
-        Set<EntityDtoPair> uniquePairs = new HashSet<>();
-
         try {
-            // Step 1: Scan for DTOs
             String[] packagesToScan = getPackagesToScan();
             log.info("🔍 Scanning for CrudX DTOs in packages: {}", String.join(", ", packagesToScan));
 
+            Map<Class<?>, Set<Class<?>>> entityToDtos = new HashMap<>();
             PathMatchingResourcePatternResolver scanner = new PathMatchingResourcePatternResolver();
             CachingMetadataReaderFactory metadataReaderFactory = new CachingMetadataReaderFactory();
+
+            int totalDtosFound = 0;
 
             for (String basePackage : packagesToScan) {
                 String pattern = "classpath*:" + basePackage.replace('.', '/') + "/**/*.class";
@@ -77,11 +72,18 @@ public class CrudXDtoScannerConfiguration {
                         String className = metadataReader.getClassMetadata().getClassName();
                         Class<?> clazz = Class.forName(className);
 
-                        if (isDtoClass(clazz)) {
-                            dtoRegistry.registerDto(clazz);
+                        // Check for REQUEST or RESPONSE DTO annotations
+                        if (clazz.isAnnotationPresent(CrudXRequestDto.class) ||
+                                clazz.isAnnotationPresent(CrudXResponseDto.class)) {
 
-                            // Extract unique entity-DTO pairs
-                            uniquePairs.addAll(extractEntityDtoPairs(clazz));
+                            crudXDtoRegistry.registerDto(clazz);
+                            totalDtosFound++;
+
+                            // Track entity -> DTOs
+                            Class<?> entityClass = getEntityClassFromDto(clazz);
+                            if (entityClass != null) {
+                                entityToDtos.computeIfAbsent(entityClass, k -> new HashSet<>()).add(clazz);
+                            }
                         }
                     } catch (Exception e) {
                         log.trace("Could not load class from resource: {}", resource.getFilename());
@@ -89,44 +91,37 @@ public class CrudXDtoScannerConfiguration {
                 }
             }
 
-            // Step 2: Generate ONE mapper per unique entity-DTO pair
-            AtomicInteger generatedCount = new AtomicInteger(0);
-
-            if (!uniquePairs.isEmpty()) {
-                log.info("🔧 Generating mappers for {} unique entity-DTO pair(s)...", uniquePairs.size());
-
-                uniquePairs.forEach(pair -> {
-                    try {
-                        // Generate single unified mapper (not per operation)
-                        GeneratedMapper<?, ?> mapper = mapperGenerator.generateMapper(
-                                pair.dtoClass,
-                                pair.entityClass,
-                                OperationType.GET_BY_ID, // Operation doesn't matter for unified mapper
-                                Direction.RESPONSE
-                        );
-
-                        if (mapper != null) {
-                            mapperRegistry.register(mapper);
-                            generatedCount.incrementAndGet();
-
-                            log.debug("  ✓ Generated: {} <-> {}Mapper",
-                                    pair.entityClass.getSimpleName(),
-                                    pair.dtoClass.getSimpleName());
-                        }
-
-                    } catch (Exception e) {
-                        log.warn("Failed to generate mapper for {} <-> {}: {}",
-                                pair.entityClass.getSimpleName(),
-                                pair.dtoClass.getSimpleName(),
-                                e.getMessage());
-                    }
-                });
+            if (entityToDtos.isEmpty()) {
+                printNoMappersWarning();
+                return;
             }
 
-            long duration = System.currentTimeMillis() - startTime;
+            log.info("🔧 Generating unified mappers for {} entities...", entityToDtos.size());
 
-            // Print summary
-            printSummary(uniquePairs.size(), generatedCount.get(), duration);
+            AtomicInteger generatedCount = new AtomicInteger(0);
+
+            entityToDtos.forEach((entityClass, dtoClasses) -> {
+                try {
+                    log.debug("Generating mapper for {} with {} DTOs: {}",
+                            entityClass.getSimpleName(),
+                            dtoClasses.size(),
+                            dtoClasses.stream().map(Class::getSimpleName).toList());
+
+                    CrudXEntityMapper<?, ?> mapper = mapperGenerator.getOrGenerateMapper(entityClass, dtoClasses);
+
+                    if (mapper != null) {
+                        mapperRegistry.register(mapper);
+                        generatedCount.incrementAndGet();
+                    }
+
+                } catch (Exception e) {
+                    log.error("Failed to generate mapper for {}: {}",
+                            entityClass.getSimpleName(), e.getMessage());
+                }
+            });
+
+            long duration = System.currentTimeMillis() - startTime;
+            printSummary(entityToDtos.size(), totalDtosFound, generatedCount.get(), duration);
 
         } catch (Exception e) {
             log.error("Error during DTO scanning and mapper generation", e);
@@ -134,78 +129,63 @@ public class CrudXDtoScannerConfiguration {
     }
 
     /**
-     * Extract unique entity-DTO pairs from DTO class annotations
+     * Extract entity class from any DTO annotation type
      */
-    private Set<EntityDtoPair> extractEntityDtoPairs(Class<?> dtoClass) {
-        Set<EntityDtoPair> pairs = new HashSet<>();
-
-        if (dtoClass.isAnnotationPresent(CrudXCreateRequestDto.class)) {
-            CrudXCreateRequestDto annotation = dtoClass.getAnnotation(CrudXCreateRequestDto.class);
-            pairs.add(new EntityDtoPair(annotation.entity(), dtoClass));
+    private Class<?> getEntityClassFromDto(Class<?> dtoClass) {
+        if (dtoClass.isAnnotationPresent(CrudXRequestDto.class)) {
+            return dtoClass.getAnnotation(CrudXRequestDto.class).entity();
         }
-
-        if (dtoClass.isAnnotationPresent(CrudXUpdateRequestDto.class)) {
-            CrudXUpdateRequestDto annotation = dtoClass.getAnnotation(CrudXUpdateRequestDto.class);
-            pairs.add(new EntityDtoPair(annotation.entity(), dtoClass));
-        }
-
-        if (dtoClass.isAnnotationPresent(CrudXBatchCreateRequestDto.class)) {
-            CrudXBatchCreateRequestDto annotation = dtoClass.getAnnotation(CrudXBatchCreateRequestDto.class);
-            pairs.add(new EntityDtoPair(annotation.entity(), dtoClass));
-        }
-
         if (dtoClass.isAnnotationPresent(CrudXResponseDto.class)) {
-            CrudXResponseDto annotation = dtoClass.getAnnotation(CrudXResponseDto.class);
-            pairs.add(new EntityDtoPair(annotation.entity(), dtoClass));
+            return dtoClass.getAnnotation(CrudXResponseDto.class).entity();
         }
-
-        if (dtoClass.isAnnotationPresent(CrudXDto.class)) {
-            CrudXDto annotation = dtoClass.getAnnotation(CrudXDto.class);
-            pairs.add(new EntityDtoPair(annotation.entity(), dtoClass));
-        }
-
-        return pairs;
+        return null;
     }
 
-    private void printSummary(int totalPairs, int generatedMappers, long duration) {
-        if (totalPairs == 0) {
-            log.warn("╔════════════════════════════════════════════════════════╗");
-            log.warn("║          No CrudX DTOs Found                          ║");
-            log.warn("╠════════════════════════════════════════════════════════╣");
-            log.warn("║  Add @CrudXResponseDto, @CrudXCreateRequestDto, etc.  ║");
-            log.warn("║  to your DTO classes to enable auto-mapping           ║");
-            log.warn("╚════════════════════════════════════════════════════════╝");
-            return;
-        }
-
+    private void printSummary(int totalEntities, int totalDtos, int generatedMappers, long duration) {
         log.info("╔════════════════════════════════════════════════════════╗");
-        log.info("║        CrudX DTO Auto-Generation Completed            ║");
+        log.info("║      CrudX Unified Mapper Generation Complete        ║");
         log.info("╠════════════════════════════════════════════════════════╣");
-        log.info("║  ✓ Entity-DTO Pairs:  {} {}",
-                String.format("%-6d", totalPairs),
-                " ".repeat(30));
-        log.info("║  ✓ Generated Mappers: {} {}",
-                String.format("%-6d", generatedMappers),
-                " ".repeat(30));
+        log.info("║  ✓ Entities:          {} {}",
+                String.format("%-6d", totalEntities), " ".repeat(30));
+        log.info("║  ✓ DTOs Found:        {} {}",
+                String.format("%-6d", totalDtos), " ".repeat(30));
+        log.info("║  ✓ Mappers Generated: {} {}",
+                String.format("%-6d", generatedMappers), " ".repeat(30));
         log.info("║  ✓ Time Taken:        {} ms {}",
-                String.format("%-6d", duration),
-                " ".repeat(27));
+                String.format("%-6d", duration), " ".repeat(27));
+        log.info("╠════════════════════════════════════════════════════════╣");
+        log.info("║  Architecture: ONE MAPPER PER ENTITY                  ║");
+        log.info("║  Average DTOs per Entity: {} {}",
+                String.format("%.1f", totalDtos / (double) Math.max(1, totalEntities)),
+                " ".repeat(24));
         log.info("╚════════════════════════════════════════════════════════╝");
 
-        // Show mapper location
-        log.info("📁 Mapper Location:");
+        log.info("📁 Generated Mapper Location:");
         log.info("  → Maven: target/generated-sources/crudx-mappers/");
         log.info("  → Gradle: build/generated/sources/crudx-mappers/");
         log.info("  → Package: io.github.sachinnimbal.crudx.generated.mappers");
 
-        // Show statistics
         if (mapperRegistry != null) {
-            GeneratedMapperRegistry.MapperStatistics stats = mapperRegistry.getStatistics();
-            log.info("Statistics:");
+            CrudXMapperRegistry.MapperStatistics stats = mapperRegistry.getStatistics();
+            log.info("📊 Statistics:");
             log.info("  → Total Mappers: {}", stats.getTotalMappers());
-            log.info("  → Unique Entities: {}", stats.getEntities());
-            log.info("  → Unique DTOs: {}", stats.getDtos());
+            log.info("  → Total Entities: {}", stats.getTotalEntities());
+            log.info("  → Total DTOs: {}", stats.getTotalDtos());
         }
+    }
+
+    private void printNoMappersWarning() {
+        log.warn("╔════════════════════════════════════════════════════════╗");
+        log.warn("║             No CrudX DTOs Found                       ║");
+        log.warn("╠════════════════════════════════════════════════════════╣");
+        log.warn("║  Add @CrudXRequestDto or @CrudXResponseDto:           ║");
+        log.warn("║                                                        ║");
+        log.warn("║  @CrudXRequestDto(                                     ║");
+        log.warn("║    entity = User.class,                                ║");
+        log.warn("║    operations = OperationType.CREATE                   ║");
+        log.warn("║  )                                                     ║");
+        log.warn("║  public class UserCreateRequest { ... }                ║");
+        log.warn("╚════════════════════════════════════════════════════════╝");
     }
 
     private String[] getPackagesToScan() {
@@ -223,44 +203,5 @@ public class CrudXDtoScannerConfiguration {
 
         log.warn("Could not detect base package. Scanning common patterns.");
         return new String[]{"com", "org", "io"};
-    }
-
-    private boolean isDtoClass(Class<?> clazz) {
-        return clazz.isAnnotationPresent(CrudXResponseDto.class) ||
-                clazz.isAnnotationPresent(CrudXCreateRequestDto.class) ||
-                clazz.isAnnotationPresent(CrudXUpdateRequestDto.class) ||
-                clazz.isAnnotationPresent(CrudXBatchCreateRequestDto.class) ||
-                clazz.isAnnotationPresent(CrudXDto.class);
-    }
-
-    /**
-     * Represents a unique Entity-DTO pair
-     */
-    private static class EntityDtoPair {
-        private final Class<?> entityClass;
-        private final Class<?> dtoClass;
-
-        public EntityDtoPair(Class<?> entityClass, Class<?> dtoClass) {
-            this.entityClass = entityClass;
-            this.dtoClass = dtoClass;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) return true;
-            if (!(o instanceof EntityDtoPair)) return false;
-            EntityDtoPair that = (EntityDtoPair) o;
-            return entityClass.equals(that.entityClass) && dtoClass.equals(that.dtoClass);
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(entityClass, dtoClass);
-        }
-
-        @Override
-        public String toString() {
-            return entityClass.getSimpleName() + " <-> " + dtoClass.getSimpleName();
-        }
     }
 }

@@ -35,7 +35,6 @@ public abstract class CrudXPostgreSQLEntity<ID extends Serializable> extends Cru
     @GeneratedValue(strategy = GenerationType.SEQUENCE)
     private ID id;
 
-    @Embedded
     private CrudXAudit audit = new CrudXAudit();
 
     @PrePersist

@@ -1,27 +1,11 @@
-/*
- * Copyright 2025 Sachin Nimbal
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 package io.github.sachinnimbal.crudx.web;
 
 import io.github.sachinnimbal.crudx.core.config.CrudXPerformanceProperties;
-import io.github.sachinnimbal.crudx.core.response.CrudxMetadataProperties;
 import io.github.sachinnimbal.crudx.core.metrics.CrudXPerformanceTracker;
 import io.github.sachinnimbal.crudx.core.metrics.PerformanceMetric;
 import io.github.sachinnimbal.crudx.core.metrics.PerformanceSummary;
 import io.github.sachinnimbal.crudx.core.response.ApiResponse;
+import io.github.sachinnimbal.crudx.core.response.CrudxMetadataProperties;
 import io.swagger.v3.oas.annotations.Hidden;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -30,7 +14,10 @@ import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -38,10 +25,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * @author Sachin Nimbal
- * @see <a href="https://www.linkedin.com/in/sachin-nimbal/">LinkedIn Profile</a>
- */
 @Slf4j
 @RestController
 @RequestMapping("${crudx.performance.dashboard-path:/crudx/performance}")
@@ -52,6 +35,7 @@ public class CrudXPerformanceController {
     private final CrudXPerformanceProperties properties;
     @Autowired
     private CrudxMetadataProperties metadataProperties;
+
     public CrudXPerformanceController(CrudXPerformanceTracker tracker, CrudXPerformanceProperties properties) {
         this.tracker = tracker;
         this.properties = properties;
@@ -80,10 +64,7 @@ public class CrudXPerformanceController {
     public ResponseEntity<String> dashboard() throws IOException {
         Resource resource = new ClassPathResource("index.html");
         String html = new String(resource.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-
-        // Replace placeholder with actual API path
         html = html.replace("${API_BASE}", properties.getDashboardPath());
-
         return ResponseEntity.ok()
                 .contentType(MediaType.TEXT_HTML)
                 .body(html);
@@ -114,10 +95,7 @@ public class CrudXPerformanceController {
     public ResponseEntity<String> swaggerUI() throws IOException {
         Resource resource = new ClassPathResource("swagger-ui.html");
         String html = new String(resource.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-
-        // Replace placeholders
         html = html.replace("${API_BASE}", properties.getDashboardPath());
-
         return ResponseEntity.ok()
                 .contentType(MediaType.TEXT_HTML)
                 .body(html);
@@ -128,10 +106,7 @@ public class CrudXPerformanceController {
     public ResponseEntity<String> endpointsTable() throws IOException {
         Resource resource = new ClassPathResource("endpoints.html");
         String html = new String(resource.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-
-        // Replace placeholder with actual API path if needed
         html = html.replace("${API_BASE}", properties.getDashboardPath());
-
         return ResponseEntity.ok()
                 .contentType(MediaType.TEXT_HTML)
                 .body(html);

@@ -66,7 +66,7 @@ public class CrudXBannerConfiguration implements ApplicationListener<Application
         logInfo(YELLOW + " -> Use either MongoDB OR MySQL/PostgreSQL" + RESET);
         logInfo("");
         logInfo(GREEN + BOLD + ">> CRUDX Framework is ready!" + RESET);
-        logInfo(CYAN + ">> Documentation: " + YELLOW + "API Documentation (https://github.com/sachinnimbal/crudx-starter/blob/main/API_DOCUMENTATION.md)" + RESET);
+        logInfo(CYAN + ">> Documentation: " + YELLOW + "API Documentation (https://sachinnimbal.github.io/crudx-framework/api-documentation.html)" + RESET);
         logInfo(CYAN + ">> Performance Dashboard: " + YELLOW + getDashboardUrl() + RESET);
     }
 

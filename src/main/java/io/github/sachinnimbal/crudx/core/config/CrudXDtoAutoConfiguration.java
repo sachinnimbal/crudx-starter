@@ -1,6 +1,6 @@
 package io.github.sachinnimbal.crudx.core.config;
 
-import io.github.sachinnimbal.crudx.dto.registry.DtoRegistry;
+import io.github.sachinnimbal.crudx.dto.registry.CrudXDtoRegistry;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -26,9 +26,9 @@ public class CrudXDtoAutoConfiguration {
     }
 
     @Bean
-    public DtoRegistry dtoRegistry() {
+    public CrudXDtoRegistry dtoRegistry() {
         log.info("✓ CrudX DTO Registry initialized (lazy-loading enabled)");
-        return new DtoRegistry();
+        return new CrudXDtoRegistry();
     }
 
     private void printBanner() {
