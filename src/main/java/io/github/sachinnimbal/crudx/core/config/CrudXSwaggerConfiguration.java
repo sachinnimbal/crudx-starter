@@ -8,6 +8,7 @@ import io.swagger.v3.core.converter.ModelConverters;
 import io.swagger.v3.core.converter.ResolvedSchema;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.Operation;
+import io.swagger.v3.oas.models.Components;
 import io.swagger.v3.oas.models.info.Contact;
 import io.swagger.v3.oas.models.info.Info;
 import io.swagger.v3.oas.models.info.License;
@@ -18,7 +19,11 @@ import io.swagger.v3.oas.models.media.Schema;
 import io.swagger.v3.oas.models.parameters.RequestBody;
 import io.swagger.v3.oas.models.responses.ApiResponse;
 import io.swagger.v3.oas.models.servers.Server;
+import jakarta.annotation.PostConstruct;
+import jakarta.persistence.Embeddable;
+import jakarta.persistence.Embedded;
 import lombok.extern.slf4j.Slf4j;
+import org.springdoc.core.customizers.OpenApiCustomizer;
 import org.springdoc.core.customizers.OperationCustomizer;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
@@ -44,13 +49,17 @@ public class CrudXSwaggerConfiguration {
     @Autowired(required = false)
     private CrudXDtoRegistry crudXDtoRegistry;
 
-    private final Set<Class<?>> processedSchemas = Collections.synchronizedSet(new HashSet<>());
+    private final Map<String, Schema> globalSchemas = Collections.synchronizedMap(new LinkedHashMap<>());
+    private final Set<Class<?>> processedClasses = Collections.synchronizedSet(new HashSet<>());
     private final Set<String> excludedPackagePrefixes = new HashSet<>();
 
     public CrudXSwaggerConfiguration(Environment environment) {
         this.environment = environment;
+        initializeExcludedPackages();
+        log.info("✓ CrudX Swagger/OpenAPI enabled");
+    }
 
-        // Initialize excluded packages for deep scanning
+    private void initializeExcludedPackages() {
         excludedPackagePrefixes.add("java.");
         excludedPackagePrefixes.add("javax.");
         excludedPackagePrefixes.add("jdk.");
@@ -58,11 +67,205 @@ public class CrudXSwaggerConfiguration {
         excludedPackagePrefixes.add("org.springframework.");
         excludedPackagePrefixes.add("com.fasterxml.jackson.");
         excludedPackagePrefixes.add("org.hibernate.");
+        excludedPackagePrefixes.add("org.apache.catalina.");
+        excludedPackagePrefixes.add("org.apache.tomcat.");
         excludedPackagePrefixes.add("ch.qos.logback.");
         excludedPackagePrefixes.add("org.slf4j.");
-
-        log.info("✓ CrudX Swagger/OpenAPI enabled");
     }
+
+    @PostConstruct
+    public void preRegisterModels() {
+        try {
+            log.info("🔍 Pre-scanning models for Swagger...");
+
+            // Register CrudX base classes
+            registerCrudXBaseClasses();
+
+            // Register all entities and DTOs
+            if (crudXDtoRegistry != null) {
+                for (Class<?> entityClass : crudXDtoRegistry.getAllEntities()) {
+                    registerClassDeep(entityClass);
+                }
+                for (Class<?> dtoClass : crudXDtoRegistry.getAllDtos()) {
+                    registerClassDeep(dtoClass);
+                }
+            }
+
+            // Register response wrappers
+            registerResponseWrappers();
+
+            log.info("✓ Pre-scanned {} model classes", processedClasses.size());
+
+        } catch (Exception e) {
+            log.warn("Error during model pre-scanning: {}", e.getMessage());
+        }
+    }
+
+    private void registerCrudXBaseClasses() {
+        try {
+            registerClassDeep(Class.forName("io.github.sachinnimbal.crudx.core.model.CrudXAudit"));
+            try {
+                registerClassDeep(Class.forName("io.github.sachinnimbal.crudx.core.model.CrudXBaseEntity"));
+            } catch (ClassNotFoundException ignored) {}
+            try {
+                registerClassDeep(Class.forName("io.github.sachinnimbal.crudx.core.model.CrudXMongoEntity"));
+            } catch (ClassNotFoundException ignored) {}
+        } catch (ClassNotFoundException e) {
+            log.debug("CrudXAudit not found");
+        }
+    }
+
+    private void registerResponseWrappers() {
+        try {
+            registerClassDeep(Class.forName("io.github.sachinnimbal.crudx.core.response.ApiResponse"));
+            registerClassDeep(Class.forName("io.github.sachinnimbal.crudx.core.response.PageResponse"));
+            registerClassDeep(Class.forName("io.github.sachinnimbal.crudx.core.response.BatchResult"));
+        } catch (ClassNotFoundException ignored) {}
+    }
+
+    /**
+     * ✅ Register class and all nested types deeply
+     */
+    private void registerClassDeep(Class<?> clazz) {
+        if (!shouldRegister(clazz)) {
+            return;
+        }
+
+        try {
+            // Use ModelConverters to get all schemas
+            Map<String, Schema> schemas = ModelConverters.getInstance().readAll(clazz);
+
+            if (!schemas.isEmpty()) {
+                // Add all schemas to global map
+                globalSchemas.putAll(schemas);
+                processedClasses.add(clazz);
+
+                log.debug("✓ Registered: {} ({} schemas)", clazz.getSimpleName(), schemas.size());
+
+                // Recursively register nested types
+                registerAllFieldTypes(clazz, new HashSet<>());
+                registerAllInnerClasses(clazz);
+            }
+
+        } catch (Exception e) {
+            log.debug("Could not register {}: {}", clazz.getSimpleName(), e.getMessage());
+        }
+    }
+
+    private void registerAllInnerClasses(Class<?> clazz) {
+        try {
+            for (Class<?> innerClass : clazz.getDeclaredClasses()) {
+                if (!Modifier.isPrivate(innerClass.getModifiers()) &&
+                        !innerClass.isSynthetic() &&
+                        !innerClass.isAnonymousClass()) {
+                    log.debug("  → Inner class: {}", innerClass.getSimpleName());
+                    registerClassDeep(innerClass);
+                }
+            }
+        } catch (Exception e) {
+            log.debug("Error scanning inner classes: {}", e.getMessage());
+        }
+    }
+
+    private void registerAllFieldTypes(Class<?> clazz, Set<Class<?>> visited) {
+        if (!visited.add(clazz)) {
+            return;
+        }
+
+        for (Field field : getAllFields(clazz)) {
+            if (Modifier.isStatic(field.getModifiers()) ||
+                    Modifier.isTransient(field.getModifiers()) ||
+                    field.isSynthetic()) {
+                continue;
+            }
+
+            Class<?> fieldType = field.getType();
+
+            // @Embedded/@Embeddable
+            if (field.isAnnotationPresent(Embedded.class) ||
+                    fieldType.isAnnotationPresent(Embeddable.class)) {
+                registerClassDeep(fieldType);
+            }
+
+            // Collections
+            if (Collection.class.isAssignableFrom(fieldType)) {
+                handleGenericType(field.getGenericType(), visited);
+            }
+            // Maps
+            else if (Map.class.isAssignableFrom(fieldType)) {
+                handleGenericType(field.getGenericType(), visited);
+            }
+            // Custom objects
+            else if (shouldRegister(fieldType) && !visited.contains(fieldType)) {
+                registerClassDeep(fieldType);
+                registerAllFieldTypes(fieldType, visited);
+            }
+        }
+    }
+
+    private void handleGenericType(Type genericType, Set<Class<?>> visited) {
+        if (genericType instanceof ParameterizedType paramType) {
+            for (Type typeArg : paramType.getActualTypeArguments()) {
+                if (typeArg instanceof Class<?> typeClass &&
+                        shouldRegister(typeClass) &&
+                        visited.add(typeClass)) {
+                    registerClassDeep(typeClass);
+                    registerAllFieldTypes(typeClass, visited);
+                }
+            }
+        }
+    }
+
+    private boolean shouldRegister(Class<?> clazz) {
+        if (clazz == null ||
+                clazz.isPrimitive() ||
+                clazz.isArray() ||
+                (clazz.isEnum() && isFrameworkEnum(clazz)) ||
+                processedClasses.contains(clazz)) {
+            return false;
+        }
+
+        if (clazz.isAnnotationPresent(Embeddable.class)) {
+            return true;
+        }
+
+        String pkg = clazz.getPackageName();
+
+        for (String prefix : excludedPackagePrefixes) {
+            if (pkg.startsWith(prefix)) {
+                return false;
+            }
+        }
+
+        if (pkg.startsWith("io.github.sachinnimbal.crudx")) {
+            return true;
+        }
+
+        if (pkg.startsWith("jakarta.")) {
+            return pkg.startsWith("jakarta.persistence");
+        }
+
+        return true;
+    }
+
+    private boolean isFrameworkEnum(Class<?> enumClass) {
+        String pkg = enumClass.getPackageName();
+        return pkg.startsWith("java.") ||
+                pkg.startsWith("jakarta.") ||
+                pkg.startsWith("org.springframework.");
+    }
+
+    private List<Field> getAllFields(Class<?> clazz) {
+        List<Field> fields = new ArrayList<>();
+        Class<?> current = clazz;
+        while (current != null && current != Object.class) {
+            fields.addAll(Arrays.asList(current.getDeclaredFields()));
+            current = current.getSuperclass();
+        }
+        return fields;
+    }
+
+    // ==================== OPENAPI CONFIGURATION ====================
 
     @Bean
     public OpenAPI crudxOpenAPI() {
@@ -70,6 +273,7 @@ public class CrudXSwaggerConfiguration {
         String serverUrl = getServerUrl();
 
         return new OpenAPI()
+                .components(new Components())  // Initialize components
                 .info(new Info()
                         .title("CrudX Framework API")
                         .description("CRUDX | The Next-Gen Multi-Database CRUD Framework for Spring Boot.")
@@ -81,11 +285,36 @@ public class CrudXSwaggerConfiguration {
                         .license(new License()
                                 .name("Apache 2.0")
                                 .url("https://github.com/sachinnimbal/crudx-starter/blob/main/LICENSE")))
-                .servers(List.of(
-                        new Server()
-                                .url(serverUrl)
-                                .description("Current Server")
-                ));
+                .servers(List.of(new Server().url(serverUrl).description("Current Server")));
+    }
+
+    /**
+     * ✅ CRITICAL: Add all pre-registered schemas to OpenAPI components
+     */
+    @Bean
+    public OpenApiCustomizer schemaRegistrationCustomizer() {
+        return openApi -> {
+            if (openApi.getComponents() == null) {
+                openApi.setComponents(new Components());
+            }
+
+            // Add all pre-registered schemas to components
+            Map<String, Schema> existingSchemas = openApi.getComponents().getSchemas();
+            if (existingSchemas == null) {
+                openApi.getComponents().setSchemas(new LinkedHashMap<>());
+                existingSchemas = openApi.getComponents().getSchemas();
+            }
+
+            // Merge global schemas into OpenAPI components
+            for (Map.Entry<String, Schema> entry : globalSchemas.entrySet()) {
+                if (!existingSchemas.containsKey(entry.getKey())) {
+                    existingSchemas.put(entry.getKey(), entry.getValue());
+                    log.debug("✓ Added schema to OpenAPI: {}", entry.getKey());
+                }
+            }
+
+            log.info("✓ Registered {} schemas in OpenAPI components", existingSchemas.size());
+        };
     }
 
     @Bean
@@ -96,586 +325,189 @@ public class CrudXSwaggerConfiguration {
             }
 
             try {
-                Class<?> entityClass = getEntityClassFromController(handlerMethod.getBeanType());
-                if (entityClass == null) {
-                    return operation;
-                }
+                Class<?> entityClass = getEntityClass(handlerMethod.getBeanType());
+                if (entityClass == null) return operation;
 
-                String methodName = handlerMethod.getMethod().getName();
+                // Ensure entity and its nested types are registered
+                registerClassDeep(entityClass);
 
-                switch (methodName) {
-                    case "create":
-                        customizeCreateOperation(operation, entityClass);
-                        break;
-                    case "createBatch":
-                        customizeBatchCreateOperation(operation, entityClass);
-                        break;
-                    case "getById":
-                        customizeGetByIdOperation(operation, entityClass);
-                        break;
-                    case "getAll":
-                        customizeGetAllOperation(operation, entityClass);
-                        break;
-                    case "getPaged":
-                        customizeGetPagedOperation(operation, entityClass);
-                        break;
-                    case "update":
-                        customizeUpdateOperation(operation, entityClass);
-                        break;
+                String method = handlerMethod.getMethod().getName();
+
+                switch (method) {
+                    case "create" -> customizeCreate(operation, entityClass);
+                    case "createBatch" -> customizeBatchCreate(operation, entityClass);
+                    case "getById" -> customizeGetById(operation, entityClass);
+                    case "getAll" -> customizeGetAll(operation, entityClass);
+                    case "getPaged" -> customizeGetPaged(operation, entityClass);
+                    case "update" -> customizeUpdate(operation, entityClass);
                 }
 
             } catch (Exception e) {
-                log.debug("Could not customize Swagger schema: {}", e.getMessage());
+                log.debug("Schema customization error: {}", e.getMessage());
             }
 
             return operation;
         };
     }
 
-    // ===== OPERATION CUSTOMIZERS =====
+    // ==================== OPERATION CUSTOMIZERS ====================
 
-    private void customizeCreateOperation(Operation operation, Class<?> entityClass) {
-        Class<?> requestClass = getRequestDtoOrEntity(entityClass, OperationType.CREATE);
-        Class<?> responseClass = getResponseDtoOrEntity(entityClass, OperationType.CREATE);
-
-        log.debug("CREATE - Request: {}, Response: {}",
-                requestClass.getSimpleName(), responseClass.getSimpleName());
-
-        // ✅ DEEP resolve request schema (including all nested types)
-        ResolvedSchema requestSchema = resolveSchemaWithDeepNesting(requestClass);
-        ResolvedSchema responseSchema = resolveSchema(responseClass);
-
-        setRequestBodySchema(operation, requestClass, requestSchema, false);
-        setResponseSchema(operation, responseClass, responseSchema, false, "201");
+    private void customizeCreate(Operation op, Class<?> entity) {
+        Class<?> req = getDto(entity, OperationType.CREATE, true);
+        Class<?> res = getDto(entity, OperationType.CREATE, false);
+        registerClassDeep(req);
+        registerClassDeep(res);
+        setRequestBody(op, req, false);
+        setResponse(op, res, false, "201");
     }
 
-    private void customizeBatchCreateOperation(Operation operation, Class<?> entityClass) {
-        Class<?> requestClass = getRequestDtoOrEntity(entityClass, OperationType.BATCH_CREATE);
-        Class<?> responseClass = getResponseDtoOrEntity(entityClass, OperationType.BATCH_CREATE);
-
-        log.debug("BATCH_CREATE - Request: List<{}>, Response: BatchResult<{}>",
-                requestClass.getSimpleName(), responseClass.getSimpleName());
-
-        // ✅ DEEP resolve request schema
-        ResolvedSchema requestSchema = resolveSchemaWithDeepNesting(requestClass);
-        ResolvedSchema responseSchema = resolveSchema(responseClass);
-
-        setRequestBodySchemaForBatch(operation, requestClass, requestSchema);
-        setBatchResultResponseSchema(operation, responseClass, "201");
+    private void customizeBatchCreate(Operation op, Class<?> entity) {
+        Class<?> req = getDto(entity, OperationType.BATCH_CREATE, true);
+        Class<?> res = getDto(entity, OperationType.BATCH_CREATE, false);
+        registerClassDeep(req);
+        registerClassDeep(res);
+        setRequestBody(op, req, true);
+        setBatchResponse(op, res, "201");
     }
 
-    private void customizeGetByIdOperation(Operation operation, Class<?> entityClass) {
-        Class<?> responseClass = getResponseDtoOrEntity(entityClass, OperationType.GET_BY_ID);
-
-        log.debug("GET_BY_ID - Response: {}", responseClass.getSimpleName());
-
-        ResolvedSchema responseSchema = resolveSchema(responseClass);
-        setResponseSchema(operation, responseClass, responseSchema, false, "200");
+    private void customizeGetById(Operation op, Class<?> entity) {
+        Class<?> res = getDto(entity, OperationType.GET_BY_ID, false);
+        registerClassDeep(res);
+        setResponse(op, res, false, "200");
     }
 
-    private void customizeGetAllOperation(Operation operation, Class<?> entityClass) {
-        Class<?> responseClass = getResponseDtoOrEntity(entityClass, OperationType.GET_ALL);
-
-        log.debug("GET_ALL - Response: List<{}>", responseClass.getSimpleName());
-
-        ResolvedSchema responseSchema = resolveSchema(responseClass);
-        setResponseSchema(operation, responseClass, responseSchema, true, "200");
+    private void customizeGetAll(Operation op, Class<?> entity) {
+        Class<?> res = getDto(entity, OperationType.GET_ALL, false);
+        registerClassDeep(res);
+        setResponse(op, res, true, "200");
     }
 
-    private void customizeGetPagedOperation(Operation operation, Class<?> entityClass) {
-        Class<?> responseClass = getResponseDtoOrEntity(entityClass, OperationType.GET_PAGED);
-
-        log.debug("GET_PAGED - Response: PageResponse<{}>", responseClass.getSimpleName());
-
-        ResolvedSchema responseSchema = resolveSchema(responseClass);
-        setPageResponseSchema(operation, responseClass, responseSchema, "200");
+    private void customizeGetPaged(Operation op, Class<?> entity) {
+        Class<?> res = getDto(entity, OperationType.GET_PAGED, false);
+        registerClassDeep(res);
+        setPageResponse(op, res, "200");
     }
 
-    private void customizeUpdateOperation(Operation operation, Class<?> entityClass) {
-        Class<?> requestClass = getRequestDtoOrEntity(entityClass, OperationType.UPDATE);
-        Class<?> responseClass = getResponseDtoOrEntity(entityClass, OperationType.UPDATE);
-
-        log.debug("UPDATE - Request: {}, Response: {}",
-                requestClass.getSimpleName(), responseClass.getSimpleName());
-
-        // ✅ DEEP resolve request schema
-        ResolvedSchema requestSchema = resolveSchemaWithDeepNesting(requestClass);
-        ResolvedSchema responseSchema = resolveSchema(responseClass);
-
-        setRequestBodySchema(operation, requestClass, requestSchema, false);
-        setResponseSchema(operation, responseClass, responseSchema, false, "200");
+    private void customizeUpdate(Operation op, Class<?> entity) {
+        Class<?> req = getDto(entity, OperationType.UPDATE, true);
+        Class<?> res = getDto(entity, OperationType.UPDATE, false);
+        registerClassDeep(req);
+        registerClassDeep(res);
+        setRequestBody(op, req, false);
+        setResponse(op, res, false, "200");
     }
 
-    // ===== HELPER METHODS =====
+    // ==================== HELPER METHODS ====================
 
-    private Class<?> getRequestDtoOrEntity(Class<?> entityClass, OperationType operation) {
+    private Class<?> getDto(Class<?> entity, OperationType op, boolean isRequest) {
         if (crudXDtoRegistry != null) {
-            Class<?> requestDto = crudXDtoRegistry.getRequestDtoClass(entityClass, operation);
-            if (requestDto != null) {
-                return requestDto;
-            }
+            Class<?> dto = isRequest ?
+                    crudXDtoRegistry.getRequestDtoClass(entity, op) :
+                    crudXDtoRegistry.getResponseDtoClass(entity, op);
+            if (dto != null) return dto;
         }
-        return entityClass;
+        return entity;
     }
 
-    private Class<?> getResponseDtoOrEntity(Class<?> entityClass, OperationType operation) {
-        if (crudXDtoRegistry != null) {
-            Class<?> responseDto = crudXDtoRegistry.getResponseDtoClass(entityClass, operation);
-            if (responseDto != null) {
-                return responseDto;
-            }
+    private void setRequestBody(Operation op, Class<?> clazz, boolean isArray) {
+        RequestBody rb = op.getRequestBody();
+        if (rb == null) {
+            rb = new RequestBody().required(true);
+            op.setRequestBody(rb);
         }
-        return entityClass;
+
+        Schema<?> schema = createSchemaRef(clazz, isArray);
+        MediaType mt = new MediaType().schema(schema);
+        rb.setContent(new Content().addMediaType("application/json", mt));
+
+        log.debug("✓ Request body: {}{}", clazz.getSimpleName(), isArray ? "[]" : "");
     }
 
-    /**
-     * ✅ NEW: Deep schema resolution with recursive nested type registration
-     * This ensures ALL nested types in request bodies are registered upfront
-     */
-    private ResolvedSchema resolveSchemaWithDeepNesting(Class<?> schemaClass) {
-        if (schemaClass == null || processedSchemas.contains(schemaClass)) {
-            return null;
-        }
+    private void setResponse(Operation op, Class<?> clazz, boolean isArray, String code) {
+        if (op.getResponses() == null) return;
 
+        ApiResponse ar = op.getResponses().get(code);
+        if (ar != null) {
+            Schema<?> dataSchema = createSchemaRef(clazz, isArray);
+            Schema<?> wrapper = createApiResponseWrapper(dataSchema);
+            MediaType mt = new MediaType().schema(wrapper);
+            ar.setContent(new Content().addMediaType("application/json", mt));
+
+            log.debug("✓ Response: {}{}", clazz.getSimpleName(), isArray ? "[]" : "");
+        }
+    }
+
+    private void setBatchResponse(Operation op, Class<?> clazz, String code) {
+        if (op.getResponses() == null) return;
+
+        ApiResponse ar = op.getResponses().get(code);
+        if (ar != null) {
+            Schema<?> batchSchema = new Schema<>().type("object")
+                    .addProperty("createdEntities", new ArraySchema()
+                            .items(createSchemaRef(clazz, false)))
+                    .addProperty("skippedCount", new Schema<>().type("integer"))
+                    .addProperty("skippedReasons", new ArraySchema()
+                            .items(new Schema<>().type("string")));
+
+            Schema<?> wrapper = createApiResponseWrapper(batchSchema);
+            MediaType mt = new MediaType().schema(wrapper);
+            ar.setContent(new Content().addMediaType("application/json", mt));
+        }
+    }
+
+    private void setPageResponse(Operation op, Class<?> clazz, String code) {
+        if (op.getResponses() == null) return;
+
+        ApiResponse ar = op.getResponses().get(code);
+        if (ar != null) {
+            Schema<?> pageSchema = new Schema<>().type("object")
+                    .addProperty("content", new ArraySchema()
+                            .items(createSchemaRef(clazz, false)))
+                    .addProperty("currentPage", new Schema<>().type("integer"))
+                    .addProperty("pageSize", new Schema<>().type("integer"))
+                    .addProperty("totalElements", new Schema<>().type("integer").format("int64"))
+                    .addProperty("totalPages", new Schema<>().type("integer"))
+                    .addProperty("first", new Schema<>().type("boolean"))
+                    .addProperty("last", new Schema<>().type("boolean"))
+                    .addProperty("empty", new Schema<>().type("boolean"));
+
+            Schema<?> wrapper = createApiResponseWrapper(pageSchema);
+            MediaType mt = new MediaType().schema(wrapper);
+            ar.setContent(new Content().addMediaType("application/json", mt));
+        }
+    }
+
+    private Schema<?> createSchemaRef(Class<?> clazz, boolean isArray) {
+        Schema<?> ref = new Schema<>().$ref("#/components/schemas/" + clazz.getSimpleName());
+        return isArray ? new ArraySchema().items(ref) : ref;
+    }
+
+    private Schema<?> createApiResponseWrapper(Schema<?> dataSchema) {
+        return new Schema<>().type("object")
+                .addProperty("success", new Schema<>().type("boolean"))
+                .addProperty("message", new Schema<>().type("string"))
+                .addProperty("data", dataSchema)
+                .addProperty("timestamp", new Schema<>().type("string").format("date-time"))
+                .addProperty("executionTimeMs", new Schema<>().type("integer").format("int64"));
+    }
+
+    private Class<?> getEntityClass(Class<?> controller) {
         try {
-            // Step 1: Use readAll to register main schema + immediate nested types
-            Map<String, Schema> allSchemas = ModelConverters.getInstance().readAll(schemaClass);
-
-            if (!allSchemas.isEmpty()) {
-                processedSchemas.add(schemaClass);
-                log.debug("✓ Deep-registered schema: {} ({} schemas) [REQUEST BODY]",
-                        schemaClass.getSimpleName(), allSchemas.size());
-
-                for (String schemaName : allSchemas.keySet()) {
-                    log.debug("  → Schema: {}", schemaName);
-                }
-            }
-
-            // Step 2: ✅ RECURSIVELY register all field types
-            registerAllNestedFieldTypes(schemaClass);
-
-            // Step 3: ✅ RECURSIVELY register all inner classes
-            registerAllInnerClassesRecursively(schemaClass);
-
-            // Step 4: Resolve as ResolvedSchema
-            ResolvedSchema resolvedSchema = ModelConverters.getInstance()
-                    .resolveAsResolvedSchema(new AnnotatedType(schemaClass));
-
-            if (resolvedSchema != null && resolvedSchema.schema != null) {
-                log.debug("✓ Resolved schema structure for: {}", schemaClass.getSimpleName());
-                return resolvedSchema;
-            }
-
-        } catch (Exception e) {
-            log.error("Could not deep-resolve schema for {}: {}",
-                    schemaClass.getSimpleName(), e.getMessage(), e);
-        }
-
-        return null;
-    }
-
-    /**
-     * ✅ Recursively register all nested field types
-     */
-    private void registerAllNestedFieldTypes(Class<?> clazz) {
-        Set<Class<?>> visited = new HashSet<>();
-        registerFieldTypesRecursive(clazz, visited);
-    }
-
-    private void registerFieldTypesRecursive(Class<?> clazz, Set<Class<?>> visited) {
-        if (clazz == null || !visited.add(clazz)) {
-            return;
-        }
-
-        for (Field field : getAllFieldsIncludingInherited(clazz)) {
-            if (Modifier.isStatic(field.getModifiers()) ||
-                    Modifier.isTransient(field.getModifiers()) ||
-                    field.isSynthetic()) {
-                continue;
-            }
-
-            Class<?> fieldType = field.getType();
-
-            // Handle Collections: List<X>, Set<X>
-            if (Collection.class.isAssignableFrom(fieldType)) {
-                Type genericType = field.getGenericType();
-                if (genericType instanceof ParameterizedType paramType) {
-                    Type[] typeArgs = paramType.getActualTypeArguments();
-                    if (typeArgs.length > 0 && typeArgs[0] instanceof Class<?> elementType) {
-                        if (shouldRegisterForRequestBody(elementType)) {
-                            log.debug("  → Collection element: {}", elementType.getSimpleName());
-                            resolveSchemaWithDeepNesting(elementType);
-                            registerFieldTypesRecursive(elementType, visited);
-                        }
-                    }
-                }
-            }
-            // Handle Maps: Map<K, V>
-            else if (Map.class.isAssignableFrom(fieldType)) {
-                Type genericType = field.getGenericType();
-                if (genericType instanceof ParameterizedType paramType) {
-                    Type[] typeArgs = paramType.getActualTypeArguments();
-                    for (Type typeArg : typeArgs) {
-                        if (typeArg instanceof Class<?> paramType1) {
-                            if (shouldRegisterForRequestBody(paramType1)) {
-                                log.debug("  → Map type: {}", paramType1.getSimpleName());
-                                resolveSchemaWithDeepNesting(paramType1);
-                                registerFieldTypesRecursive(paramType1, visited);
-                            }
-                        }
-                    }
-                }
-            }
-            // Handle custom object types (POJOs, inner classes, etc.)
-            else if (shouldRegisterForRequestBody(fieldType)) {
-                log.debug("  → Nested field: {} (type: {})",
-                        field.getName(), fieldType.getSimpleName());
-                resolveSchemaWithDeepNesting(fieldType);
-                registerFieldTypesRecursive(fieldType, visited);
-            }
-        }
-    }
-
-    /**
-     * ✅ Recursively register all inner classes at any depth
-     */
-    private void registerAllInnerClassesRecursively(Class<?> clazz) {
-        try {
-            Class<?>[] innerClasses = clazz.getDeclaredClasses();
-
-            for (Class<?> innerClass : innerClasses) {
-                if (Modifier.isPrivate(innerClass.getModifiers()) ||
-                        innerClass.isSynthetic() ||
-                        innerClass.isAnonymousClass()) {
-                    continue;
-                }
-
-                if (shouldRegisterForRequestBody(innerClass)) {
-                    log.debug("  → Inner class: {} in {}",
-                            innerClass.getSimpleName(), clazz.getSimpleName());
-                    resolveSchemaWithDeepNesting(innerClass);
-                }
+            Type t = controller.getGenericSuperclass();
+            if (t instanceof ParameterizedType pt) {
+                return (Class<?>) pt.getActualTypeArguments()[0];
             }
         } catch (Exception e) {
-            log.debug("Error scanning inner classes of {}: {}",
-                    clazz.getSimpleName(), e.getMessage());
-        }
-    }
-
-    /**
-     * ✅ Check if class should be registered for request body (package-agnostic)
-     */
-    private boolean shouldRegisterForRequestBody(Class<?> clazz) {
-        if (clazz == null ||
-                clazz.isPrimitive() ||
-                clazz.isArray() ||
-                clazz.isEnum() ||
-                processedSchemas.contains(clazz)) {
-            return false;
-        }
-
-        String packageName = clazz.getPackageName();
-
-        // Exclude framework packages
-        for (String excludedPrefix : excludedPackagePrefixes) {
-            if (packageName.startsWith(excludedPrefix)) {
-                return false;
-            }
-        }
-
-        // Include CrudX classes
-        if (packageName.startsWith("io.github.sachinnimbal.crudx")) {
-            return true;
-        }
-
-        // Include jakarta.persistence only
-        if (packageName.startsWith("jakarta.")) {
-            return packageName.startsWith("jakarta.persistence");
-        }
-
-        // ✅ Accept ALL user application classes
-        return true;
-    }
-
-    /**
-     * Get all fields including inherited ones
-     */
-    private List<Field> getAllFieldsIncludingInherited(Class<?> clazz) {
-        List<Field> fields = new ArrayList<>();
-        Class<?> current = clazz;
-
-        while (current != null && current != Object.class) {
-            fields.addAll(Arrays.asList(current.getDeclaredFields()));
-            current = current.getSuperclass();
-        }
-
-        return fields;
-    }
-
-    /**
-     * Standard schema resolution (for responses - handled by Swagger after API hit)
-     */
-    private ResolvedSchema resolveSchema(Class<?> schemaClass) {
-        if (schemaClass == null || processedSchemas.contains(schemaClass)) {
-            return null;
-        }
-
-        try {
-            Map<String, Schema> allSchemas = ModelConverters.getInstance().readAll(schemaClass);
-
-            if (!allSchemas.isEmpty()) {
-                processedSchemas.add(schemaClass);
-                log.debug("✓ Registered schema: {} ({} schemas)",
-                        schemaClass.getSimpleName(), allSchemas.size());
-
-                for (String schemaName : allSchemas.keySet()) {
-                    log.debug("  → Schema: {}", schemaName);
-                }
-            }
-
-            ResolvedSchema resolvedSchema = ModelConverters.getInstance()
-                    .resolveAsResolvedSchema(new AnnotatedType(schemaClass));
-
-            if (resolvedSchema != null && resolvedSchema.schema != null) {
-                log.debug("✓ Resolved schema structure for: {}", schemaClass.getSimpleName());
-                return resolvedSchema;
-            }
-
-        } catch (Exception e) {
-            log.error("Could not resolve schema for {}: {}",
-                    schemaClass.getSimpleName(), e.getMessage(), e);
-        }
-
-        return null;
-    }
-
-    /**
-     * Set request body schema with resolved type information
-     */
-    private void setRequestBodySchema(Operation operation, Class<?> schemaClass,
-                                      ResolvedSchema resolvedSchema, boolean isArray) {
-        RequestBody requestBody = operation.getRequestBody();
-        if (requestBody == null) {
-            requestBody = new RequestBody();
-            requestBody.setRequired(true);
-            operation.setRequestBody(requestBody);
-        }
-
-        Content content = requestBody.getContent();
-        if (content == null) {
-            content = new Content();
-            requestBody.setContent(content);
-        }
-
-        MediaType mediaType = new MediaType();
-        Schema<?> schema;
-
-        if (resolvedSchema != null && resolvedSchema.schema != null) {
-            if (isArray) {
-                ArraySchema arraySchema = new ArraySchema();
-                arraySchema.setItems(resolvedSchema.schema);
-                schema = arraySchema;
-            } else {
-                schema = resolvedSchema.schema;
-            }
-        } else {
-            if (isArray) {
-                ArraySchema arraySchema = new ArraySchema();
-                Schema<?> itemSchema = new Schema<>();
-                itemSchema.set$ref("#/components/schemas/" + schemaClass.getSimpleName());
-                arraySchema.setItems(itemSchema);
-                schema = arraySchema;
-            } else {
-                schema = new Schema<>();
-                schema.set$ref("#/components/schemas/" + schemaClass.getSimpleName());
-            }
-        }
-
-        mediaType.setSchema(schema);
-        content.addMediaType("application/json", mediaType);
-
-        log.debug("✓ Request schema set: {}{}", schemaClass.getSimpleName(), isArray ? "[]" : "");
-    }
-
-    /**
-     * Set request body schema for batch operations
-     */
-    private void setRequestBodySchemaForBatch(Operation operation, Class<?> elementClass,
-                                              ResolvedSchema resolvedSchema) {
-        RequestBody requestBody = operation.getRequestBody();
-        if (requestBody == null) {
-            requestBody = new RequestBody();
-            requestBody.setRequired(true);
-            operation.setRequestBody(requestBody);
-        }
-
-        Content content = requestBody.getContent();
-        if (content == null) {
-            content = new Content();
-            requestBody.setContent(content);
-        }
-
-        MediaType mediaType = new MediaType();
-        ArraySchema arraySchema = new ArraySchema();
-
-        if (resolvedSchema != null && resolvedSchema.schema != null) {
-            arraySchema.setItems(resolvedSchema.schema);
-        } else {
-            Schema<?> itemSchema = new Schema<>();
-            itemSchema.set$ref("#/components/schemas/" + elementClass.getSimpleName());
-            arraySchema.setItems(itemSchema);
-        }
-
-        mediaType.setSchema(arraySchema);
-        content.addMediaType("application/json", mediaType);
-
-        log.debug("✓ Batch request schema set: {}[]", elementClass.getSimpleName());
-    }
-
-    /**
-     * Set response schema with resolved type information
-     */
-    private void setResponseSchema(Operation operation, Class<?> schemaClass,
-                                   ResolvedSchema resolvedSchema, boolean isArray, String statusCode) {
-        if (operation.getResponses() == null) {
-            return;
-        }
-
-        Schema<?> dataSchema;
-
-        if (resolvedSchema != null && resolvedSchema.schema != null) {
-            if (isArray) {
-                ArraySchema arraySchema = new ArraySchema();
-                arraySchema.setItems(resolvedSchema.schema);
-                dataSchema = arraySchema;
-            } else {
-                dataSchema = resolvedSchema.schema;
-            }
-        } else {
-            if (isArray) {
-                ArraySchema arraySchema = new ArraySchema();
-                Schema<?> itemSchema = new Schema<>();
-                itemSchema.set$ref("#/components/schemas/" + schemaClass.getSimpleName());
-                arraySchema.setItems(itemSchema);
-                dataSchema = arraySchema;
-            } else {
-                dataSchema = new Schema<>();
-                dataSchema.set$ref("#/components/schemas/" + schemaClass.getSimpleName());
-            }
-        }
-
-        ApiResponse response = operation.getResponses().get(statusCode);
-        if (response != null) {
-            updateApiResponseSchema(response, dataSchema, schemaClass.getSimpleName());
-        }
-
-        log.debug("✓ Response schema set: {}{}", schemaClass.getSimpleName(), isArray ? "[]" : "");
-    }
-
-    private void setBatchResultResponseSchema(Operation operation, Class<?> elementClass, String statusCode) {
-        if (operation.getResponses() == null) {
-            return;
-        }
-
-        Schema<?> batchResultSchema = new Schema<>();
-        batchResultSchema.setType("object");
-
-        ArraySchema createdEntitiesArray = new ArraySchema();
-        Schema<?> itemSchema = new Schema<>();
-        itemSchema.set$ref("#/components/schemas/" + elementClass.getSimpleName());
-        createdEntitiesArray.setItems(itemSchema);
-
-        batchResultSchema.addProperty("createdEntities", createdEntitiesArray);
-        batchResultSchema.addProperty("skippedCount", new Schema<>().type("integer"));
-        batchResultSchema.addProperty("skippedReasons", new ArraySchema().items(new Schema<>().type("string")));
-
-        ApiResponse response = operation.getResponses().get(statusCode);
-        if (response != null) {
-            updateApiResponseSchema(response, batchResultSchema, "BatchResult<" + elementClass.getSimpleName() + ">");
-        }
-
-        log.debug("✓ BatchResult response schema set: BatchResult<{}>", elementClass.getSimpleName());
-    }
-
-    private void setPageResponseSchema(Operation operation, Class<?> elementClass,
-                                       ResolvedSchema resolvedSchema, String statusCode) {
-        if (operation.getResponses() == null) {
-            return;
-        }
-
-        Schema<?> pageResponseSchema = new Schema<>();
-        pageResponseSchema.setType("object");
-
-        ArraySchema contentArray = new ArraySchema();
-        if (resolvedSchema != null && resolvedSchema.schema != null) {
-            contentArray.setItems(resolvedSchema.schema);
-        } else {
-            Schema<?> itemSchema = new Schema<>();
-            itemSchema.set$ref("#/components/schemas/" + elementClass.getSimpleName());
-            contentArray.setItems(itemSchema);
-        }
-
-        pageResponseSchema.addProperty("content", contentArray);
-        pageResponseSchema.addProperty("currentPage", new Schema<>().type("integer"));
-        pageResponseSchema.addProperty("pageSize", new Schema<>().type("integer"));
-        pageResponseSchema.addProperty("totalElements", new Schema<>().type("integer").format("int64"));
-        pageResponseSchema.addProperty("totalPages", new Schema<>().type("integer"));
-        pageResponseSchema.addProperty("first", new Schema<>().type("boolean"));
-        pageResponseSchema.addProperty("last", new Schema<>().type("boolean"));
-        pageResponseSchema.addProperty("empty", new Schema<>().type("boolean"));
-
-        ApiResponse response = operation.getResponses().get(statusCode);
-        if (response != null) {
-            updateApiResponseSchema(response, pageResponseSchema, "PageResponse<" + elementClass.getSimpleName() + ">");
-        }
-
-        log.debug("✓ PageResponse schema set: PageResponse<{}>", elementClass.getSimpleName());
-    }
-
-    private void updateApiResponseSchema(ApiResponse apiResponse, Schema<?> dataSchema, String description) {
-        if (apiResponse.getContent() == null) {
-            apiResponse.setContent(new Content());
-        }
-
-        MediaType mediaType = new MediaType();
-
-        Schema<?> wrapperSchema = new Schema<>();
-        wrapperSchema.setType("object");
-        wrapperSchema.addProperty("success", new Schema<>().type("boolean"));
-        wrapperSchema.addProperty("message", new Schema<>().type("string"));
-        wrapperSchema.addProperty("data", dataSchema);
-        wrapperSchema.addProperty("timestamp", new Schema<>().type("string").format("date-time"));
-        wrapperSchema.addProperty("executionTimeMs", new Schema<>().type("integer").format("int64"));
-
-        mediaType.setSchema(wrapperSchema);
-        apiResponse.getContent().addMediaType("application/json", mediaType);
-        apiResponse.setDescription("Success - Returns " + description);
-    }
-
-    private Class<?> getEntityClassFromController(Class<?> controllerClass) {
-        try {
-            Type genericSuperclass = controllerClass.getGenericSuperclass();
-            if (genericSuperclass instanceof ParameterizedType paramType) {
-                Type[] typeArgs = paramType.getActualTypeArguments();
-                if (typeArgs.length >= 1) {
-                    return (Class<?>) typeArgs[0];
-                }
-            }
-        } catch (Exception e) {
-            log.debug("Could not extract entity class from controller: {}", e.getMessage());
+            log.debug("Could not extract entity class: {}", e.getMessage());
         }
         return null;
     }
 
     private String getServerUrl() {
         String port = environment.getProperty("server.port", "8080");
-        String contextPath = environment.getProperty("server.servlet.context-path", "");
+        String ctx = environment.getProperty("server.servlet.context-path", "");
         String host = environment.getProperty("server.address", "localhost");
-
-        if (contextPath.endsWith("/")) {
-            contextPath = contextPath.substring(0, contextPath.length() - 1);
-        }
-
-        return String.format("http://%s:%s%s", host, port, contextPath);
+        if (ctx.endsWith("/")) ctx = ctx.substring(0, ctx.length() - 1);
+        return String.format("http://%s:%s%s", host, port, ctx);
     }
 }
