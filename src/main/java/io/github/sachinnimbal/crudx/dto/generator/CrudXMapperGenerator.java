@@ -13,16 +13,18 @@ import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
+import java.lang.reflect.ParameterizedType;
+import java.lang.reflect.Type;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.PosixFilePermission;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 
-/**
- * FIXED MAPPER GENERATOR - Correct Inner Class Handling
- */
 @Slf4j
 @Component
 public class CrudXMapperGenerator {
@@ -30,6 +32,28 @@ public class CrudXMapperGenerator {
     private static final String GENERATED_PACKAGE = "io.github.sachinnimbal.crudx.generated.mappers";
     private static final String MAPPER_SUFFIX = "EntityMapper";
     private static final String LOCK_COMMENT = "// ⚠️ AUTO-GENERATED - DO NOT MODIFY - Changes will be overwritten\n";
+    private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("MMMM dd, yyyy 'at' hh:mm:ss a");
+    private static final String FRAMEWORK_VERSION = getFrameworkVersion();
+
+    private static final String APACHE_LICENSE_HEADER =
+            """
+                    /*
+                     * Copyright 2025 Sachin Nimbal
+                     *
+                     * Licensed under the Apache License, Version 2.0 (the "License");
+                     * you may not use this file except in compliance with the License.
+                     * You may obtain a copy of the License at
+                     *
+                     *     http://www.apache.org/licenses/LICENSE-2.0
+                     *
+                     * Unless required by applicable law or agreed to in writing, software
+                     * distributed under the License is distributed on an "AS IS" BASIS,
+                     * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+                     * See the License for the specific language governing permissions and
+                     * limitations under the License.
+                     */
+                    
+                    """;
 
     private final Path outputDirectory;
     private final JavaCompiler compiler;
@@ -39,6 +63,39 @@ public class CrudXMapperGenerator {
         this.compiler = ToolProvider.getSystemJavaCompiler();
         this.outputDirectory = createOutputDirectory();
         cleanGeneratedFiles();
+    }
+
+    private static String getFrameworkVersion() {
+        String version = System.getProperty("crudx.version");
+        if (version != null && !version.isEmpty()) {
+            return version;
+        }
+
+        Package pkg = CrudXMapperGenerator.class.getPackage();
+        if (pkg != null && pkg.getImplementationVersion() != null) {
+            return pkg.getImplementationVersion();
+        }
+
+        try {
+            Properties props = new Properties();
+            var versionStream = CrudXMapperGenerator.class.getClassLoader()
+                    .getResourceAsStream("crudx-version.properties");
+            if (versionStream != null) {
+                try (versionStream) {
+                    props.load(versionStream);
+                    version = props.getProperty("version");
+                    if (version != null && !version.isEmpty()) {
+                        log.debug("Loaded CrudX version from properties: {}", version);
+                        return version;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.debug("Could not read version from properties: {}", e.getMessage());
+        }
+
+        log.debug("Using fallback version: 2.0.0");
+        return "2.0.0";
     }
 
     @SuppressWarnings("unchecked")
@@ -121,19 +178,25 @@ public class CrudXMapperGenerator {
         MapperAnalysis analysis = new MapperAnalysis();
         analysis.entityClass = entityClass;
         analysis.entityFields = getAllFields(entityClass);
+        log.info("Analyzing entity: {} with {} DTOs", entityClass.getSimpleName(), dtoClasses.size());
 
         for (Class<?> dtoClass : dtoClasses) {
             DtoAnalysis dtoAnalysis = new DtoAnalysis();
             dtoAnalysis.dtoClass = dtoClass;
             dtoAnalysis.dtoFields = getAllFields(dtoClass);
+            log.debug("Analyzing DTO: {} with {} fields", dtoClass.getSimpleName(), dtoAnalysis.dtoFields.size());
 
             for (Field dtoField : dtoAnalysis.dtoFields) {
                 FieldMapping mapping = analyzeFieldMapping(dtoField, entityClass);
                 if (mapping != null) {
                     dtoAnalysis.fieldMappings.add(mapping);
+                    log.debug("  Field: {} -> {} (nested={}, collection={})",
+                            mapping.dtoFieldName,
+                            mapping.entityFieldName,
+                            mapping.nested,
+                            mapping.collection);
                 }
             }
-
             analysis.dtoAnalyses.add(dtoAnalysis);
         }
 
@@ -164,11 +227,21 @@ public class CrudXMapperGenerator {
             if (dtoField.isAnnotationPresent(CrudXNested.class)) {
                 mapping.nested = true;
                 mapping.nestedDtoClass = dtoField.getAnnotation(CrudXNested.class).dto();
+            } else if (isNestedObject(dtoField.getType())) {
+                mapping.nested = true;
+                mapping.nestedDtoClass = null;
+                log.debug("Auto-detected nested object: {} in {}",
+                        dtoField.getName(), dtoField.getDeclaringClass().getSimpleName());
             }
 
             if (dtoField.isAnnotationPresent(CrudXCollection.class)) {
                 mapping.collection = true;
                 mapping.collectionElementType = dtoField.getAnnotation(CrudXCollection.class).elementDto();
+            } else if (Collection.class.isAssignableFrom(dtoField.getType())) {
+                mapping.collection = true;
+                mapping.collectionElementType = getCollectionElementType(dtoField);
+                log.debug("Auto-detected collection: {} in {}",
+                        dtoField.getName(), dtoField.getDeclaringClass().getSimpleName());
             }
 
             return mapping;
@@ -179,15 +252,31 @@ public class CrudXMapperGenerator {
         }
     }
 
+    private Class<?> getCollectionElementType(Field field) {
+        try {
+            Type genericType = field.getGenericType();
+            if (genericType instanceof ParameterizedType paramType) {
+                Type[] typeArgs = paramType.getActualTypeArguments();
+                if (typeArgs.length > 0 && typeArgs[0] instanceof Class) {
+                    return (Class<?>) typeArgs[0];
+                }
+            }
+        } catch (Exception e) {
+            log.debug("Could not determine collection element type for {}", field.getName());
+        }
+        return Object.class;
+    }
+
     private String generateCrudXMapperSource(Class<?> entityClass, MapperAnalysis analysis) {
         StringBuilder code = new StringBuilder();
         String className = getMapperClassName(entityClass);
         String simpleClassName = className.substring(className.lastIndexOf('.') + 1);
+        LocalDateTime now = LocalDateTime.now();
+        String formattedDateTime = now.format(DATE_TIME_FORMATTER);
 
-        // Lock warning
+        code.append(APACHE_LICENSE_HEADER);
         code.append(LOCK_COMMENT);
 
-        // ✅ NEW: MapStruct-style header comment
         code.append("/*\n");
         code.append(" * CrudX Entity Mapper - Auto-generated by CrudX Framework\n");
         code.append(" *\n");
@@ -196,36 +285,35 @@ public class CrudXMapperGenerator {
         code.append(" * DTOs Supported: ").append(analysis.dtoAnalyses.size()).append("\n");
         code.append(" *\n");
 
-        // List all supported DTOs
         for (DtoAnalysis dto : analysis.dtoAnalyses) {
             code.append(" *   - ").append(dto.dtoClass.getSimpleName()).append("\n");
         }
 
         code.append(" *\n");
-        code.append(" * Generated on: ").append(java.time.LocalDateTime.now()
-                .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))).append("\n");
-        code.append(" * CrudX Framework Version: 2.0.0\n");
+        code.append(" * Generated on: ").append(formattedDateTime).append("\n");
+        code.append(" * CrudX Framework Version: ").append(FRAMEWORK_VERSION).append("\n");
         code.append(" *\n");
         code.append(" * WARNING: Do not modify this file manually.\n");
         code.append(" *          Changes will be overwritten on next build.\n");
         code.append(" */\n\n");
 
-        // Package
         code.append("package ").append(GENERATED_PACKAGE).append(";\n\n");
 
-        // Imports
-        code.append("import io.github.sachinnimbal.crudx.dto.mapper.CrudXEntityMapper;\n");
-        code.append(generateImportStatement(entityClass)).append("\n");
+        Set<String> imports = new LinkedHashSet<>();
+        imports.add("import io.github.sachinnimbal.crudx.dto.mapper.CrudXEntityMapper;");
+        imports.add(generateImportStatement(entityClass));
 
         for (DtoAnalysis dtoAnalysis : analysis.dtoAnalyses) {
-            code.append(generateImportStatement(dtoAnalysis.dtoClass)).append("\n");
+            imports.add(generateImportStatement(dtoAnalysis.dtoClass));
+        }
+
+        for (String imp : imports) {
+            code.append(imp).append("\n");
         }
 
         code.append("import java.util.*;\n");
         code.append("import java.time.*;\n");
-        code.append("import java.lang.reflect.*;\n\n");
-
-        // ✅ NEW: Add @Generated annotation
+        code.append("import java.lang.reflect.*;\n");
         code.append("import javax.annotation.processing.Generated;\n\n");
 
         code.append("/**\n");
@@ -239,28 +327,25 @@ public class CrudXMapperGenerator {
         }
         code.append(" * </ul>\n");
         code.append(" *\n");
-        code.append(" * @generated by CrudX Framework v2.0.0\n");
-        code.append(" * @author CrudX Mapper Generator\n");
+        code.append(" * @generated by CrudX Framework v").append(FRAMEWORK_VERSION).append("\n");
+        code.append(" * @author Sachin Nimbal\n");
         code.append(" */\n");
 
-        // Add @Generated annotation
         code.append("@Generated(\n");
         code.append("    value = \"io.github.sachinnimbal.crudx.dto.generator.CrudXMapperGenerator\",\n");
-        code.append("    date = \"").append(java.time.LocalDateTime.now()
-                .format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE_TIME)).append("\",\n");
-        code.append("    comments = \"CrudX Framework - Unified Entity Mapper\"\n");
+        code.append("    date = \"").append(formattedDateTime).append("\",\n");
+        code.append("    comments = \"CRUDX | The Next-Gen Multi-Database CRUD Framework for Spring Boot.\"\n");
         code.append(")\n");
 
-        // Class declaration
         code.append("public class ").append(simpleClassName);
         code.append(" implements CrudXEntityMapper<");
         code.append(getCodeReference(entityClass)).append(", Object> {\n\n");
 
-        // Methods
         code.append(generateGenericToEntityMethod(entityClass, analysis));
         code.append(generateGenericToDtoMethod(entityClass, analysis));
         code.append(generateUpdateEntityMethod(entityClass, analysis));
         code.append(generateBatchMethods(entityClass));
+        code.append(generateDeepCopyHelpers(analysis));
         code.append(generateMetadataMethods(entityClass, analysis));
 
         code.append("}\n");
@@ -268,27 +353,27 @@ public class CrudXMapperGenerator {
         return code.toString();
     }
 
-    /**
-     * ✅ FIX: Generate correct import for both regular and inner classes
-     */
     private String generateImportStatement(Class<?> clazz) {
-        // Convert com.example.Controller$Inner to com.example.Controller.Inner
+        if (clazz.getEnclosingClass() != null) {
+            return "import " + clazz.getEnclosingClass().getName().replace('$', '.') + ";";
+        }
         return "import " + clazz.getName().replace('$', '.') + ";";
     }
 
-    /**
-     * Get reference for Javadoc (uses simple name)
-     */
-    private String getJavadocReference(Class<?> clazz) {
+    private String getCodeReference(Class<?> clazz) {
+        if (clazz.getEnclosingClass() != null) {
+            return getCodeReference(clazz.getEnclosingClass()) + "." + clazz.getSimpleName();
+        }
         return clazz.getSimpleName();
     }
 
     /**
-     * ✅ CRITICAL FIX: Get reference for generated code
-     * Since we import "com.example.Controller.Inner", we just use "Inner" in code
+     * Creates a unique method name using fully qualified class names to avoid collisions
      */
-    private String getCodeReference(Class<?> clazz) {
-        return clazz.getSimpleName();
+    private String getUniqueMethodName(Class<?> sourceType, Class<?> targetType) {
+        String sourceFqn = sourceType.getName().replace('.', '_').replace('$', '_');
+        String targetFqn = targetType.getName().replace('.', '_').replace('$', '_');
+        return "map_" + sourceFqn + "_to_" + targetFqn;
     }
 
     private String generateGenericToEntityMethod(Class<?> entityClass, MapperAnalysis analysis) {
@@ -312,7 +397,17 @@ public class CrudXMapperGenerator {
                 String getter = "typedDto.get" + capitalize(mapping.dtoFieldName) + "()";
                 String setter = "entity.set" + capitalize(mapping.entityFieldName);
 
-                if (!mapping.nested && !mapping.collection) {
+                if (mapping.nested) {
+                    // Use unique method name based on fully qualified types
+                    String conversionMethod = getUniqueMethodName(mapping.dtoFieldType, mapping.entityFieldType);
+                    code.append("            ").append(setter).append("(")
+                            .append(conversionMethod).append("(").append(getter).append("));\n");
+                } else if (mapping.collection) {
+                    Class<?> entityElementType = getEntityElementTypeFromField(mapping.entityFieldName, entityClass);
+                    String conversionMethod = getUniqueMethodName(mapping.collectionElementType, entityElementType) + "_List";
+                    code.append("            ").append(setter).append("(")
+                            .append(conversionMethod).append("(").append(getter).append("));\n");
+                } else {
                     code.append("            ").append(setter).append("(").append(getter).append(");\n");
                 }
             }
@@ -345,7 +440,19 @@ public class CrudXMapperGenerator {
             for (FieldMapping mapping : dtoAnalysis.fieldMappings) {
                 String getter = "entity.get" + capitalize(mapping.entityFieldName) + "()";
                 String setter = "dto.set" + capitalize(mapping.dtoFieldName);
-                code.append("            ").append(setter).append("(").append(getter).append(");\n");
+
+                if (mapping.nested) {
+                    String conversionMethod = getUniqueMethodName(mapping.entityFieldType, mapping.dtoFieldType);
+                    code.append("            ").append(setter).append("(")
+                            .append(conversionMethod).append("(").append(getter).append("));\n");
+                } else if (mapping.collection) {
+                    Class<?> entityElementType = getEntityElementTypeFromField(mapping.entityFieldName, entityClass);
+                    String conversionMethod = getUniqueMethodName(entityElementType, mapping.collectionElementType) + "_List";
+                    code.append("            ").append(setter).append("(")
+                            .append(conversionMethod).append("(").append(getter).append("));\n");
+                } else {
+                    code.append("            ").append(setter).append("(").append(getter).append(");\n");
+                }
             }
 
             code.append("            return (D) dto;\n");
@@ -378,7 +485,20 @@ public class CrudXMapperGenerator {
                 String setter = "entity.set" + capitalize(mapping.entityFieldName);
 
                 code.append("            if (").append(getter).append(" != null) {\n");
-                code.append("                ").append(setter).append("(").append(getter).append(");\n");
+
+                if (mapping.nested) {
+                    String conversionMethod = getUniqueMethodName(mapping.dtoFieldType, mapping.entityFieldType);
+                    code.append("                ").append(setter).append("(")
+                            .append(conversionMethod).append("(").append(getter).append("));\n");
+                } else if (mapping.collection) {
+                    Class<?> entityElementType = getEntityElementTypeFromField(mapping.entityFieldName, entityClass);
+                    String conversionMethod = getUniqueMethodName(mapping.collectionElementType, entityElementType) + "_List";
+                    code.append("                ").append(setter).append("(")
+                            .append(conversionMethod).append("(").append(getter).append("));\n");
+                } else {
+                    code.append("                ").append(setter).append("(").append(getter).append(");\n");
+                }
+
                 code.append("            }\n");
             }
 
@@ -523,7 +643,10 @@ public class CrudXMapperGenerator {
     private void lockGeneratedFile(Path file) {
         try {
             File javaFile = file.toFile();
-            javaFile.setReadOnly();
+
+            if (!javaFile.setReadOnly()) {
+                log.warn("Failed to set read-only flag for: {}", file.getFileName());
+            }
 
             if (file.getFileSystem().supportedFileAttributeViews().contains("posix")) {
                 try {
@@ -532,14 +655,16 @@ public class CrudXMapperGenerator {
                     perms.add(PosixFilePermission.GROUP_READ);
                     perms.add(PosixFilePermission.OTHERS_READ);
                     Files.setPosixFilePermissions(file, perms);
+                    log.debug("🔒 Set POSIX read-only permissions for: {}", file.getFileName());
                 } catch (Exception e) {
                     log.debug("Could not set POSIX permissions: {}", e.getMessage());
                 }
             }
 
-            log.debug("🔒 Locked generated file: {}", file.getFileName());
+            log.info("🔒 Locked generated file (read-only): {}", file.getFileName());
+
         } catch (Exception e) {
-            log.warn("Could not lock file {}: {}", file.getFileName(), e.getMessage());
+            log.warn("Could not fully lock file {}: {}", file.getFileName(), e.getMessage());
         }
     }
 
@@ -592,6 +717,316 @@ public class CrudXMapperGenerator {
             }
             throw e;
         }
+    }
+
+    private Class<?> getEntityElementTypeFromField(String fieldName, Class<?> entityClass) {
+        try {
+            Field field = getFieldFromClass(entityClass, fieldName);
+            Type genericType = field.getGenericType();
+            if (genericType instanceof ParameterizedType paramType) {
+                Type[] typeArgs = paramType.getActualTypeArguments();
+                if (typeArgs.length > 0 && typeArgs[0] instanceof Class) {
+                    return (Class<?>) typeArgs[0];
+                }
+            }
+        } catch (Exception e) {
+            log.debug("Could not determine entity element type for field: {}", fieldName);
+        }
+        return Object.class;
+    }
+
+    private static class NestedMapping {
+        String methodName;
+        Class<?> sourceType;
+        Class<?> targetType;
+        List<FieldMapping> fieldMappings = new ArrayList<>();
+    }
+
+    private String generateDeepCopyHelpers(MapperAnalysis analysis) {
+        StringBuilder code = new StringBuilder();
+        // Use fully qualified names as keys to avoid collisions
+        Map<String, NestedMapping> nestedMappings = new LinkedHashMap<>();
+
+        // First pass: Collect all nested mappings
+        for (DtoAnalysis dtoAnalysis : analysis.dtoAnalyses) {
+            for (FieldMapping mapping : dtoAnalysis.fieldMappings) {
+
+                // Handle nested objects
+                if (mapping.nested) {
+                    // Use fully qualified names to create unique keys
+                    String key = mapping.dtoFieldType.getName() + "_to_" + mapping.entityFieldType.getName();
+
+                    if (!nestedMappings.containsKey(key)) {
+                        NestedMapping nestedMap = new NestedMapping();
+                        nestedMap.methodName = getUniqueMethodName(mapping.dtoFieldType, mapping.entityFieldType);
+                        nestedMap.sourceType = mapping.dtoFieldType;
+                        nestedMap.targetType = mapping.entityFieldType;
+                        nestedMap.fieldMappings = analyzeNestedFieldMappings(
+                                mapping.dtoFieldType,
+                                mapping.entityFieldType
+                        );
+
+                        nestedMappings.put(key, nestedMap);
+                    }
+
+                    // Reverse mapping (Entity → DTO)
+                    String reverseKey = mapping.entityFieldType.getName() + "_to_" + mapping.dtoFieldType.getName();
+
+                    if (!nestedMappings.containsKey(reverseKey)) {
+                        NestedMapping reverseMap = new NestedMapping();
+                        reverseMap.methodName = getUniqueMethodName(mapping.entityFieldType, mapping.dtoFieldType);
+                        reverseMap.sourceType = mapping.entityFieldType;
+                        reverseMap.targetType = mapping.dtoFieldType;
+                        reverseMap.fieldMappings = analyzeNestedFieldMappings(
+                                mapping.entityFieldType,
+                                mapping.dtoFieldType
+                        );
+
+                        nestedMappings.put(reverseKey, reverseMap);
+                    }
+                }
+
+                // Handle collections of nested objects
+                if (mapping.collection && mapping.collectionElementType != null) {
+                    Class<?> dtoElementType = mapping.collectionElementType;
+                    Class<?> entityElementType = getEntityElementTypeFromField(mapping.entityFieldName, analysis.entityClass);
+
+                    if (entityElementType != null && !dtoElementType.equals(entityElementType)) {
+
+                        String elementKey = dtoElementType.getName() + "_to_" + entityElementType.getName();
+
+                        if (!nestedMappings.containsKey(elementKey)) {
+                            NestedMapping nestedMap = new NestedMapping();
+                            nestedMap.methodName = getUniqueMethodName(dtoElementType, entityElementType);
+                            nestedMap.sourceType = dtoElementType;
+                            nestedMap.targetType = entityElementType;
+                            nestedMap.fieldMappings = analyzeNestedFieldMappings(
+                                    dtoElementType,
+                                    entityElementType
+                            );
+
+                            nestedMappings.put(elementKey, nestedMap);
+                        }
+
+                        // Reverse mapping for collections
+                        String reverseElementKey = entityElementType.getName() + "_to_" + dtoElementType.getName();
+
+                        if (!nestedMappings.containsKey(reverseElementKey)) {
+                            NestedMapping reverseMap = new NestedMapping();
+                            reverseMap.methodName = getUniqueMethodName(entityElementType, dtoElementType);
+                            reverseMap.sourceType = entityElementType;
+                            reverseMap.targetType = dtoElementType;
+                            reverseMap.fieldMappings = analyzeNestedFieldMappings(
+                                    entityElementType,
+                                    dtoElementType
+                            );
+
+                            nestedMappings.put(reverseElementKey, reverseMap);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Second pass: Generate conversion methods
+        for (NestedMapping nestedMap : nestedMappings.values()) {
+            code.append(generateNestedConversionMethod(nestedMap));
+        }
+
+        // Third pass: Generate collection conversion methods
+        Set<String> listMethodsGenerated = new HashSet<>();
+
+        for (DtoAnalysis dtoAnalysis : analysis.dtoAnalyses) {
+            for (FieldMapping mapping : dtoAnalysis.fieldMappings) {
+                if (mapping.collection && mapping.collectionElementType != null) {
+                    Class<?> dtoElementType = mapping.collectionElementType;
+                    Class<?> entityElementType = getEntityElementTypeFromField(mapping.entityFieldName, analysis.entityClass);
+
+                    if (entityElementType != null) {
+                        // DTO → Entity list conversion
+                        String listKey = dtoElementType.getName() + "_to_" + entityElementType.getName() + "_List";
+
+                        if (!listMethodsGenerated.contains(listKey)) {
+                            listMethodsGenerated.add(listKey);
+
+                            String conversionMethod = getUniqueMethodName(dtoElementType, entityElementType);
+                            code.append(generateCollectionConversionMethod(
+                                    dtoElementType,
+                                    entityElementType,
+                                    conversionMethod
+                            ));
+                        }
+
+                        // Entity → DTO list conversion (for responses)
+                        String reverseDtoListKey = entityElementType.getName() + "_to_" + dtoElementType.getName() + "_List";
+
+                        if (!listMethodsGenerated.contains(reverseDtoListKey)) {
+                            listMethodsGenerated.add(reverseDtoListKey);
+
+                            String reverseConversionMethod = getUniqueMethodName(entityElementType, dtoElementType);
+                            code.append(generateCollectionConversionMethod(
+                                    entityElementType,
+                                    dtoElementType,
+                                    reverseConversionMethod
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
+        return code.toString();
+    }
+
+    private List<FieldMapping> analyzeNestedFieldMappings(Class<?> sourceClass, Class<?> targetClass) {
+        List<FieldMapping> mappings = new ArrayList<>();
+
+        List<Field> sourceFields = getAllFields(sourceClass);
+
+        for (Field sourceField : sourceFields) {
+            if (Modifier.isStatic(sourceField.getModifiers()) ||
+                    Modifier.isTransient(sourceField.getModifiers())) {
+                continue;
+            }
+
+            CrudXField fieldAnnotation = sourceField.getAnnotation(CrudXField.class);
+
+            if (fieldAnnotation != null && fieldAnnotation.ignore()) {
+                continue;
+            }
+
+            String targetFieldName = fieldAnnotation != null && !fieldAnnotation.value().isEmpty()
+                    ? fieldAnnotation.value()
+                    : sourceField.getName();
+
+            try {
+                Field targetField = getFieldFromClass(targetClass, targetFieldName);
+
+                FieldMapping mapping = new FieldMapping();
+                mapping.dtoFieldName = sourceField.getName();
+                mapping.entityFieldName = targetField.getName();
+                mapping.dtoFieldType = sourceField.getType();
+                mapping.entityFieldType = targetField.getType();
+                mapping.needsConversion = !sourceField.getType().equals(targetField.getType());
+
+                if (sourceField.isAnnotationPresent(CrudXNested.class)) {
+                    mapping.nested = true;
+                    mapping.nestedDtoClass = sourceField.getAnnotation(CrudXNested.class).dto();
+                } else if (isNestedObject(sourceField.getType())) {
+                    mapping.nested = true;
+                }
+
+                if (sourceField.isAnnotationPresent(CrudXCollection.class)) {
+                    mapping.collection = true;
+                    mapping.collectionElementType = sourceField.getAnnotation(CrudXCollection.class).elementDto();
+                } else if (Collection.class.isAssignableFrom(sourceField.getType())) {
+                    mapping.collection = true;
+                    mapping.collectionElementType = getCollectionElementType(sourceField);
+                }
+
+                mappings.add(mapping);
+
+            } catch (NoSuchFieldException e) {
+                log.debug("Field {} not found in target {} (nested mapping)",
+                        targetFieldName, targetClass.getSimpleName());
+            }
+        }
+
+        return mappings;
+    }
+
+    private String generateNestedConversionMethod(NestedMapping nestedMap) {
+        StringBuilder code = new StringBuilder();
+        String sourceRef = getCodeReference(nestedMap.sourceType);
+        String targetRef = getCodeReference(nestedMap.targetType);
+
+        code.append("    /**\n");
+        code.append("     * Converts ").append(sourceRef).append(" to ").append(targetRef).append("\n");
+        code.append("     * @param source Source object of type ").append(sourceRef).append("\n");
+        code.append("     * @return Converted object of type ").append(targetRef).append("\n");
+        code.append("     */\n");
+        code.append("    private ").append(targetRef).append(" ")
+                .append(nestedMap.methodName).append("(").append(sourceRef).append(" source) {\n");
+        code.append("        if (source == null) return null;\n\n");
+        code.append("        ").append(targetRef).append(" target = new ").append(targetRef).append("();\n");
+
+        for (FieldMapping mapping : nestedMap.fieldMappings) {
+            String getter = "source.get" + capitalize(mapping.dtoFieldName) + "()";
+            String setter = "target.set" + capitalize(mapping.entityFieldName);
+
+            // Handle nested objects within nested objects
+            if (mapping.nested) {
+                String nestedConversionMethod = getUniqueMethodName(mapping.dtoFieldType, mapping.entityFieldType);
+                code.append("        ").append(setter).append("(")
+                        .append(nestedConversionMethod).append("(").append(getter).append("));\n");
+            } else if (mapping.collection) {
+                String collectionConversionMethod = getUniqueMethodName(
+                        mapping.collectionElementType,
+                        getCollectionElementType(mapping.entityFieldType)
+                ) + "_List";
+                code.append("        ").append(setter).append("(")
+                        .append(collectionConversionMethod).append("(").append(getter).append("));\n");
+            } else {
+                code.append("        ").append(setter).append("(").append(getter).append(");\n");
+            }
+        }
+
+        code.append("        return target;\n");
+        code.append("    }\n\n");
+
+        return code.toString();
+    }
+
+    private Class<?> getCollectionElementType(Class<?> fieldType) {
+        // Fallback for when we can't determine generic type
+        return Object.class;
+    }
+
+    private String generateCollectionConversionMethod(
+            Class<?> sourceElementType,
+            Class<?> targetElementType,
+            String elementConversionMethod) {
+
+        StringBuilder code = new StringBuilder();
+
+        String sourceRef = getCodeReference(sourceElementType);
+        String targetRef = getCodeReference(targetElementType);
+
+        String methodName = getUniqueMethodName(sourceElementType, targetElementType) + "_List";
+
+        code.append("    /**\n");
+        code.append("     * Converts List<").append(sourceRef).append("> to List<")
+                .append(targetRef).append(">\n");
+        code.append("     * @param source Source list\n");
+        code.append("     * @return Converted list\n");
+        code.append("     */\n");
+        code.append("    private List<").append(targetRef).append("> ")
+                .append(methodName).append("(List<").append(sourceRef).append("> source) {\n");
+        code.append("        if (source == null) return null;\n\n");
+        code.append("        List<").append(targetRef).append("> target = new ArrayList<>(source.size());\n");
+        code.append("        for (").append(sourceRef).append(" item : source) {\n");
+
+        if (sourceElementType.equals(targetElementType)) {
+            code.append("            target.add(item);\n");
+        } else {
+            code.append("            target.add(").append(elementConversionMethod).append("(item));\n");
+        }
+
+        code.append("        }\n");
+        code.append("        return target;\n");
+        code.append("    }\n\n");
+
+        return code.toString();
+    }
+
+    private boolean isNestedObject(Class<?> type) {
+        if (type == null) return false;
+        return !type.isPrimitive()
+                && !type.getName().startsWith("java.lang")
+                && !type.getName().startsWith("java.time")
+                && !type.getName().startsWith("java.util")
+                && !type.getName().startsWith("java.math")
+                && !type.isEnum();
     }
 
     private static class MapperAnalysis {

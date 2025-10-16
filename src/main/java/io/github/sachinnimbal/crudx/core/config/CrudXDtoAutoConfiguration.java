@@ -1,6 +1,7 @@
 package io.github.sachinnimbal.crudx.core.config;
 
 import io.github.sachinnimbal.crudx.dto.registry.CrudXDtoRegistry;
+import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -46,5 +47,16 @@ public class CrudXDtoAutoConfiguration {
         log.info("  → Inherit Constraints: {}", properties.isInheritConstraints());
         log.info("  → Lazy Initialization: {}", properties.isLazyInitialization());
         log.info("  → Immutable Strategy: {}", properties.getImmutableStrategy());
+    }
+
+    @PostConstruct
+    public void validateConfiguration() {
+        if (properties.getScanPackages() == null || properties.getScanPackages().length == 0) {
+            log.warn("╔════════════════════════════════════════════════════════╗");
+            log.warn("║  WARNING: No scan packages configured!                ║");
+            log.warn("║  Add to application.properties:                        ║");
+            log.warn("║  crudx.dto.scan-packages=com.yourcompany.yourapp       ║");
+            log.warn("╚════════════════════════════════════════════════════════╝");
+        }
     }
 }

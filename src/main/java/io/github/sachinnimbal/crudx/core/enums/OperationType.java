@@ -11,6 +11,5 @@ public enum OperationType {
     GET_PAGED,          // GET /api/{entity}/paged
 
     // UPDATE operations
-    UPDATE,             // PATCH /api/{entity}/{id}
-    DELETE
+    UPDATE             // PATCH /api/{entity}/{id}
 }

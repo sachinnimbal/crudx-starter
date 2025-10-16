@@ -189,19 +189,104 @@ public class CrudXDtoScannerConfiguration {
     }
 
     private String[] getPackagesToScan() {
+        // Priority 1: User-configured packages
         if (properties != null && properties.getScanPackages() != null &&
                 properties.getScanPackages().length > 0) {
+            log.info("Using configured scan packages: {}",
+                    String.join(", ", properties.getScanPackages()));
             return properties.getScanPackages();
         }
 
-        String mainClassName = System.getProperty("sun.java.command");
-        if (mainClassName != null && mainClassName.contains(".")) {
-            String basePackage = mainClassName.substring(0, mainClassName.lastIndexOf('.'));
-            log.debug("Auto-detected base package: {}", basePackage);
-            return new String[]{basePackage};
+        // Priority 2: Detect from Spring Boot main class
+        try {
+            String mainClass = deduceMainApplicationClass();
+            if (mainClass != null) {
+                String basePackage = mainClass.substring(0, mainClass.lastIndexOf('.'));
+                log.info("Auto-detected base package from @SpringBootApplication: {}", basePackage);
+                return new String[]{basePackage};
+            }
+        } catch (Exception e) {
+            log.debug("Could not detect main class: {}", e.getMessage());
         }
 
-        log.warn("Could not detect base package. Scanning common patterns.");
-        return new String[]{"com", "org", "io"};
+        // Priority 3: Scan from all @Entity classes
+        try {
+            Set<String> entityPackages = scanEntityPackages();
+            if (!entityPackages.isEmpty()) {
+                String[] packages = entityPackages.toArray(new String[0]);
+                log.info("Auto-detected packages from @Entity classes: {}",
+                        String.join(", ", packages));
+                return packages;
+            }
+        } catch (Exception e) {
+            log.debug("Could not scan entity packages: {}", e.getMessage());
+        }
+
+        // Priority 4: Fallback - throw exception instead of guessing
+        throw new IllegalStateException(
+                "Cannot determine base package for DTO scanning. Please configure:\n" +
+                        "  crudx.dto.scan-packages=com.yourcompany.yourapp\n" +
+                        "Or annotate your main class with @SpringBootApplication"
+        );
+    }
+
+    /**
+     * Find the main Spring Boot application class
+     */
+    private String deduceMainApplicationClass() {
+        try {
+            StackTraceElement[] stackTrace = new RuntimeException().getStackTrace();
+            for (StackTraceElement element : stackTrace) {
+                if ("main".equals(element.getMethodName())) {
+                    return element.getClassName();
+                }
+            }
+
+            // Alternative: Check for @SpringBootApplication
+            Map<String, Object> beans = applicationContext.getBeansWithAnnotation(
+                    org.springframework.boot.autoconfigure.SpringBootApplication.class);
+            if (!beans.isEmpty()) {
+                Object bean = beans.values().iterator().next();
+                return bean.getClass().getPackage().getName();
+            }
+        } catch (Exception e) {
+            log.debug("Error deducing main class", e);
+        }
+        return null;
+    }
+
+    /**
+     * Scan all @Entity annotated classes and extract their packages
+     */
+    private Set<String> scanEntityPackages() {
+        Set<String> packages = new HashSet<>();
+        try {
+            Map<String, Object> entities = applicationContext.getBeansWithAnnotation(
+                    jakarta.persistence.Entity.class);
+
+            for (Object entity : entities.values()) {
+                String packageName = entity.getClass().getPackage().getName();
+                // Get parent package (assume DTOs are in sibling packages)
+                if (packageName.contains(".")) {
+                    String parentPackage = packageName.substring(0, packageName.lastIndexOf('.'));
+                    packages.add(parentPackage);
+                }
+            }
+
+            // Also check for MongoDB documents
+            Map<String, Object> documents = applicationContext.getBeansWithAnnotation(
+                    org.springframework.data.mongodb.core.mapping.Document.class);
+
+            for (Object doc : documents.values()) {
+                String packageName = doc.getClass().getPackage().getName();
+                if (packageName.contains(".")) {
+                    String parentPackage = packageName.substring(0, packageName.lastIndexOf('.'));
+                    packages.add(parentPackage);
+                }
+            }
+        } catch (Exception e) {
+            log.debug("Error scanning entity packages", e);
+        }
+        return packages;
     }
 }
