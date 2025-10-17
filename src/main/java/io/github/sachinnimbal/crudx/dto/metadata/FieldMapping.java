@@ -15,6 +15,12 @@ public class FieldMapping {
     private boolean required;
     private boolean nested;
     private boolean collection;
+    private boolean computed;
     private Class<?> nestedDtoClass;
     private FetchStrategy fetchStrategy;
+    // Collection-specific
+    private Class<?> collectionElementType;
+    private int maxCollectionSize;
+    // Computed field-specific
+    private String spelExpression;
 }

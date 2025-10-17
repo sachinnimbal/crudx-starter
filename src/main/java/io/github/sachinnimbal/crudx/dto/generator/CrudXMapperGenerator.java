@@ -1,10 +1,13 @@
 package io.github.sachinnimbal.crudx.dto.generator;
 
 import io.github.sachinnimbal.crudx.core.annotations.dto.CrudXCollection;
+import io.github.sachinnimbal.crudx.core.annotations.dto.CrudXComputed;
 import io.github.sachinnimbal.crudx.core.annotations.dto.CrudXField;
 import io.github.sachinnimbal.crudx.core.annotations.dto.CrudXNested;
+import io.github.sachinnimbal.crudx.core.enums.FetchStrategy;
 import io.github.sachinnimbal.crudx.dto.mapper.CrudXEntityMapper;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.expression.spel.standard.SpelExpressionParser;
 import org.springframework.stereotype.Component;
 
 import javax.tools.JavaCompiler;
@@ -35,29 +38,29 @@ public class CrudXMapperGenerator {
     private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("MMMM dd, yyyy 'at' hh:mm:ss a");
     private static final String FRAMEWORK_VERSION = getFrameworkVersion();
 
-    private static final String APACHE_LICENSE_HEADER =
-            """
-                    /*
-                     * Copyright 2025 Sachin Nimbal
-                     *
-                     * Licensed under the Apache License, Version 2.0 (the "License");
-                     * you may not use this file except in compliance with the License.
-                     * You may obtain a copy of the License at
-                     *
-                     *     http://www.apache.org/licenses/LICENSE-2.0
-                     *
-                     * Unless required by applicable law or agreed to in writing, software
-                     * distributed under the License is distributed on an "AS IS" BASIS,
-                     * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-                     * See the License for the specific language governing permissions and
-                     * limitations under the License.
-                     */
-                    
-                    """;
+    private static final String APACHE_LICENSE_HEADER = """
+            /*
+             * Copyright 2025 Sachin Nimbal
+             *
+             * Licensed under the Apache License, Version 2.0 (the "License");
+             * you may not use this file except in compliance with the License.
+             * You may obtain a copy of the License at
+             *
+             *     http://www.apache.org/licenses/LICENSE-2.0
+             *
+             * Unless required by applicable law or agreed to in writing, software
+             * distributed under the License is distributed on an "AS IS" BASIS,
+             * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+             * See the License for the specific language governing permissions and
+             * limitations under the License.
+             */
+            
+            """;
 
     private final Path outputDirectory;
     private final JavaCompiler compiler;
     private final Map<Class<?>, CrudXEntityMapper<?, ?>> entityMappers = new HashMap<>();
+    private final SpelExpressionParser spelParser = new SpelExpressionParser();
 
     public CrudXMapperGenerator() {
         this.compiler = ToolProvider.getSystemJavaCompiler();
@@ -78,8 +81,7 @@ public class CrudXMapperGenerator {
 
         try {
             Properties props = new Properties();
-            var versionStream = CrudXMapperGenerator.class.getClassLoader()
-                    .getResourceAsStream("crudx-version.properties");
+            var versionStream = CrudXMapperGenerator.class.getClassLoader().getResourceAsStream("crudx-version.properties");
             if (versionStream != null) {
                 try (versionStream) {
                     props.load(versionStream);
@@ -117,14 +119,11 @@ public class CrudXMapperGenerator {
                 String className = getMapperClassName(entityClass);
 
                 Class<?> mapperClass = compileAndLoad(className, sourceCode);
-                CrudXEntityMapper<E, ?> mapper = (CrudXEntityMapper<E, ?>) mapperClass
-                        .getDeclaredConstructor()
-                        .newInstance();
+                CrudXEntityMapper<E, ?> mapper = (CrudXEntityMapper<E, ?>) mapperClass.getDeclaredConstructor().newInstance();
 
                 entityMappers.put(entityClass, mapper);
 
-                log.info("✓ Generated CrudX mapper: {} (handles {} DTOs)",
-                        className.substring(className.lastIndexOf('.') + 1), dtoClasses.size());
+                log.info("✓ Generated CrudX mapper: {} (handles {} DTOs)", className.substring(className.lastIndexOf('.') + 1), dtoClasses.size());
 
                 return mapper;
 
@@ -190,11 +189,7 @@ public class CrudXMapperGenerator {
                 FieldMapping mapping = analyzeFieldMapping(dtoField, entityClass);
                 if (mapping != null) {
                     dtoAnalysis.fieldMappings.add(mapping);
-                    log.debug("  Field: {} -> {} (nested={}, collection={})",
-                            mapping.dtoFieldName,
-                            mapping.entityFieldName,
-                            mapping.nested,
-                            mapping.collection);
+                    log.debug("  Field: {} -> {} (nested={}, collection={}, computed={})", mapping.dtoFieldName, mapping.entityFieldName, mapping.nested, mapping.collection, mapping.computed);
                 }
             }
             analysis.dtoAnalyses.add(dtoAnalysis);
@@ -210,9 +205,22 @@ public class CrudXMapperGenerator {
             return null;
         }
 
-        String entityFieldName = fieldAnnotation != null && !fieldAnnotation.value().isEmpty()
-                ? fieldAnnotation.value()
-                : dtoField.getName();
+        // ✓ HANDLE @CrudXComputed - NEW
+        CrudXComputed computedAnnotation = dtoField.getAnnotation(CrudXComputed.class);
+        if (computedAnnotation != null) {
+            FieldMapping mapping = new FieldMapping();
+            mapping.dtoFieldName = dtoField.getName();
+            mapping.entityFieldName = null;
+            mapping.dtoFieldType = dtoField.getType();
+            mapping.entityFieldType = null;
+            mapping.computed = true;
+            mapping.spelExpression = computedAnnotation.expression();
+            mapping.required = fieldAnnotation != null && fieldAnnotation.required();
+            log.debug("Found computed field: {} with expression: {}", dtoField.getName(), computedAnnotation.expression());
+            return mapping;
+        }
+
+        String entityFieldName = fieldAnnotation != null && !fieldAnnotation.value().isEmpty() ? fieldAnnotation.value() : dtoField.getName();
 
         try {
             Field entityField = getFieldFromClass(entityClass, entityFieldName);
@@ -223,25 +231,33 @@ public class CrudXMapperGenerator {
             mapping.dtoFieldType = dtoField.getType();
             mapping.entityFieldType = entityField.getType();
             mapping.needsConversion = !dtoField.getType().equals(entityField.getType());
+            mapping.required = fieldAnnotation != null && fieldAnnotation.required();
 
+            // ✓ HANDLE @CrudXNested with FetchStrategy - NEW
             if (dtoField.isAnnotationPresent(CrudXNested.class)) {
+                CrudXNested nestedAnnotation = dtoField.getAnnotation(CrudXNested.class);
                 mapping.nested = true;
-                mapping.nestedDtoClass = dtoField.getAnnotation(CrudXNested.class).dto();
+                mapping.nestedDtoClass = nestedAnnotation.dto();
+                mapping.fetchStrategy = nestedAnnotation.fetch();
+                log.debug("Found nested field: {} with fetch strategy: {}", dtoField.getName(), nestedAnnotation.fetch());
             } else if (isNestedObject(dtoField.getType())) {
                 mapping.nested = true;
                 mapping.nestedDtoClass = null;
-                log.debug("Auto-detected nested object: {} in {}",
-                        dtoField.getName(), dtoField.getDeclaringClass().getSimpleName());
+                log.debug("Auto-detected nested object: {} in {}", dtoField.getName(), dtoField.getDeclaringClass().getSimpleName());
             }
 
+            // ✓ HANDLE @CrudXCollection with maxSize - NEW
             if (dtoField.isAnnotationPresent(CrudXCollection.class)) {
+                CrudXCollection collectionAnnotation = dtoField.getAnnotation(CrudXCollection.class);
                 mapping.collection = true;
-                mapping.collectionElementType = dtoField.getAnnotation(CrudXCollection.class).elementDto();
+                mapping.collectionElementType = collectionAnnotation.elementDto();
+                mapping.maxCollectionSize = collectionAnnotation.maxSize();
+                log.debug("Found collection field: {} with maxSize: {}", dtoField.getName(), collectionAnnotation.maxSize());
             } else if (Collection.class.isAssignableFrom(dtoField.getType())) {
                 mapping.collection = true;
                 mapping.collectionElementType = getCollectionElementType(dtoField);
-                log.debug("Auto-detected collection: {} in {}",
-                        dtoField.getName(), dtoField.getDeclaringClass().getSimpleName());
+                mapping.maxCollectionSize = 1000;
+                log.debug("Auto-detected collection: {} in {}", dtoField.getName(), dtoField.getDeclaringClass().getSimpleName());
             }
 
             return mapping;
@@ -314,66 +330,36 @@ public class CrudXMapperGenerator {
         code.append("import java.util.*;\n");
         code.append("import java.time.*;\n");
         code.append("import java.lang.reflect.*;\n");
-        code.append("import javax.annotation.processing.Generated;\n\n");
-
-        code.append("/**\n");
-        code.append(" * Unified mapper for {@link ").append(entityClass.getSimpleName()).append("} entity.\n");
-        code.append(" * <p>\n");
-        code.append(" * This mapper handles all DTO conversions for the entity.\n");
-        code.append(" * Supported DTOs:\n");
-        code.append(" * <ul>\n");
-        for (DtoAnalysis dto : analysis.dtoAnalyses) {
-            code.append(" *   <li>{@link ").append(dto.dtoClass.getSimpleName()).append("}</li>\n");
-        }
-        code.append(" * </ul>\n");
-        code.append(" *\n");
-        code.append(" * @generated by CrudX Framework v").append(FRAMEWORK_VERSION).append("\n");
-        code.append(" * @author Sachin Nimbal\n");
-        code.append(" */\n");
+        code.append("import javax.annotation.processing.Generated;\n");
+        code.append("import org.springframework.expression.Expression;\n");
+        code.append("import org.springframework.expression.spel.standard.SpelExpressionParser;\n");
+        code.append("import org.springframework.expression.spel.support.StandardEvaluationContext;\n\n");
 
         code.append("@Generated(\n");
         code.append("    value = \"io.github.sachinnimbal.crudx.dto.generator.CrudXMapperGenerator\",\n");
         code.append("    date = \"").append(formattedDateTime).append("\",\n");
-        code.append("    comments = \"CRUDX | The Next-Gen Multi-Database CRUD Framework for Spring Boot.\"\n");
+        code.append("    comments = \"CRUDX | All Annotations Supported\"\n");
         code.append(")\n");
 
         code.append("public class ").append(simpleClassName);
         code.append(" implements CrudXEntityMapper<");
         code.append(getCodeReference(entityClass)).append(", Object> {\n\n");
 
+        code.append("    private final SpelExpressionParser spelParser = new SpelExpressionParser();\n");
+        code.append("    private final Map<String, Expression> compiledExpressions = new HashMap<>();\n\n");
+
         code.append(generateGenericToEntityMethod(entityClass, analysis));
         code.append(generateGenericToDtoMethod(entityClass, analysis));
         code.append(generateUpdateEntityMethod(entityClass, analysis));
         code.append(generateBatchMethods(entityClass));
         code.append(generateDeepCopyHelpers(analysis));
+        code.append(generateComputedFieldHelpers());
+        code.append(generateValidationHelpers());
         code.append(generateMetadataMethods(entityClass, analysis));
 
         code.append("}\n");
 
         return code.toString();
-    }
-
-    private String generateImportStatement(Class<?> clazz) {
-        if (clazz.getEnclosingClass() != null) {
-            return "import " + clazz.getEnclosingClass().getName().replace('$', '.') + ";";
-        }
-        return "import " + clazz.getName().replace('$', '.') + ";";
-    }
-
-    private String getCodeReference(Class<?> clazz) {
-        if (clazz.getEnclosingClass() != null) {
-            return getCodeReference(clazz.getEnclosingClass()) + "." + clazz.getSimpleName();
-        }
-        return clazz.getSimpleName();
-    }
-
-    /**
-     * Creates a unique method name using fully qualified class names to avoid collisions
-     */
-    private String getUniqueMethodName(Class<?> sourceType, Class<?> targetType) {
-        String sourceFqn = sourceType.getName().replace('.', '_').replace('$', '_');
-        String targetFqn = targetType.getName().replace('.', '_').replace('$', '_');
-        return "map_" + sourceFqn + "_to_" + targetFqn;
     }
 
     private String generateGenericToEntityMethod(Class<?> entityClass, MapperAnalysis analysis) {
@@ -394,19 +380,29 @@ public class CrudXMapperGenerator {
             code.append(dtoRef).append(") dto;\n");
 
             for (FieldMapping mapping : dtoAnalysis.fieldMappings) {
+                if (mapping.computed) {
+                    continue; // Skip computed fields in entity mapping
+                }
+
                 String getter = "typedDto.get" + capitalize(mapping.dtoFieldName) + "()";
                 String setter = "entity.set" + capitalize(mapping.entityFieldName);
 
+                // ✓ NEW: Required field validation
+                if (mapping.required) {
+                    code.append("            validateRequired(").append(getter).append(", \"").append(mapping.dtoFieldName).append("\");\n");
+                }
+
                 if (mapping.nested) {
-                    // Use unique method name based on fully qualified types
                     String conversionMethod = getUniqueMethodName(mapping.dtoFieldType, mapping.entityFieldType);
-                    code.append("            ").append(setter).append("(")
-                            .append(conversionMethod).append("(").append(getter).append("));\n");
+                    code.append("            ").append(setter).append("(").append(conversionMethod).append("(").append(getter).append("));\n");
                 } else if (mapping.collection) {
                     Class<?> entityElementType = getEntityElementTypeFromField(mapping.entityFieldName, entityClass);
                     String conversionMethod = getUniqueMethodName(mapping.collectionElementType, entityElementType) + "_List";
-                    code.append("            ").append(setter).append("(")
-                            .append(conversionMethod).append("(").append(getter).append("));\n");
+
+                    // ✓ NEW: Collection size validation
+                    code.append("            validateCollectionSize(").append(getter).append(", ").append(mapping.maxCollectionSize).append(", \"").append(mapping.dtoFieldName).append("\");\n");
+
+                    code.append("            ").append(setter).append("(").append(conversionMethod).append("(").append(getter).append("));\n");
                 } else {
                     code.append("            ").append(setter).append("(").append(getter).append(");\n");
                 }
@@ -438,20 +434,24 @@ public class CrudXMapperGenerator {
             code.append(dtoRef).append("();\n");
 
             for (FieldMapping mapping : dtoAnalysis.fieldMappings) {
-                String getter = "entity.get" + capitalize(mapping.entityFieldName) + "()";
                 String setter = "dto.set" + capitalize(mapping.dtoFieldName);
 
-                if (mapping.nested) {
-                    String conversionMethod = getUniqueMethodName(mapping.entityFieldType, mapping.dtoFieldType);
-                    code.append("            ").append(setter).append("(")
-                            .append(conversionMethod).append("(").append(getter).append("));\n");
-                } else if (mapping.collection) {
-                    Class<?> entityElementType = getEntityElementTypeFromField(mapping.entityFieldName, entityClass);
-                    String conversionMethod = getUniqueMethodName(entityElementType, mapping.collectionElementType) + "_List";
-                    code.append("            ").append(setter).append("(")
-                            .append(conversionMethod).append("(").append(getter).append("));\n");
+                // ✓ NEW: Handle computed fields with SpEL
+                if (mapping.computed) {
+                    code.append("            ").append(setter).append("((").append(getCodeReference(mapping.dtoFieldType)).append(") evaluateSpelExpression(\"").append(escapeJavaString(mapping.spelExpression)).append("\", entity));\n");
                 } else {
-                    code.append("            ").append(setter).append("(").append(getter).append(");\n");
+                    String getter = "entity.get" + capitalize(mapping.entityFieldName) + "()";
+
+                    if (mapping.nested) {
+                        String conversionMethod = getUniqueMethodName(mapping.entityFieldType, mapping.dtoFieldType);
+                        code.append("            ").append(setter).append("(").append(conversionMethod).append("(").append(getter).append("));\n");
+                    } else if (mapping.collection) {
+                        Class<?> entityElementType = getEntityElementTypeFromField(mapping.entityFieldName, entityClass);
+                        String conversionMethod = getUniqueMethodName(entityElementType, mapping.collectionElementType) + "_List";
+                        code.append("            ").append(setter).append("(").append(conversionMethod).append("(").append(getter).append("));\n");
+                    } else {
+                        code.append("            ").append(setter).append("(").append(getter).append(");\n");
+                    }
                 }
             }
 
@@ -481,6 +481,10 @@ public class CrudXMapperGenerator {
             code.append(dtoRef).append(") dto;\n");
 
             for (FieldMapping mapping : dtoAnalysis.fieldMappings) {
+                if (mapping.computed) {
+                    continue; // Skip computed fields in updates
+                }
+
                 String getter = "typedDto.get" + capitalize(mapping.dtoFieldName) + "()";
                 String setter = "entity.set" + capitalize(mapping.entityFieldName);
 
@@ -488,13 +492,14 @@ public class CrudXMapperGenerator {
 
                 if (mapping.nested) {
                     String conversionMethod = getUniqueMethodName(mapping.dtoFieldType, mapping.entityFieldType);
-                    code.append("                ").append(setter).append("(")
-                            .append(conversionMethod).append("(").append(getter).append("));\n");
+                    code.append("                ").append(setter).append("(").append(conversionMethod).append("(").append(getter).append("));\n");
                 } else if (mapping.collection) {
+                    // ✓ NEW: Validate collection size in updates too
+                    code.append("                validateCollectionSize(").append(getter).append(", ").append(mapping.maxCollectionSize).append(", \"").append(mapping.dtoFieldName).append("\");\n");
+
                     Class<?> entityElementType = getEntityElementTypeFromField(mapping.entityFieldName, entityClass);
                     String conversionMethod = getUniqueMethodName(mapping.collectionElementType, entityElementType) + "_List";
-                    code.append("                ").append(setter).append("(")
-                            .append(conversionMethod).append("(").append(getter).append("));\n");
+                    code.append("                ").append(setter).append("(").append(conversionMethod).append("(").append(getter).append("));\n");
                 } else {
                     code.append("                ").append(setter).append("(").append(getter).append(");\n");
                 }
@@ -542,44 +547,103 @@ public class CrudXMapperGenerator {
 
     private String generateReflectionHelpers(Class<?> entityClass) {
         String entityRef = getCodeReference(entityClass);
-        return "    private " + entityRef + " mapUsingReflection(Object dto, " +
-                entityRef + " entity) {\n" +
-                "        try {\n" +
-                "            for (Field dtoField : dto.getClass().getDeclaredFields()) {\n" +
-                "                dtoField.setAccessible(true);\n" +
-                "                Object value = dtoField.get(dto);\n" +
-                "                if (value != null) {\n" +
-                "                    try {\n" +
-                "                        Field entityField = entity.getClass().getDeclaredField(dtoField.getName());\n" +
-                "                        entityField.setAccessible(true);\n" +
-                "                        entityField.set(entity, value);\n" +
-                "                    } catch (NoSuchFieldException ignored) {}\n" +
-                "                }\n" +
-                "            }\n" +
-                "        } catch (Exception e) {\n" +
-                "            throw new RuntimeException(\"Reflection mapping failed\", e);\n" +
-                "        }\n" +
-                "        return entity;\n" +
-                "    }\n\n" +
-                "    private <D> D mapToDtoUsingReflection(" + entityRef + " entity, Class<D> dtoClass) {\n" +
-                "        try {\n" +
-                "            D dto = dtoClass.getDeclaredConstructor().newInstance();\n" +
-                "            for (Field dtoField : dtoClass.getDeclaredFields()) {\n" +
-                "                try {\n" +
-                "                    Field entityField = entity.getClass().getDeclaredField(dtoField.getName());\n" +
-                "                    entityField.setAccessible(true);\n" +
-                "                    Object value = entityField.get(entity);\n" +
-                "                    if (value != null) {\n" +
-                "                        dtoField.setAccessible(true);\n" +
-                "                        dtoField.set(dto, value);\n" +
-                "                    }\n" +
-                "                } catch (NoSuchFieldException ignored) {}\n" +
-                "            }\n" +
-                "            return dto;\n" +
-                "        } catch (Exception e) {\n" +
-                "            throw new RuntimeException(\"Reflection mapping failed\", e);\n" +
-                "        }\n" +
-                "    }\n\n";
+
+        StringBuilder code = new StringBuilder();
+
+        // mapUsingReflection method
+        code.append("    private ").append(entityRef).append(" mapUsingReflection(Object dto, ").append(entityRef).append(" entity) {\n");
+        code.append("        try {\n");
+        code.append("            for (Field dtoField : dto.getClass().getDeclaredFields()) {\n");
+        code.append("                dtoField.setAccessible(true);\n");
+        code.append("                Object value = dtoField.get(dto);\n");
+        code.append("                if (value != null) {\n");
+        code.append("                    try {\n");
+        code.append("                        Field entityField = entity.getClass().getDeclaredField(dtoField.getName());\n");
+        code.append("                        entityField.setAccessible(true);\n");
+        code.append("                        entityField.set(entity, value);\n");
+        code.append("                    } catch (NoSuchFieldException ignored) {}\n");
+        code.append("                }\n");
+        code.append("            }\n");
+        code.append("        } catch (Exception e) {\n");
+        code.append("            throw new RuntimeException(\"Reflection mapping failed\", e);\n");
+        code.append("        }\n");
+        code.append("        return entity;\n");
+        code.append("    }\n\n");
+
+        // mapToDtoUsingReflection method
+        code.append("    private <D> D mapToDtoUsingReflection(").append(entityRef).append(" entity, Class<D> dtoClass) {\n");
+        code.append("        try {\n");
+        code.append("            D dto = dtoClass.getDeclaredConstructor().newInstance();\n");
+        code.append("            for (Field dtoField : dtoClass.getDeclaredFields()) {\n");
+        code.append("                try {\n");
+        code.append("                    Field entityField = entity.getClass().getDeclaredField(dtoField.getName());\n");
+        code.append("                    entityField.setAccessible(true);\n");
+        code.append("                    Object value = entityField.get(entity);\n");
+        code.append("                    if (value != null) {\n");
+        code.append("                        dtoField.setAccessible(true);\n");
+        code.append("                        dtoField.set(dto, value);\n");
+        code.append("                    }\n");
+        code.append("                } catch (NoSuchFieldException ignored) {}\n");
+        code.append("            }\n");
+        code.append("            return dto;\n");
+        code.append("        } catch (Exception e) {\n");
+        code.append("            throw new RuntimeException(\"Reflection mapping failed\", e);\n");
+        code.append("        }\n");
+        code.append("    }\n\n");
+
+        return code.toString();
+    }
+
+    // ✓ NEW: SpEL Expression Evaluation for @CrudXComputed
+    private String generateComputedFieldHelpers() {
+        return """
+                /**
+                 * Evaluates SpEL expression for @CrudXComputed fields
+                 */
+                private Object evaluateSpelExpression(String expression, Object entity) {
+                    try {
+                        Expression compiledExpr = compiledExpressions.computeIfAbsent(
+                            expression, 
+                            expr -> spelParser.parseExpression(expr)
+                        );
+                
+                        StandardEvaluationContext context = new StandardEvaluationContext(entity);
+                        context.setVariable("entity", entity);
+                
+                        return compiledExpr.getValue(context);
+                    } catch (Exception e) {
+                        throw new RuntimeException("Failed to evaluate SpEL expression: " + expression, e);
+                    }
+                }
+                
+                """;
+    }
+
+    // ✓ NEW: Validation Helpers for @CrudXField(required) and @CrudXCollection(maxSize)
+    private String generateValidationHelpers() {
+        return """
+                /**
+                 * Validates required field is not null - for @CrudXField(required=true)
+                 */
+                private void validateRequired(Object value, String fieldName) {
+                    if (value == null) {
+                        throw new IllegalArgumentException("Required field '" + fieldName + "' cannot be null");
+                    }
+                }
+                
+                /**
+                 * Validates collection size does not exceed maximum - for @CrudXCollection(maxSize)
+                 */
+                private void validateCollectionSize(Collection<?> collection, int maxSize, String fieldName) {
+                    if (collection != null && collection.size() > maxSize) {
+                        throw new IllegalArgumentException(
+                            "Collection field '" + fieldName + "' exceeds maximum size of " + maxSize + 
+                            ". Current size: " + collection.size()
+                        );
+                    }
+                }
+                
+                """;
     }
 
     private String generateMetadataMethods(Class<?> entityClass, MapperAnalysis analysis) {
@@ -695,6 +759,26 @@ public class CrudXMapperGenerator {
         return GENERATED_PACKAGE + "." + entityClass.getSimpleName() + MAPPER_SUFFIX;
     }
 
+    private String generateImportStatement(Class<?> clazz) {
+        if (clazz.getEnclosingClass() != null) {
+            return "import " + clazz.getEnclosingClass().getName().replace('$', '.') + ";";
+        }
+        return "import " + clazz.getName().replace('$', '.') + ";";
+    }
+
+    private String getCodeReference(Class<?> clazz) {
+        if (clazz.getEnclosingClass() != null) {
+            return getCodeReference(clazz.getEnclosingClass()) + "." + clazz.getSimpleName();
+        }
+        return clazz.getSimpleName();
+    }
+
+    private String getUniqueMethodName(Class<?> sourceType, Class<?> targetType) {
+        String sourceFqn = sourceType.getName().replace('.', '_').replace('$', '_');
+        String targetFqn = targetType.getName().replace('.', '_').replace('$', '_');
+        return "map_" + sourceFqn + "_to_" + targetFqn;
+    }
+
     private String capitalize(String str) {
         return str.substring(0, 1).toUpperCase() + str.substring(1);
     }
@@ -744,7 +828,6 @@ public class CrudXMapperGenerator {
 
     private String generateDeepCopyHelpers(MapperAnalysis analysis) {
         StringBuilder code = new StringBuilder();
-        // Use fully qualified names as keys to avoid collisions
         Map<String, NestedMapping> nestedMappings = new LinkedHashMap<>();
 
         // First pass: Collect all nested mappings
@@ -752,8 +835,7 @@ public class CrudXMapperGenerator {
             for (FieldMapping mapping : dtoAnalysis.fieldMappings) {
 
                 // Handle nested objects
-                if (mapping.nested) {
-                    // Use fully qualified names to create unique keys
+                if (mapping.nested && !mapping.computed) {
                     String key = mapping.dtoFieldType.getName() + "_to_" + mapping.entityFieldType.getName();
 
                     if (!nestedMappings.containsKey(key)) {
@@ -761,10 +843,7 @@ public class CrudXMapperGenerator {
                         nestedMap.methodName = getUniqueMethodName(mapping.dtoFieldType, mapping.entityFieldType);
                         nestedMap.sourceType = mapping.dtoFieldType;
                         nestedMap.targetType = mapping.entityFieldType;
-                        nestedMap.fieldMappings = analyzeNestedFieldMappings(
-                                mapping.dtoFieldType,
-                                mapping.entityFieldType
-                        );
+                        nestedMap.fieldMappings = analyzeNestedFieldMappings(mapping.dtoFieldType, mapping.entityFieldType);
 
                         nestedMappings.put(key, nestedMap);
                     }
@@ -777,17 +856,14 @@ public class CrudXMapperGenerator {
                         reverseMap.methodName = getUniqueMethodName(mapping.entityFieldType, mapping.dtoFieldType);
                         reverseMap.sourceType = mapping.entityFieldType;
                         reverseMap.targetType = mapping.dtoFieldType;
-                        reverseMap.fieldMappings = analyzeNestedFieldMappings(
-                                mapping.entityFieldType,
-                                mapping.dtoFieldType
-                        );
+                        reverseMap.fieldMappings = analyzeNestedFieldMappings(mapping.entityFieldType, mapping.dtoFieldType);
 
                         nestedMappings.put(reverseKey, reverseMap);
                     }
                 }
 
                 // Handle collections of nested objects
-                if (mapping.collection && mapping.collectionElementType != null) {
+                if (mapping.collection && mapping.collectionElementType != null && !mapping.computed) {
                     Class<?> dtoElementType = mapping.collectionElementType;
                     Class<?> entityElementType = getEntityElementTypeFromField(mapping.entityFieldName, analysis.entityClass);
 
@@ -800,10 +876,7 @@ public class CrudXMapperGenerator {
                             nestedMap.methodName = getUniqueMethodName(dtoElementType, entityElementType);
                             nestedMap.sourceType = dtoElementType;
                             nestedMap.targetType = entityElementType;
-                            nestedMap.fieldMappings = analyzeNestedFieldMappings(
-                                    dtoElementType,
-                                    entityElementType
-                            );
+                            nestedMap.fieldMappings = analyzeNestedFieldMappings(dtoElementType, entityElementType);
 
                             nestedMappings.put(elementKey, nestedMap);
                         }
@@ -816,10 +889,7 @@ public class CrudXMapperGenerator {
                             reverseMap.methodName = getUniqueMethodName(entityElementType, dtoElementType);
                             reverseMap.sourceType = entityElementType;
                             reverseMap.targetType = dtoElementType;
-                            reverseMap.fieldMappings = analyzeNestedFieldMappings(
-                                    entityElementType,
-                                    dtoElementType
-                            );
+                            reverseMap.fieldMappings = analyzeNestedFieldMappings(entityElementType, dtoElementType);
 
                             nestedMappings.put(reverseElementKey, reverseMap);
                         }
@@ -838,7 +908,7 @@ public class CrudXMapperGenerator {
 
         for (DtoAnalysis dtoAnalysis : analysis.dtoAnalyses) {
             for (FieldMapping mapping : dtoAnalysis.fieldMappings) {
-                if (mapping.collection && mapping.collectionElementType != null) {
+                if (mapping.collection && mapping.collectionElementType != null && !mapping.computed) {
                     Class<?> dtoElementType = mapping.collectionElementType;
                     Class<?> entityElementType = getEntityElementTypeFromField(mapping.entityFieldName, analysis.entityClass);
 
@@ -850,25 +920,17 @@ public class CrudXMapperGenerator {
                             listMethodsGenerated.add(listKey);
 
                             String conversionMethod = getUniqueMethodName(dtoElementType, entityElementType);
-                            code.append(generateCollectionConversionMethod(
-                                    dtoElementType,
-                                    entityElementType,
-                                    conversionMethod
-                            ));
+                            code.append(generateCollectionConversionMethod(dtoElementType, entityElementType, conversionMethod));
                         }
 
-                        // Entity → DTO list conversion (for responses)
+                        // Entity → DTO list conversion
                         String reverseDtoListKey = entityElementType.getName() + "_to_" + dtoElementType.getName() + "_List";
 
                         if (!listMethodsGenerated.contains(reverseDtoListKey)) {
                             listMethodsGenerated.add(reverseDtoListKey);
 
                             String reverseConversionMethod = getUniqueMethodName(entityElementType, dtoElementType);
-                            code.append(generateCollectionConversionMethod(
-                                    entityElementType,
-                                    dtoElementType,
-                                    reverseConversionMethod
-                            ));
+                            code.append(generateCollectionConversionMethod(entityElementType, dtoElementType, reverseConversionMethod));
                         }
                     }
                 }
@@ -884,8 +946,7 @@ public class CrudXMapperGenerator {
         List<Field> sourceFields = getAllFields(sourceClass);
 
         for (Field sourceField : sourceFields) {
-            if (Modifier.isStatic(sourceField.getModifiers()) ||
-                    Modifier.isTransient(sourceField.getModifiers())) {
+            if (Modifier.isStatic(sourceField.getModifiers()) || Modifier.isTransient(sourceField.getModifiers())) {
                 continue;
             }
 
@@ -895,9 +956,13 @@ public class CrudXMapperGenerator {
                 continue;
             }
 
-            String targetFieldName = fieldAnnotation != null && !fieldAnnotation.value().isEmpty()
-                    ? fieldAnnotation.value()
-                    : sourceField.getName();
+            // Skip computed fields in nested analysis
+            CrudXComputed computedAnnotation = sourceField.getAnnotation(CrudXComputed.class);
+            if (computedAnnotation != null) {
+                continue;
+            }
+
+            String targetFieldName = fieldAnnotation != null && !fieldAnnotation.value().isEmpty() ? fieldAnnotation.value() : sourceField.getName();
 
             try {
                 Field targetField = getFieldFromClass(targetClass, targetFieldName);
@@ -908,27 +973,32 @@ public class CrudXMapperGenerator {
                 mapping.dtoFieldType = sourceField.getType();
                 mapping.entityFieldType = targetField.getType();
                 mapping.needsConversion = !sourceField.getType().equals(targetField.getType());
+                mapping.required = fieldAnnotation != null && fieldAnnotation.required();
 
                 if (sourceField.isAnnotationPresent(CrudXNested.class)) {
+                    CrudXNested nestedAnnotation = sourceField.getAnnotation(CrudXNested.class);
                     mapping.nested = true;
-                    mapping.nestedDtoClass = sourceField.getAnnotation(CrudXNested.class).dto();
+                    mapping.nestedDtoClass = nestedAnnotation.dto();
+                    mapping.fetchStrategy = nestedAnnotation.fetch();
                 } else if (isNestedObject(sourceField.getType())) {
                     mapping.nested = true;
                 }
 
                 if (sourceField.isAnnotationPresent(CrudXCollection.class)) {
+                    CrudXCollection collectionAnnotation = sourceField.getAnnotation(CrudXCollection.class);
                     mapping.collection = true;
-                    mapping.collectionElementType = sourceField.getAnnotation(CrudXCollection.class).elementDto();
+                    mapping.collectionElementType = collectionAnnotation.elementDto();
+                    mapping.maxCollectionSize = collectionAnnotation.maxSize();
                 } else if (Collection.class.isAssignableFrom(sourceField.getType())) {
                     mapping.collection = true;
                     mapping.collectionElementType = getCollectionElementType(sourceField);
+                    mapping.maxCollectionSize = 1000;
                 }
 
                 mappings.add(mapping);
 
             } catch (NoSuchFieldException e) {
-                log.debug("Field {} not found in target {} (nested mapping)",
-                        targetFieldName, targetClass.getSimpleName());
+                log.debug("Field {} not found in target {} (nested mapping)", targetFieldName, targetClass.getSimpleName());
             }
         }
 
@@ -942,11 +1012,10 @@ public class CrudXMapperGenerator {
 
         code.append("    /**\n");
         code.append("     * Converts ").append(sourceRef).append(" to ").append(targetRef).append("\n");
-        code.append("     * @param source Source object of type ").append(sourceRef).append("\n");
-        code.append("     * @return Converted object of type ").append(targetRef).append("\n");
+        code.append("     * @param source Source object\n");
+        code.append("     * @return Converted object\n");
         code.append("     */\n");
-        code.append("    private ").append(targetRef).append(" ")
-                .append(nestedMap.methodName).append("(").append(sourceRef).append(" source) {\n");
+        code.append("    private ").append(targetRef).append(" ").append(nestedMap.methodName).append("(").append(sourceRef).append(" source) {\n");
         code.append("        if (source == null) return null;\n\n");
         code.append("        ").append(targetRef).append(" target = new ").append(targetRef).append("();\n");
 
@@ -957,15 +1026,10 @@ public class CrudXMapperGenerator {
             // Handle nested objects within nested objects
             if (mapping.nested) {
                 String nestedConversionMethod = getUniqueMethodName(mapping.dtoFieldType, mapping.entityFieldType);
-                code.append("        ").append(setter).append("(")
-                        .append(nestedConversionMethod).append("(").append(getter).append("));\n");
+                code.append("        ").append(setter).append("(").append(nestedConversionMethod).append("(").append(getter).append("));\n");
             } else if (mapping.collection) {
-                String collectionConversionMethod = getUniqueMethodName(
-                        mapping.collectionElementType,
-                        getCollectionElementType(mapping.entityFieldType)
-                ) + "_List";
-                code.append("        ").append(setter).append("(")
-                        .append(collectionConversionMethod).append("(").append(getter).append("));\n");
+                String collectionConversionMethod = getUniqueMethodName(mapping.collectionElementType, getCollectionElementType(mapping.entityFieldType)) + "_List";
+                code.append("        ").append(setter).append("(").append(collectionConversionMethod).append("(").append(getter).append("));\n");
             } else {
                 code.append("        ").append(setter).append("(").append(getter).append(");\n");
             }
@@ -978,14 +1042,10 @@ public class CrudXMapperGenerator {
     }
 
     private Class<?> getCollectionElementType(Class<?> fieldType) {
-        // Fallback for when we can't determine generic type
-        return Object.class;
+        return Object.class; // Fallback
     }
 
-    private String generateCollectionConversionMethod(
-            Class<?> sourceElementType,
-            Class<?> targetElementType,
-            String elementConversionMethod) {
+    private String generateCollectionConversionMethod(Class<?> sourceElementType, Class<?> targetElementType, String elementConversionMethod) {
 
         StringBuilder code = new StringBuilder();
 
@@ -995,13 +1055,9 @@ public class CrudXMapperGenerator {
         String methodName = getUniqueMethodName(sourceElementType, targetElementType) + "_List";
 
         code.append("    /**\n");
-        code.append("     * Converts List<").append(sourceRef).append("> to List<")
-                .append(targetRef).append(">\n");
-        code.append("     * @param source Source list\n");
-        code.append("     * @return Converted list\n");
+        code.append("     * Converts List<").append(sourceRef).append("> to List<").append(targetRef).append(">\n");
         code.append("     */\n");
-        code.append("    private List<").append(targetRef).append("> ")
-                .append(methodName).append("(List<").append(sourceRef).append("> source) {\n");
+        code.append("    private List<").append(targetRef).append("> ").append(methodName).append("(List<").append(sourceRef).append("> source) {\n");
         code.append("        if (source == null) return null;\n\n");
         code.append("        List<").append(targetRef).append("> target = new ArrayList<>(source.size());\n");
         code.append("        for (").append(sourceRef).append(" item : source) {\n");
@@ -1029,6 +1085,15 @@ public class CrudXMapperGenerator {
                 && !type.isEnum();
     }
 
+    private String escapeJavaString(String str) {
+        if (str == null) return "";
+        return str.replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t");
+    }
+
     private static class MapperAnalysis {
         Class<?> entityClass;
         List<Field> entityFields;
@@ -1049,7 +1114,12 @@ public class CrudXMapperGenerator {
         boolean needsConversion;
         boolean nested;
         boolean collection;
+        boolean computed;           // ✓ NEW: For @CrudXComputed
+        boolean required;           // ✓ NEW: For @CrudXField(required)
         Class<?> nestedDtoClass;
         Class<?> collectionElementType;
+        int maxCollectionSize = 1000;  // ✓ NEW: For @CrudXCollection(maxSize)
+        String spelExpression;          // ✓ NEW: For @CrudXComputed(expression)
+        FetchStrategy fetchStrategy;    // ✓ NEW: For @CrudXNested(fetch)
     }
 }

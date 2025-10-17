@@ -2,10 +2,16 @@ package io.github.sachinnimbal.crudx.dto.registry;
 
 import io.github.sachinnimbal.crudx.core.annotations.CrudXImmutable;
 import io.github.sachinnimbal.crudx.core.annotations.CrudXUniqueConstraint;
-import io.github.sachinnimbal.crudx.core.annotations.dto.*;
+import io.github.sachinnimbal.crudx.core.annotations.dto.CrudXCollection;
+import io.github.sachinnimbal.crudx.core.annotations.dto.CrudXComputed;
+import io.github.sachinnimbal.crudx.core.annotations.dto.CrudXField;
+import io.github.sachinnimbal.crudx.core.annotations.dto.CrudXNested;
 import io.github.sachinnimbal.crudx.core.enums.Direction;
 import io.github.sachinnimbal.crudx.core.enums.OperationType;
-import io.github.sachinnimbal.crudx.dto.metadata.*;
+import io.github.sachinnimbal.crudx.dto.metadata.DtoMetadata;
+import io.github.sachinnimbal.crudx.dto.metadata.FieldMapping;
+import io.github.sachinnimbal.crudx.dto.metadata.UniqueConstraintMetadata;
+import io.github.sachinnimbal.crudx.dto.metadata.ValidationProfile;
 import jakarta.validation.constraints.*;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -13,19 +19,14 @@ import org.springframework.stereotype.Component;
 import java.lang.reflect.Field;
 import java.util.*;
 
-/**
- * Extracts metadata from DTO and Entity classes
- * Cached for reuse across mapper generation
- */
 @Slf4j
 @Component
 public class DtoMetadataExtractor {
 
-    // Cache entity metadata to avoid repeated reflection
     private final Map<Class<?>, EntityMetadata> entityMetadataCache = new HashMap<>();
 
     /**
-     * Extract complete DTO metadata
+     * Extract complete DTO metadata with all annotation support
      */
     public DtoMetadata extractMetadata(Class<?> dtoClass,
                                        Class<?> entityClass,
@@ -39,11 +40,27 @@ public class DtoMetadataExtractor {
         Map<String, FieldMapping> fieldMappings = new HashMap<>();
         Map<String, ValidationProfile> validationProfiles = new HashMap<>();
 
-        // Process DTO fields
         for (Field dtoField : getAllFields(dtoClass)) {
             CrudXField fieldAnnotation = dtoField.getAnnotation(CrudXField.class);
 
             if (fieldAnnotation != null && fieldAnnotation.ignore()) {
+                continue;
+            }
+
+            // Handle @CrudXComputed fields
+            if (dtoField.isAnnotationPresent(CrudXComputed.class)) {
+                CrudXComputed computed = dtoField.getAnnotation(CrudXComputed.class);
+                FieldMapping mapping = FieldMapping.builder()
+                        .dtoFieldName(dtoField.getName())
+                        .dtoFieldType(dtoField.getType())
+                        .computed(true)
+                        .spelExpression(computed.expression())
+                        .required(fieldAnnotation != null && fieldAnnotation.required())
+                        .build();
+                fieldMappings.put(dtoField.getName(), mapping);
+
+                log.debug("Registered computed field: {} with expression: {}",
+                        dtoField.getName(), computed.expression());
                 continue;
             }
 
@@ -52,32 +69,39 @@ public class DtoMetadataExtractor {
                     ? fieldAnnotation.value()
                     : dtoFieldName;
 
-            // Build field mapping
-            FieldMapping mapping = FieldMapping.builder()
+            FieldMapping.FieldMappingBuilder mappingBuilder = FieldMapping.builder()
                     .dtoFieldName(dtoFieldName)
                     .entityFieldName(entityFieldName)
                     .dtoFieldType(dtoField.getType())
                     .ignored(false)
-                    .build();
+                    .required(fieldAnnotation != null && fieldAnnotation.required());
 
-            // Handle nested objects
+            // Handle @CrudXNested
             if (dtoField.isAnnotationPresent(CrudXNested.class)) {
                 CrudXNested nested = dtoField.getAnnotation(CrudXNested.class);
-                mapping.setNested(true);
-                mapping.setNestedDtoClass(nested.dto());
-                mapping.setFetchStrategy(nested.fetch());
+                mappingBuilder.nested(true)
+                        .nestedDtoClass(nested.dto())
+                        .fetchStrategy(nested.fetch());
+
+                log.debug("Registered nested field: {} with DTO: {} and fetch strategy: {}",
+                        dtoFieldName, nested.dto().getSimpleName(), nested.fetch());
             }
 
-            // Handle collections
+            // Handle @CrudXCollection
             if (dtoField.isAnnotationPresent(CrudXCollection.class)) {
                 CrudXCollection collection = dtoField.getAnnotation(CrudXCollection.class);
-                mapping.setCollection(true);
-                mapping.setNestedDtoClass(collection.elementDto());
+                mappingBuilder.collection(true)
+                        .collectionElementType(collection.elementDto())
+                        .maxCollectionSize(collection.maxSize());
+
+                log.debug("Registered collection field: {} with element DTO: {} and maxSize: {}",
+                        dtoFieldName, collection.elementDto().getSimpleName(), collection.maxSize());
             }
 
+            FieldMapping mapping = mappingBuilder.build();
             fieldMappings.put(dtoFieldName, mapping);
 
-            // Inherit validations
+            // Inherit validations from entity
             if (inheritValidations && entityMeta.getValidationProfiles().containsKey(entityFieldName)) {
                 ValidationProfile inheritedProfile = entityMeta.getValidationProfiles().get(entityFieldName);
 
@@ -110,41 +134,37 @@ public class DtoMetadataExtractor {
                 .build();
     }
 
-    /**
-     * Get or extract entity metadata (cached)
-     */
     private EntityMetadata getEntityMetadata(Class<?> entityClass) {
         return entityMetadataCache.computeIfAbsent(entityClass, this::extractEntityMetadata);
     }
 
-    /**
-     * Extract metadata from entity class
-     */
     private EntityMetadata extractEntityMetadata(Class<?> entityClass) {
         Set<String> immutableFields = new HashSet<>();
         List<UniqueConstraintMetadata> uniqueConstraints = new ArrayList<>();
         Map<String, ValidationProfile> validationProfiles = new HashMap<>();
 
-        // Extract immutable fields
         for (Field field : getAllFields(entityClass)) {
             if (field.isAnnotationPresent(CrudXImmutable.class)) {
                 immutableFields.add(field.getName());
+                log.debug("Registered immutable field: {} in entity: {}",
+                        field.getName(), entityClass.getSimpleName());
             }
 
-            // Extract validation annotations
             ValidationProfile profile = extractValidationProfile(field);
             if (profile != null) {
                 validationProfiles.put(field.getName(), profile);
             }
         }
 
-        // Extract unique constraints
         CrudXUniqueConstraint[] constraints = entityClass.getAnnotationsByType(CrudXUniqueConstraint.class);
         for (CrudXUniqueConstraint constraint : constraints) {
             uniqueConstraints.add(UniqueConstraintMetadata.builder()
                     .fields(constraint.fields())
                     .message(constraint.message())
                     .build());
+
+            log.debug("Registered unique constraint on fields: {} in entity: {}",
+                    Arrays.toString(constraint.fields()), entityClass.getSimpleName());
         }
 
         return EntityMetadata.builder()
@@ -155,9 +175,6 @@ public class DtoMetadataExtractor {
                 .build();
     }
 
-    /**
-     * Extract validation profile from field
-     */
     private ValidationProfile extractValidationProfile(Field field) {
         ValidationProfile.ValidationProfileBuilder builder = ValidationProfile.builder();
         boolean hasConstraints = false;
