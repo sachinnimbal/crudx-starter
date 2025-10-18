@@ -6,6 +6,9 @@ plugins {
     id 'com.gradleup.nmcp' version '0.0.8'
 }
 
+apply from : "gradle/author.gradle"
+apply from : "gradle/publishing.gradle"
+
 group = project.findProperty("group")
 version = project.findProperty("version")
 description = project.findProperty("description")
@@ -22,7 +25,10 @@ java {
                 attributes(
                         'Implementation-Title': project.name,
                         'Implementation-Version': project.version,
-                        'Implementation-Vendor': 'Sachin Nimbal'
+                        'Implementation-Vendor': 'Sachin Nimbal',
+                        'Built-By': 'Sachin Nimbal',
+                        'Built-Date': new Date().format('yyyy-MM-dd HH:mm:ss'),
+                        'Copyright': "Copyright ${project.findProperty('author.copyrightYear')} Sachin Nimbal"
                 )
             }
         }
@@ -85,4 +91,117 @@ tasks.withType(JavaCompile).configureEach {
 tasks.withType(Javadoc).configureEach {
     options.encoding = 'UTF-8'
     options.addBooleanOption('Xdoclint:none', true)
+}
+
+
+tasks.register('generateVersionProperties') {
+    def propertiesFile = layout.buildDirectory.file('resources/main/crudx-version.properties')
+    outputs.file(propertiesFile)
+
+    doLast {
+        def file = propertiesFile.get().asFile
+        file.parentFile.mkdirs()
+        file.text = """# CrudX Framework Version
+# Auto-generated - DO NOT EDIT
+version=${project.version}
+group=${project.group}
+artifact=${project.name}
+description=${project.description}
+author.name=${project.findProperty('author.name')}
+author.email=${project.findProperty('author.email')}
+author.linkedin=${project.findProperty('author.linkedin')}
+copyright.year=${project.findProperty('author.copyrightYear')}
+build.date=${new Date().format('yyyy-MM-dd HH:mm:ss')}
+"""
+        logger.lifecycle("✓ Generated version properties: ${file.absolutePath}")
+    }
+}
+
+// ============================================================
+// NEW: Generate META-INF/services for Annotation Processor
+// ============================================================
+tasks.register('generateAnnotationProcessorService') {
+    def serviceDir = layout.buildDirectory.dir('resources/main/META-INF/services')
+    def serviceFile = serviceDir.map { it.file('javax.annotation.processing.Processor') }
+    outputs.file(serviceFile)
+
+    doLast {
+        def file = serviceFile.get().asFile
+        file.parentFile.mkdirs()
+        file.text = """io.github.sachinnimbal.crudx.annotation.processor.CrudXDtoValidationProcessor
+"""
+        logger.lifecycle("✓ Generated Annotation Processor service file: ${file.absolutePath}")
+    }
+}
+
+tasks.named('compileJava') {
+    dependsOn 'generateVersionProperties', 'generateAnnotationProcessorService'
+}
+
+tasks.named('processResources') {
+    dependsOn 'generateVersionProperties', 'generateAnnotationProcessorService'
+}
+
+tasks.withType(JavaExec).configureEach {
+    systemProperty 'crudx.version', project.version
+    systemProperty 'crudx.group', project.group
+}
+
+tasks.withType(Test).configureEach {
+    systemProperty 'crudx.version', project.version
+    systemProperty 'crudx.group', project.group
+}
+
+tasks.named('clean') {
+    doLast {
+        def versionFile = layout.buildDirectory.file('resources/main/crudx-version.properties').get().asFile
+        def serviceFile = layout.buildDirectory.file('resources/main/META-INF/services/javax.annotation.processing.Processor').get().asFile
+
+        if (versionFile.exists()) {
+            versionFile.delete()
+            logger.lifecycle("✓ Cleaned version properties file")
+        }
+
+        if (serviceFile.exists()) {
+            serviceFile.delete()
+            logger.lifecycle("✓ Cleaned annotation processor service file")
+        }
+    }
+}
+
+tasks.register('verifyVersion') {
+    group = 'verification'
+    description = 'Verifies that the version and annotation processor are correctly configured'
+
+    doLast {
+        println """
+╔═══════════════════════════════════════════════════════════╗
+║           CrudX Framework Version Information             ║
+╠═══════════════════════════════════════════════════════════╣
+║ Version:     ${project.version}
+║ Group:       ${project.group}
+║ Artifact:    ${project.name}
+║ Description: ${project.description}
+║ Author:      ${project.findProperty('author.name')}
+║ Email:       ${project.findProperty('author.email')}
+║ LinkedIn:    ${project.findProperty('author.linkedin')}
+║ Copyright:   © ${project.findProperty('author.copyrightYear')} Sachin Nimbal
+╚═══════════════════════════════════════════════════════════╝
+"""
+
+        def versionFile = layout.buildDirectory.file('resources/main/crudx-version.properties').get().asFile
+        def serviceFile = layout.buildDirectory.file('resources/main/META-INF/services/javax.annotation.processing.Processor').get().asFile
+
+        if (versionFile.exists()) {
+            println "✓ Version properties file exists: ${versionFile.absolutePath}"
+        } else {
+            println "✗ Version properties file not found. Run './gradlew build'"
+        }
+
+        if (serviceFile.exists()) {
+            println "✓ Annotation Processor service file exists: ${serviceFile.absolutePath}"
+        } else {
+            println "✗ Annotation Processor service file not found. Run './gradlew build'"
+        }
+    }
 }
