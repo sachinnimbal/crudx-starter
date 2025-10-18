@@ -16,8 +16,8 @@
 
 package io.github.sachinnimbal.crudx.web;
 
+import io.github.sachinnimbal.crudx.core.config.CrudXProperties;
 import io.github.sachinnimbal.crudx.core.enums.DatabaseType;
-import io.github.sachinnimbal.crudx.core.exception.DuplicateEntityException;
 import io.github.sachinnimbal.crudx.core.exception.EntityNotFoundException;
 import io.github.sachinnimbal.crudx.core.model.CrudXBaseEntity;
 import io.github.sachinnimbal.crudx.core.model.CrudXMongoEntity;
@@ -28,6 +28,10 @@ import io.github.sachinnimbal.crudx.core.response.BatchResult;
 import io.github.sachinnimbal.crudx.core.response.PageResponse;
 import io.github.sachinnimbal.crudx.service.CrudXService;
 import jakarta.annotation.PostConstruct;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotEmpty;
+import lombok.AllArgsConstructor;
+import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationContext;
@@ -43,6 +47,7 @@ import java.io.Serializable;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -164,6 +169,9 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     private Class<T> entityClass;
     private Class<ID> idClass;
 
+    @Autowired
+    protected CrudXProperties crudxProperties;
+
     private static final int MAX_PAGE_SIZE = 100000;
     private static final int LARGE_DATASET_THRESHOLD = 1000;
     private static final int DEFAULT_PAGE_SIZE = 50;
@@ -237,7 +245,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     }
 
     @PostMapping
-    public ResponseEntity<ApiResponse<T>> create(@RequestBody T entity) {
+    public ResponseEntity<ApiResponse<T>> create(@Valid @RequestBody T entity) {
         long startTime = System.currentTimeMillis();
 
         try {
@@ -257,10 +265,6 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
             return ResponseEntity.status(HttpStatus.CREATED)
                     .body(ApiResponse.success(created, "Entity created successfully", HttpStatus.CREATED, executionTime));
-        } catch (IllegalArgumentException e) {
-            long executionTime = System.currentTimeMillis() - startTime;
-            log.error("Invalid entity data: {} | Time taken: {} ms", e.getMessage(), executionTime);
-            throw e;
         } catch (Exception e) {
             long executionTime = System.currentTimeMillis() - startTime;
             log.error("Error creating entity: {} | Time taken: {} ms", e.getMessage(), executionTime, e);
@@ -270,7 +274,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
     @PostMapping("/batch")
     public ResponseEntity<ApiResponse<BatchResult<T>>> createBatch(
-            @RequestBody List<T> entities,
+            @Valid @RequestBody List<T> entities,
             @RequestParam(required = false, defaultValue = "true") boolean skipDuplicates) {
 
         long startTime = System.currentTimeMillis();
@@ -284,7 +288,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
             beforeCreateBatch(entities);
 
-            final int MAX_BATCH_SIZE = 100000;
+            final int MAX_BATCH_SIZE = crudxProperties.getMaxBatchSize();
             if (entities.size() > MAX_BATCH_SIZE) {
                 throw new IllegalArgumentException(
                         String.format("Batch size exceeds maximum limit of %d (1 Lakh). Current size: %d. " +
@@ -293,104 +297,22 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                 );
             }
 
-            // Optimal chunk size for memory efficiency - tested for best performance
-            // 500 records per chunk balances memory usage and database round trips
-            final int OPTIMAL_CHUNK_SIZE = 500;
+            final int OPTIMAL_CHUNK_SIZE = crudxProperties.getBatchSize();
+            ;
 
-            // Always use chunking for batches > 100 to maintain consistent performance
             if (entities.size() > 100) {
                 log.info("Processing batch of {} entities in chunks of {} (Memory-optimized mode)",
                         entities.size(), OPTIMAL_CHUNK_SIZE);
 
-                BatchResult<T> combinedResult = new BatchResult<>();
-                List<T> allCreated = new ArrayList<>((int) (entities.size() * 0.9));
-                int totalSkipped = 0;
-                List<String> allSkippedReasons = new ArrayList<>();
+                BatchResult<T> combinedResult = processChunkedBatch(
+                        entities, skipDuplicates, OPTIMAL_CHUNK_SIZE, startTime);
 
-                int totalChunks = (entities.size() + OPTIMAL_CHUNK_SIZE - 1) / OPTIMAL_CHUNK_SIZE;
-                int chunkNumber = 0;
-
-                // Process in chunks with progress tracking
-                for (int i = 0; i < entities.size(); i += OPTIMAL_CHUNK_SIZE) {
-                    chunkNumber++;
-                    int end = Math.min(i + OPTIMAL_CHUNK_SIZE, entities.size());
-
-                    // Create new list to avoid memory leaks from subList
-                    List<T> chunk = new ArrayList<>(entities.subList(i, end));
-
-                    long chunkStart = System.currentTimeMillis();
-                    log.debug("Processing chunk {}/{}: records {}-{}",
-                            chunkNumber, totalChunks, i + 1, end);
-
-                    try {
-                        BatchResult<T> chunkResult = crudService.createBatch(chunk, skipDuplicates);
-
-                        // Merge results
-                        allCreated.addAll(chunkResult.getCreatedEntities());
-                        totalSkipped += chunkResult.getSkippedCount();
-
-                        if (chunkResult.getSkippedReasons() != null && !chunkResult.getSkippedReasons().isEmpty()) {
-                            allSkippedReasons.addAll(chunkResult.getSkippedReasons());
-                        }
-
-                        long chunkTime = System.currentTimeMillis() - chunkStart;
-                        log.debug("Chunk {}/{} completed: {} created, {} skipped | Time: {} ms",
-                                chunkNumber, totalChunks,
-                                chunkResult.getCreatedEntities().size(),
-                                chunkResult.getSkippedCount(),
-                                chunkTime);
-
-                    } catch (Exception chunkError) {
-                        log.error("Error processing chunk {}/{} (records {}-{}): {}",
-                                chunkNumber, totalChunks, i + 1, end, chunkError.getMessage());
-
-                        // Continue with next chunk if skipDuplicates=true
-                        if (!skipDuplicates) {
-                            throw chunkError;
-                        }
-
-                        totalSkipped += (end - i);
-                        allSkippedReasons.add(String.format("Chunk %d/%d (records %d-%d) failed: %s",
-                                chunkNumber, totalChunks, i + 1, end, chunkError.getMessage()));
-                    } finally {
-                        // Explicitly clear chunk to help GC
-                        chunk.clear();
-                    }
-
-                    // Progress logging every 10 chunks or for large batches
-                    if (chunkNumber % 10 == 0 || entities.size() > 10000) {
-                        double progress = (double) end / entities.size() * 100;
-                        long elapsed = System.currentTimeMillis() - startTime;
-                        long estimated = (long) (elapsed / progress * 100);
-                        log.info("Progress: {}/{} records ({}%) | Elapsed: {} ms | Estimated total: {} ms",
-                                end, entities.size(), String.format("%.1f", progress), elapsed, estimated);
-                    }
-                }
-
-                // Build combined result
-                combinedResult.setCreatedEntities(allCreated);
-                combinedResult.setSkippedCount(totalSkipped);
-                if (!allSkippedReasons.isEmpty()) {
-                    combinedResult.setSkippedReasons(allSkippedReasons);
-                }
-
-                afterCreateBatch(allCreated);
+                afterCreateBatch(combinedResult.getCreatedEntities());
 
                 long executionTime = System.currentTimeMillis() - startTime;
-                double recordsPerSecond = (allCreated.size() * 1000.0) / executionTime;
+                double recordsPerSecond = (combinedResult.getCreatedEntities().size() * 1000.0) / executionTime;
 
-                String message;
-                if (combinedResult.hasSkipped()) {
-                    message = String.format(
-                            "Batch creation completed: %d created, %d skipped (duplicates/errors) | " +
-                                    "Processed in %d chunks | Performance: %.0f records/sec",
-                            allCreated.size(), totalSkipped, totalChunks, recordsPerSecond);
-                } else {
-                    message = String.format(
-                            "%d entities created successfully | Processed in %d chunks | Performance: %.0f records/sec",
-                            allCreated.size(), totalChunks, recordsPerSecond);
-                }
-
+                String message = formatBatchMessage(combinedResult, recordsPerSecond, OPTIMAL_CHUNK_SIZE);
                 log.info("{} | Total time: {} ms", message, executionTime);
 
                 return ResponseEntity.status(HttpStatus.CREATED)
@@ -402,29 +324,13 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             afterCreateBatch(result.getCreatedEntities());
 
             long executionTime = System.currentTimeMillis() - startTime;
-
-            String message;
-            if (result.hasSkipped()) {
-                message = String.format("Batch creation completed: %d created, %d skipped (duplicates/errors)",
-                        result.getCreatedEntities().size(), result.getSkippedCount());
-            } else {
-                message = String.format("%d entities created successfully", result.getCreatedEntities().size());
-            }
+            String message = formatSimpleMessage(result);
 
             log.info("{} | Time taken: {} ms", message, executionTime);
 
             return ResponseEntity.status(HttpStatus.CREATED)
                     .body(ApiResponse.success(result, message, HttpStatus.CREATED, executionTime));
 
-        } catch (IllegalArgumentException e) {
-            long executionTime = System.currentTimeMillis() - startTime;
-            log.error("Invalid batch data: {} | Time taken: {} ms", e.getMessage(), executionTime);
-            throw e;
-        } catch (DuplicateEntityException e) {
-            long executionTime = System.currentTimeMillis() - startTime;
-            log.error("Duplicate entity in batch (skipDuplicates=false): {} | Time taken: {} ms",
-                    e.getMessage(), executionTime);
-            throw e;
         } catch (Exception e) {
             long executionTime = System.currentTimeMillis() - startTime;
             log.error("Error creating batch: {} | Time taken: {} ms", e.getMessage(), executionTime, e);
@@ -435,7 +341,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     @GetMapping("/{id}")
     public ResponseEntity<ApiResponse<T>> getById(@PathVariable ID id) {
         long startTime = System.currentTimeMillis();
-
+        validateId(id);
         try {
             log.debug("Fetching entity by ID: {}", id);
 
@@ -455,14 +361,6 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             log.info("Entity found with ID: {} | Time taken: {} ms", id, executionTime);
 
             return ResponseEntity.ok(ApiResponse.success(entity, "Entity retrieved successfully", executionTime));
-        } catch (EntityNotFoundException e) {
-            long executionTime = System.currentTimeMillis() - startTime;
-            log.warn("Entity not found with ID: {} | Time taken: {} ms", id, executionTime);
-            throw e;
-        } catch (IllegalArgumentException e) {
-            long executionTime = System.currentTimeMillis() - startTime;
-            log.error("Invalid ID parameter: {} | Time taken: {} ms", e.getMessage(), executionTime);
-            throw e;
         } catch (Exception e) {
             long executionTime = System.currentTimeMillis() - startTime;
             log.error("Error fetching entity by ID {}: {} | Time taken: {} ms", id, e.getMessage(), executionTime, e);
@@ -544,14 +442,6 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                     String.format("Retrieved %d entities", entities.size()),
                     executionTime));
 
-        } catch (EntityNotFoundException e) {
-            long executionTime = System.currentTimeMillis() - startTime;
-            log.warn("No entities found | Time taken: {} ms", executionTime);
-            throw e;
-        } catch (IllegalArgumentException e) {
-            long executionTime = System.currentTimeMillis() - startTime;
-            log.error("Invalid parameters: {} | Time taken: {} ms", e.getMessage(), executionTime);
-            throw e;
         } catch (Exception e) {
             long executionTime = System.currentTimeMillis() - startTime;
             log.error("Error fetching all entities: {} | Time taken: {} ms", e.getMessage(), executionTime, e);
@@ -618,14 +508,6 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
             return ResponseEntity.ok(ApiResponse.success(pageResponse, message, executionTime));
 
-        } catch (EntityNotFoundException e) {
-            long executionTime = System.currentTimeMillis() - startTime;
-            log.warn("No entities found | Time taken: {} ms", executionTime);
-            throw e;
-        } catch (IllegalArgumentException e) {
-            long executionTime = System.currentTimeMillis() - startTime;
-            log.error("Invalid pagination parameters: {} | Time taken: {} ms", e.getMessage(), executionTime);
-            throw e;
         } catch (Exception e) {
             long executionTime = System.currentTimeMillis() - startTime;
             log.error("Error fetching paged entities: {} | Time taken: {} ms", e.getMessage(), executionTime, e);
@@ -636,9 +518,10 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     @PatchMapping("/{id}")
     public ResponseEntity<ApiResponse<T>> update(
             @PathVariable ID id,
-            @RequestBody Map<String, Object> updates) {
+            @RequestBody @NotEmpty Map<String, Object> updates) {
 
         long startTime = System.currentTimeMillis();
+        validateId(id);
 
         try {
             log.debug("Updating entity with ID: {}", id);
@@ -666,14 +549,6 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             log.info("Entity updated successfully with ID: {} | Time taken: {} ms", id, executionTime);
 
             return ResponseEntity.ok(ApiResponse.success(updated, "Entity updated successfully", executionTime));
-        } catch (EntityNotFoundException e) {
-            long executionTime = System.currentTimeMillis() - startTime;
-            log.warn("Entity not found for update with ID: {} | Time taken: {} ms", id, executionTime);
-            throw e;
-        } catch (IllegalArgumentException e) {
-            long executionTime = System.currentTimeMillis() - startTime;
-            log.error("Invalid update data: {} | Time taken: {} ms", e.getMessage(), executionTime);
-            throw e;
         } catch (Exception e) {
             long executionTime = System.currentTimeMillis() - startTime;
             log.error("Error updating entity with ID {}: {} | Time taken: {} ms", id, e.getMessage(), executionTime, e);
@@ -706,7 +581,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     @GetMapping("/exists/{id}")
     public ResponseEntity<ApiResponse<Boolean>> exists(@PathVariable ID id) {
         long startTime = System.currentTimeMillis();
-
+        validateId(id);
         try {
             log.debug("Checking existence of entity with ID: {}", id);
 
@@ -723,10 +598,6 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             return ResponseEntity.ok(ApiResponse.success(exists,
                     String.format("Entity %s", exists ? "exists" : "does not exist"),
                     executionTime));
-        } catch (IllegalArgumentException e) {
-            long executionTime = System.currentTimeMillis() - startTime;
-            log.error("Invalid ID parameter: {} | Time taken: {} ms", e.getMessage(), executionTime);
-            throw e;
         } catch (Exception e) {
             long executionTime = System.currentTimeMillis() - startTime;
             log.error("Error checking entity existence with ID {}: {} | Time taken: {} ms", id, e.getMessage(), executionTime, e);
@@ -737,7 +608,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     @DeleteMapping("/{id}")
     public ResponseEntity<ApiResponse<Void>> delete(@PathVariable ID id) {
         long startTime = System.currentTimeMillis();
-
+        validateId(id);
         try {
             log.debug("Deleting entity with ID: {}", id);
 
@@ -757,14 +628,6 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             log.info("Entity deleted successfully with ID: {} | Time taken: {} ms", id, executionTime);
 
             return ResponseEntity.ok(ApiResponse.success(null, "Entity deleted successfully", executionTime));
-        } catch (EntityNotFoundException e) {
-            long executionTime = System.currentTimeMillis() - startTime;
-            log.warn("Entity not found for deletion with ID: {} | Time taken: {} ms", id, executionTime);
-            throw e;
-        } catch (IllegalArgumentException e) {
-            long executionTime = System.currentTimeMillis() - startTime;
-            log.error("Invalid ID parameter: {} | Time taken: {} ms", e.getMessage(), executionTime);
-            throw e;
         } catch (Exception e) {
             long executionTime = System.currentTimeMillis() - startTime;
             log.error("Error deleting entity with ID {}: {} | Time taken: {} ms", id, e.getMessage(), executionTime, e);
@@ -773,7 +636,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     }
 
     @DeleteMapping("/batch")
-    public ResponseEntity<ApiResponse<BatchResult<ID>>> deleteBatch(@RequestBody List<ID> ids) {
+    public ResponseEntity<ApiResponse<BatchResult<ID>>> deleteBatch(@Valid @RequestBody List<ID> ids) {
         long startTime = System.currentTimeMillis();
 
         try {
@@ -808,10 +671,6 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
             return ResponseEntity.ok(ApiResponse.success(result, message, executionTime));
 
-        } catch (IllegalArgumentException e) {
-            long executionTime = System.currentTimeMillis() - startTime;
-            log.error("Invalid batch delete data: {} | Time taken: {} ms", e.getMessage(), executionTime);
-            throw e;
         } catch (Exception e) {
             long executionTime = System.currentTimeMillis() - startTime;
             log.error("Error deleting batch: {} | Time taken: {} ms", e.getMessage(), executionTime, e);
@@ -820,7 +679,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     }
 
     @DeleteMapping("/batch/force")
-    public ResponseEntity<ApiResponse<Void>> deleteBatchForce(@RequestBody List<ID> ids) {
+    public ResponseEntity<ApiResponse<Void>> deleteBatchForce(@Valid @RequestBody List<ID> ids) {
         long startTime = System.currentTimeMillis();
 
         try {
@@ -841,7 +700,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             beforeDeleteBatch(ids);
 
             // Process in smaller batches to minimize memory footprint
-            int batchSize = 100;
+            int batchSize = crudxProperties.getBatchSize();
             int totalDeleted = 0;
             List<ID> actuallyDeletedIds = new ArrayList<>();
 
@@ -871,14 +730,34 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                     String.format("%d IDs processed for deletion (existence not verified)", totalDeleted),
                     executionTime));
 
-        } catch (IllegalArgumentException e) {
-            long executionTime = System.currentTimeMillis() - startTime;
-            log.error("Invalid force delete data: {} | Time taken: {} ms", e.getMessage(), executionTime);
-            throw e;
         } catch (Exception e) {
             long executionTime = System.currentTimeMillis() - startTime;
             log.error("Error force deleting batch: {} | Time taken: {} ms", e.getMessage(), executionTime, e);
             throw new RuntimeException("Failed to force delete batch: " + e.getMessage(), e);
+        }
+    }
+
+    @PatchMapping("/batch")
+    public ResponseEntity<ApiResponse<BatchResult<T>>> updateBatch(
+            @Valid @RequestBody Map<ID, Map<String, Object>> updates) {
+        long startTime = System.currentTimeMillis();
+        try {
+            log.debug("Processing batch update for {} entities", updates.size());
+            if (updates.isEmpty()) {
+                throw new IllegalArgumentException("Updates map cannot be empty");
+            }
+            BatchResult<T> result = crudService.updateBatch(updates);
+            long executionTime = System.currentTimeMillis() - startTime;
+            String message = result.hasSkipped()
+                    ? String.format("Batch update completed: %d updated, %d skipped",
+                    result.getCreatedEntities().size(), result.getSkippedCount())
+                    : String.format("%d entities updated successfully",
+                    result.getCreatedEntities().size());
+            return ResponseEntity.ok(ApiResponse.success(result, message, executionTime));
+        } catch (Exception e) {
+            long executionTime = System.currentTimeMillis() - startTime;
+            log.error("Error in batch update: {}", e.getMessage(), e);
+            throw new RuntimeException("Failed to update batch: " + e.getMessage(), e);
         }
     }
 
@@ -899,6 +778,156 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         } catch (Exception e) {
             log.warn("Could not clone entity for comparison", e);
             return null;
+        }
+    }
+
+    @Data
+    @AllArgsConstructor
+    private static class ChunkProcessingResult<T> {
+        private List<T> createdEntities;
+        private int skippedCount;
+        private List<String> skippedReasons;
+    }
+
+    private BatchResult<T> processChunkedBatch(List<T> entities,
+                                               boolean skipDuplicates,
+                                               int chunkSize,
+                                               long startTime) {
+        BatchResult<T> combinedResult = new BatchResult<>();
+        List<T> allCreated = new ArrayList<>((int) (entities.size() * 0.9));
+        int totalSkipped = 0;
+        List<String> allSkippedReasons = new ArrayList<>();
+
+        int totalChunks = (entities.size() + chunkSize - 1) / chunkSize;
+        int chunkNumber = 0;
+
+        for (int i = 0; i < entities.size(); i += chunkSize) {
+            chunkNumber++;
+            int end = Math.min(i + chunkSize, entities.size());
+
+            ChunkProcessingResult<T> result = processSingleChunk(
+                    entities, i, end, chunkNumber, totalChunks, skipDuplicates);
+
+            allCreated.addAll(result.getCreatedEntities());
+            totalSkipped += result.getSkippedCount();
+
+            if (result.getSkippedReasons() != null && !result.getSkippedReasons().isEmpty()) {
+                allSkippedReasons.addAll(result.getSkippedReasons());
+            }
+
+            // Progress logging
+            if (chunkNumber % 10 == 0 || entities.size() > 10000) {
+                logProgress(entities.size(), end, startTime);
+            }
+
+            // GC hint for large batches
+            if (chunkNumber % 10 == 0 && entities.size() > 10000) {
+                System.gc();
+            }
+        }
+
+        combinedResult.setCreatedEntities(allCreated);
+        combinedResult.setSkippedCount(totalSkipped);
+        if (!allSkippedReasons.isEmpty()) {
+            combinedResult.setSkippedReasons(allSkippedReasons);
+        }
+
+        return combinedResult;
+    }
+
+    private ChunkProcessingResult<T> processSingleChunk(List<T> entities,
+                                                        int start,
+                                                        int end,
+                                                        int chunkNumber,
+                                                        int totalChunks,
+                                                        boolean skipDuplicates) {
+        List<T> chunk = new ArrayList<>(entities.subList(start, end));
+        long chunkStart = System.currentTimeMillis();
+
+        log.debug("Processing chunk {}/{}: records {}-{}",
+                chunkNumber, totalChunks, start + 1, end);
+
+        try {
+            BatchResult<T> chunkResult = crudService.createBatch(chunk, skipDuplicates);
+
+            long chunkTime = System.currentTimeMillis() - chunkStart;
+            log.debug("Chunk {}/{} completed: {} created, {} skipped | Time: {} ms",
+                    chunkNumber, totalChunks,
+                    chunkResult.getCreatedEntities().size(),
+                    chunkResult.getSkippedCount(),
+                    chunkTime);
+
+            return new ChunkProcessingResult<>(
+                    chunkResult.getCreatedEntities(),
+                    chunkResult.getSkippedCount(),
+                    chunkResult.getSkippedReasons()
+            );
+
+        } catch (Exception chunkError) {
+            log.error("Error processing chunk {}/{} (records {}-{}): {}",
+                    chunkNumber, totalChunks, start + 1, end, chunkError.getMessage());
+
+            if (!skipDuplicates) {
+                throw chunkError;
+            }
+
+            return new ChunkProcessingResult<>(
+                    Collections.emptyList(),
+                    end - start,
+                    Collections.singletonList(String.format(
+                            "Chunk %d/%d (records %d-%d) failed: %s",
+                            chunkNumber, totalChunks, start + 1, end, chunkError.getMessage()))
+            );
+        }
+    }
+
+    private void logProgress(int totalSize, int currentEnd, long startTime) {
+        double progress = (double) currentEnd / totalSize * 100;
+        long elapsed = System.currentTimeMillis() - startTime;
+        long estimated = (long) (elapsed / progress * 100);
+
+        log.info("Progress: {}/{} records ({}%) | Elapsed: {} ms | Estimated total: {} ms",
+                currentEnd, totalSize, String.format("%.1f", progress), elapsed, estimated);
+    }
+
+    private String formatBatchMessage(BatchResult<T> result, double recordsPerSecond, int chunkSize) {
+        int totalChunks = (result.getTotalProcessed() + chunkSize - 1) / chunkSize;
+
+        if (result.hasSkipped()) {
+            return String.format(
+                    "Batch creation completed: %d created, %d skipped (duplicates/errors) | " +
+                            "Processed in %d chunks | Performance: %.0f records/sec",
+                    result.getCreatedEntities().size(),
+                    result.getSkippedCount(),
+                    totalChunks,
+                    recordsPerSecond);
+        } else {
+            return String.format(
+                    "%d entities created successfully | Processed in %d chunks | Performance: %.0f records/sec",
+                    result.getCreatedEntities().size(),
+                    totalChunks,
+                    recordsPerSecond);
+        }
+    }
+
+    private String formatSimpleMessage(BatchResult<T> result) {
+        if (result.hasSkipped()) {
+            return String.format("Batch creation completed: %d created, %d skipped (duplicates/errors)",
+                    result.getCreatedEntities().size(), result.getSkippedCount());
+        } else {
+            return String.format("%d entities created successfully",
+                    result.getCreatedEntities().size());
+        }
+    }
+
+    private void validateId(ID id) {
+        switch (id) {
+            case null -> throw new IllegalArgumentException("ID cannot be null");
+            case String s when s.trim().isEmpty() -> throw new IllegalArgumentException("ID cannot be empty");
+            case Number number when number.longValue() <= 0 ->
+                    throw new IllegalArgumentException("ID must be positive");
+            default -> {
+            }
         }
     }
 

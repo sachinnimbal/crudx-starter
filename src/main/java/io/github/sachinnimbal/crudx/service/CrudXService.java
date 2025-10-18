@@ -53,4 +53,6 @@ public interface CrudXService<T extends CrudXBaseEntity<ID>, ID extends Serializ
     boolean existsById(ID id);
 
     BatchResult<T> deleteBatch(List<ID> ids);
+
+    BatchResult<T> updateBatch(Map<ID, Map<String, Object>> updates);
 }

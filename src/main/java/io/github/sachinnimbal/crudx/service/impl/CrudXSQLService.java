@@ -18,6 +18,7 @@ package io.github.sachinnimbal.crudx.service.impl;
 
 import io.github.sachinnimbal.crudx.core.annotations.CrudXImmutable;
 import io.github.sachinnimbal.crudx.core.annotations.CrudXUniqueConstraint;
+import io.github.sachinnimbal.crudx.core.config.CrudXProperties;
 import io.github.sachinnimbal.crudx.core.exception.DuplicateEntityException;
 import io.github.sachinnimbal.crudx.core.exception.EntityNotFoundException;
 import io.github.sachinnimbal.crudx.core.model.CrudXBaseEntity;
@@ -62,8 +63,8 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
 
     protected Class<T> entityClass;
 
-    // Configurable default batch size - optimized for minimal memory usage
-    private static final int DEFAULT_BATCH_SIZE = 100;  // Smaller batches for lower memory
+    @Autowired
+    protected CrudXProperties crudxProperties;
     private static final int MAX_IN_MEMORY_THRESHOLD = 5000;  // Lower threshold
 
     @PostConstruct
@@ -91,13 +92,26 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
             log.debug("Entity class resolved via GenericTypeResolver: {}", entityClass.getSimpleName());
             return;
         }
+        if (entityManager != null) {
+            // Set query timeout globally
+            entityManager.getEntityManagerFactory()
+                    .getProperties()
+                    .put("javax.persistence.query.timeout", 30000); // 30 seconds
 
+            // Set lock timeout for deadlock prevention
+            entityManager.getEntityManagerFactory()
+                    .getProperties()
+                    .put("javax.persistence.lock.timeout", 10000); // 10 seconds
+
+            log.info("Query and lock timeouts configured for {}", entityClass.getSimpleName());
+        }
         throw new IllegalStateException(
                 "Could not resolve entity class for service: " + getClass().getSimpleName()
         );
     }
 
     @Override
+    @Transactional(timeout = 300)
     public T create(T entity) {
         long startTime = System.currentTimeMillis();
         log.debug("Creating SQL entity: {}", getEntityClassName());
@@ -110,6 +124,7 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
     }
 
     @Override
+    @Transactional(timeout = 600)
     public BatchResult<T> createBatch(List<T> entities, boolean skipDuplicates) {
         long startTime = System.currentTimeMillis();
         log.debug("Creating batch of {} SQL entities (skipDuplicates: {})", entities.size(), skipDuplicates);
@@ -117,18 +132,18 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
         BatchResult<T> result = new BatchResult<>();
         int processedCount = 0;
 
+        int batchSize = crudxProperties.getBatchSize();
+
         for (int i = 0; i < entities.size(); i++) {
             T entity = entities.get(i);
 
             try {
-                // Validate unique constraints - will throw DuplicateEntityException if duplicate found
                 validateUniqueConstraints(entity);
-
                 entityManager.persist(entity);
                 result.getCreatedEntities().add(entity);
                 processedCount++;
 
-                if (processedCount % DEFAULT_BATCH_SIZE == 0 || (i + 1) == entities.size()) {
+                if (processedCount % batchSize == 0 || (i + 1) == entities.size()) {
                     long batchStartTime = System.currentTimeMillis();
                     entityManager.flush();
                     entityManager.clear();
@@ -141,17 +156,14 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
                 }
             } catch (DuplicateEntityException e) {
                 if (skipDuplicates) {
-                    // Skip this duplicate and continue
                     result.addSkippedReason(String.format("Entity at index %d skipped - %s", i, e.getMessage()));
                     result.setSkippedCount(result.getSkippedCount() + 1);
                     log.debug("Skipped duplicate entity at index {}: {}", i, e.getMessage());
                 } else {
-                    // Don't skip - throw exception to fail the entire batch
                     log.error("Duplicate entity found at index {} - failing batch creation", i);
                     throw e;
                 }
             } catch (Exception e) {
-                // For other exceptions, skip if skipDuplicates is true, otherwise throw
                 if (skipDuplicates) {
                     result.addSkippedReason(String.format("Entity at index %d skipped - error: %s", i, e.getMessage()));
                     result.setSkippedCount(result.getSkippedCount() + 1);
@@ -250,59 +262,6 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
         long duration = System.currentTimeMillis() - startTime;
         log.info("Found {} sorted SQL entities | Time taken: {} ms", entities.size(), duration);
         return entities;
-    }
-
-    @Transactional(readOnly = true)
-    private List<T> findAllWithCursor(Sort sort) {
-        List<T> result = new ArrayList<>();
-        int firstResult = 0;
-        int batchSize = DEFAULT_BATCH_SIZE;
-        long totalCount = count();
-
-        while (true) {
-            CriteriaBuilder cb = entityManager.getCriteriaBuilder();
-            CriteriaQuery<T> query = cb.createQuery(entityClass);
-            Root<T> root = query.from(entityClass);
-            query.select(root);
-
-            if (sort != null) {
-                List<Order> orders = new ArrayList<>();
-                sort.forEach(order -> {
-                    if (order.isAscending()) {
-                        orders.add(cb.asc(root.get(order.getProperty())));
-                    } else {
-                        orders.add(cb.desc(root.get(order.getProperty())));
-                    }
-                });
-                query.orderBy(orders);
-            }
-
-            TypedQuery<T> typedQuery = entityManager.createQuery(query);
-            typedQuery.setFirstResult(firstResult);
-            typedQuery.setMaxResults(batchSize);
-
-            List<T> batch = typedQuery.getResultList();
-
-            if (batch.isEmpty()) {
-                break;
-            }
-
-            result.addAll(batch);
-            firstResult += batchSize;
-
-            // Critical: Clear EntityManager to free memory immediately
-            entityManager.clear();
-
-            // Clear batch reference to allow GC
-            batch.clear();
-
-            log.debug("Loaded batch: {}/{} entities (memory optimized)", result.size(), totalCount);
-
-            if (batch.size() < batchSize) {
-                break;
-            }
-        }
-        return result;
     }
 
     @Override
@@ -419,7 +378,6 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
         BatchResult<T> result = new BatchResult<>();
         List<ID> notFoundIds = new ArrayList<>();
 
-        // Fetch all entities in one query (optimized)
         CriteriaBuilder cb = entityManager.getCriteriaBuilder();
         CriteriaQuery<T> query = cb.createQuery(entityClass);
         Root<T> root = query.from(entityClass);
@@ -428,12 +386,10 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
 
         List<T> entitiesToDelete = entityManager.createQuery(query).getResultList();
 
-        // Track which IDs were found
         Set<ID> foundIds = entitiesToDelete.stream()
                 .map(T::getId)
                 .collect(Collectors.toSet());
 
-        // Track not found IDs
         for (ID id : ids) {
             if (!foundIds.contains(id)) {
                 notFoundIds.add(id);
@@ -442,27 +398,61 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
         }
         result.setSkippedCount(notFoundIds.size());
 
-        // Delete in batches
         if (!entitiesToDelete.isEmpty()) {
-            int batchSize = 100;
+            int batchSize = crudxProperties.getBatchSize();  // ← CHANGE THIS LINE
             for (int i = 0; i < entitiesToDelete.size(); i += batchSize) {
                 int end = Math.min(i + batchSize, entitiesToDelete.size());
                 List<T> deleteBatch = entitiesToDelete.subList(i, end);
 
-                // Delete batch
                 for (T entity : deleteBatch) {
                     entityManager.remove(entity);
                 }
                 entityManager.flush();
 
-                // Add deleted entities to result
                 result.getCreatedEntities().addAll(deleteBatch);
                 log.info("Deleted batch {}/{} SQL entities",
                         result.getCreatedEntities().size(), entitiesToDelete.size());
             }
         }
+
         long duration = System.currentTimeMillis() - startTime;
         log.info("Batch deletion completed: {} deleted, {} skipped | Time taken: {} ms",
+                result.getCreatedEntities().size(), result.getSkippedCount(), duration);
+
+        return result;
+    }
+
+    @Override
+    @Transactional(timeout = 600)
+    public BatchResult<T> updateBatch(Map<ID, Map<String, Object>> updates) {
+        long startTime = System.currentTimeMillis();
+        log.debug("Updating batch of {} entities", updates.size());
+
+        BatchResult<T> result = new BatchResult<>();
+        int processedCount = 0;
+        int batchSize = crudxProperties.getBatchSize();
+
+        for (Map.Entry<ID, Map<String, Object>> entry : updates.entrySet()) {
+            try {
+                T updated = update(entry.getKey(), entry.getValue());
+                result.getCreatedEntities().add(updated);
+                processedCount++;
+
+                // Flush periodically
+                if (processedCount % batchSize == 0) {
+                    entityManager.flush();
+                    entityManager.clear();
+                }
+
+            } catch (Exception e) {
+                result.setSkippedCount(result.getSkippedCount() + 1);
+                result.addSkippedReason("ID " + entry.getKey() + ": " + e.getMessage());
+                log.error("Failed to update entity {}: {}", entry.getKey(), e.getMessage());
+            }
+        }
+
+        long duration = System.currentTimeMillis() - startTime;
+        log.info("Batch update completed: {} updated, {} skipped | Time: {} ms",
                 result.getCreatedEntities().size(), result.getSkippedCount(), duration);
 
         return result;
@@ -568,7 +558,7 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
         Map<String, Object> oldValues = new HashMap<>();
         try {
             for (Map.Entry<String, Object> entry : updates.entrySet()) {
-                Field field = null;
+                Field field;
                 try {
                     field = getFieldFromClass(entityClass, entry.getKey());
                 } catch (NoSuchFieldException e) {
@@ -606,5 +596,55 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
         }
         // 5. Auto-check unique constraints
         validateUniqueConstraints(entity);
+    }
+
+    @Transactional(readOnly = true)
+    private List<T> findAllWithCursor(Sort sort) {
+        List<T> result = new ArrayList<>();
+        int firstResult = 0;
+        int batchSize = crudxProperties.getBatchSize();
+        long totalCount = count();
+
+        while (true) {
+            CriteriaBuilder cb = entityManager.getCriteriaBuilder();
+            CriteriaQuery<T> query = cb.createQuery(entityClass);
+            Root<T> root = query.from(entityClass);
+            query.select(root);
+
+            if (sort != null) {
+                List<Order> orders = new ArrayList<>();
+                sort.forEach(order -> {
+                    if (order.isAscending()) {
+                        orders.add(cb.asc(root.get(order.getProperty())));
+                    } else {
+                        orders.add(cb.desc(root.get(order.getProperty())));
+                    }
+                });
+                query.orderBy(orders);
+            }
+
+            TypedQuery<T> typedQuery = entityManager.createQuery(query);
+            typedQuery.setFirstResult(firstResult);
+            typedQuery.setMaxResults(batchSize);
+
+            List<T> batch = typedQuery.getResultList();
+
+            if (batch.isEmpty()) {
+                break;
+            }
+
+            result.addAll(batch);
+            firstResult += batchSize;
+
+            entityManager.clear();
+            batch.clear();
+
+            log.debug("Loaded batch: {}/{} entities (memory optimized)", result.size(), totalCount);
+
+            if (batch.size() < batchSize) {
+                break;
+            }
+        }
+        return result;
     }
 }

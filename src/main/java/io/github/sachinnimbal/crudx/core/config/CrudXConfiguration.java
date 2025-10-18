@@ -23,6 +23,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.domain.EntityScan;
 import org.springframework.boot.autoconfigure.orm.jpa.HibernatePropertiesCustomizer;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
@@ -40,6 +41,7 @@ import org.springframework.data.mongodb.repository.config.EnableMongoRepositorie
 @Slf4j
 @Configuration
 @ComponentScan(basePackages = "io.github.sachinnimbal.crudx")
+@EnableConfigurationProperties(CrudXProperties.class)
 @Import({
         CrudXBannerConfiguration.class,
         CrudXServiceAutoConfiguration.class,
