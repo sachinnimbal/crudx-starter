@@ -371,14 +371,19 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
     }
 
     @Override
-    public void delete(ID id) {
+    public T delete(ID id) {
         long startTime = System.currentTimeMillis();
         log.debug("Deleting SQL entity with ID: {}", id);
-        T entity = findById(id);
+        T entity = entityManager.find(entityClass, id);
+        if (entity == null) {
+            log.warn("Entity not found with ID: {}", id);
+            throw new EntityNotFoundException(getEntityClassName(), id);
+        }
         entityManager.remove(entity);
         entityManager.flush();
         long duration = System.currentTimeMillis() - startTime;
         log.info("SQL entity deleted with ID: {} | Time taken: {} ms", id, duration);
+        return entity;
     }
 
     @Override
@@ -407,70 +412,55 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
     }
 
     @Override
-    public BatchResult<ID> deleteBatch(List<ID> ids) {
+    public BatchResult<T> deleteBatch(List<ID> ids) {
         long startTime = System.currentTimeMillis();
-        log.debug("Deleting batch of {} SQL entities with skip tracking", ids.size());
+        log.debug("Deleting batch of {} SQL entities", ids.size());
 
-        BatchResult<ID> result = new BatchResult<>();
-        List<ID> existingIds = new ArrayList<>();
+        BatchResult<T> result = new BatchResult<>();
         List<ID> notFoundIds = new ArrayList<>();
 
-        // Check existence in batches to minimize database calls
-        int checkBatchSize = 100;
-        for (int i = 0; i < ids.size(); i += checkBatchSize) {
-            int end = Math.min(i + checkBatchSize, ids.size());
-            List<ID> batchToCheck = ids.subList(i, end);
+        // Fetch all entities in one query (optimized)
+        CriteriaBuilder cb = entityManager.getCriteriaBuilder();
+        CriteriaQuery<T> query = cb.createQuery(entityClass);
+        Root<T> root = query.from(entityClass);
+        query.select(root);
+        query.where(root.get("id").in(ids));
 
-            // Use a simpler approach: fetch entities and extract IDs
-            CriteriaBuilder cb = entityManager.getCriteriaBuilder();
-            CriteriaQuery<T> query = cb.createQuery(entityClass);
-            Root<T> root = query.from(entityClass);
-            query.select(root);
-            query.where(root.get("id").in(batchToCheck));
+        List<T> entitiesToDelete = entityManager.createQuery(query).getResultList();
 
-            List<T> foundEntities = entityManager.createQuery(query).getResultList();
+        // Track which IDs were found
+        Set<ID> foundIds = entitiesToDelete.stream()
+                .map(T::getId)
+                .collect(Collectors.toSet());
 
-            // Extract IDs from found entities
-            List<ID> foundIds = new ArrayList<>();
-            for (T entity : foundEntities) {
-                foundIds.add(entity.getId());
+        // Track not found IDs
+        for (ID id : ids) {
+            if (!foundIds.contains(id)) {
+                notFoundIds.add(id);
+                result.addSkippedReason(String.format("ID %s not found", id));
             }
-            existingIds.addAll(foundIds);
-
-            // Track not found IDs
-            for (ID id : batchToCheck) {
-                if (!foundIds.contains(id)) {
-                    notFoundIds.add(id);
-                    result.addSkippedReason(String.format("ID %s not found", id));
-                }
-            }
-
-            log.debug("Checked existence for batch {}/{} IDs", end, ids.size());
         }
-
-        // Delete only existing IDs in batches
-        if (!existingIds.isEmpty()) {
-            int deleteBatchSize = 100;
-            for (int i = 0; i < existingIds.size(); i += deleteBatchSize) {
-                int end = Math.min(i + deleteBatchSize, existingIds.size());
-                List<ID> deleteBatch = existingIds.subList(i, end);
-
-                CriteriaBuilder cb = entityManager.getCriteriaBuilder();
-                CriteriaDelete<T> delete = cb.createCriteriaDelete(entityClass);
-                Root<T> root = delete.from(entityClass);
-                delete.where(root.get("id").in(deleteBatch));
-
-                entityManager.createQuery(delete).executeUpdate();
-                result.getCreatedEntities().addAll(deleteBatch);
-
-                log.info("Deleted batch {}/{} SQL entities",
-                        result.getCreatedEntities().size(), existingIds.size());
-            }
-            entityManager.flush();
-        }
-
         result.setSkippedCount(notFoundIds.size());
 
+        // Delete in batches
+        if (!entitiesToDelete.isEmpty()) {
+            int batchSize = 100;
+            for (int i = 0; i < entitiesToDelete.size(); i += batchSize) {
+                int end = Math.min(i + batchSize, entitiesToDelete.size());
+                List<T> deleteBatch = entitiesToDelete.subList(i, end);
+
+                // Delete batch
+                for (T entity : deleteBatch) {
+                    entityManager.remove(entity);
+                }
+                entityManager.flush();
+
+                // Add deleted entities to result
+                result.getCreatedEntities().addAll(deleteBatch);
+                log.info("Deleted batch {}/{} SQL entities",
+                        result.getCreatedEntities().size(), entitiesToDelete.size());
+            }
+        }
         long duration = System.currentTimeMillis() - startTime;
         log.info("Batch deletion completed: {} deleted, {} skipped | Time taken: {} ms",
                 result.getCreatedEntities().size(), result.getSkippedCount(), duration);

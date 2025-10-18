@@ -33,6 +33,7 @@ import java.lang.annotation.*;
  * // Example 2: Custom error message
  * {@literal @}CrudXUniqueConstraint(
  *     fields = {"username"},
+ *     name = "UK_user_name",
  *     message = "Username already exists. Please choose a different username."
  * )
  * public class User extends CrudXMongoEntity&lt;String&gt; {

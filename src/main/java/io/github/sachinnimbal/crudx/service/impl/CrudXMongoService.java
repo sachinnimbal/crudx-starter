@@ -312,15 +312,18 @@ public abstract class CrudXMongoService<T extends CrudXMongoEntity<ID>, ID exten
     }
 
     @Override
-    public void delete(ID id) {
+    public T delete(ID id) {
         long startTime = System.currentTimeMillis();
         log.debug("Deleting MongoDB entity with ID: {}", id);
-
-        T entity = findById(id);
-        mongoTemplate.remove(entity);
-
+        Query query = new Query(Criteria.where("_id").is(id));
+        T deletedEntity = mongoTemplate.findAndRemove(query, entityClass);
+        if (deletedEntity == null) {
+            log.warn("Entity not found with ID: {}", id);
+            throw new EntityNotFoundException(getEntityClassName(), id);
+        }
         long duration = System.currentTimeMillis() - startTime;
         log.info("MongoDB entity deleted with ID: {} | Time taken: {} ms", id, duration);
+        return deletedEntity;
     }
 
     @Override
@@ -343,60 +346,31 @@ public abstract class CrudXMongoService<T extends CrudXMongoEntity<ID>, ID exten
     }
 
     @Override
-    public BatchResult<ID> deleteBatch(List<ID> ids) {
+    public BatchResult<T> deleteBatch(List<ID> ids) {
         long startTime = System.currentTimeMillis();
-        log.debug("Deleting batch of {} MongoDB entities with skip tracking", ids.size());
-
-        BatchResult<ID> result = new BatchResult<>();
-        List<ID> existingIds = new ArrayList<>();
-        List<ID> notFoundIds = new ArrayList<>();
-
-        // Check existence in batches
-        int checkBatchSize = 100;
-        for (int i = 0; i < ids.size(); i += checkBatchSize) {
-            int end = Math.min(i + checkBatchSize, ids.size());
-            List<ID> batchToCheck = ids.subList(i, end);
-
-            // Query to find which IDs exist (fetch only _id field for performance)
-            Query query = Query.query(Criteria.where("_id").in(batchToCheck));
-            query.fields().include("_id");
-
-            List<T> foundEntities = mongoTemplate.find(query, entityClass);
-            List<ID> foundIds = foundEntities.stream()
-                    .map(T::getId)
-                    .toList();
-
-            existingIds.addAll(foundIds);
-
-            // Track not found IDs
-            for (ID id : batchToCheck) {
-                if (!foundIds.contains(id)) {
-                    notFoundIds.add(id);
-                    result.addSkippedReason(String.format("ID %s not found", id));
-                }
-            }
-
-            log.debug("Checked existence for batch {}/{} IDs", end, ids.size());
-        }
-
-        // Delete only existing IDs in batches
-        if (!existingIds.isEmpty()) {
-            int deleteBatchSize = 100;
-            for (int i = 0; i < existingIds.size(); i += deleteBatchSize) {
-                int end = Math.min(i + deleteBatchSize, existingIds.size());
-                List<ID> deleteBatch = existingIds.subList(i, end);
-
-                Query deleteQuery = Query.query(Criteria.where("_id").in(deleteBatch));
-                mongoTemplate.remove(deleteQuery, entityClass);
-                result.getCreatedEntities().addAll(deleteBatch);
-
-                log.info("Deleted batch {}/{} MongoDB entities",
-                        result.getCreatedEntities().size(), existingIds.size());
+        log.debug("Deleting batch of {} MongoDB entities", ids.size());
+        BatchResult<T> result = new BatchResult<>();
+        // Fetch all entities in one query
+        Query findQuery = Query.query(Criteria.where("_id").in(ids));
+        List<T> entitiesToDelete = mongoTemplate.find(findQuery, entityClass);
+        // Track which IDs were found
+        Set<ID> foundIds = entitiesToDelete.stream()
+                .map(T::getId)
+                .collect(Collectors.toSet());
+        // Track not found IDs
+        for (ID id : ids) {
+            if (!foundIds.contains(id)) {
+                result.addSkippedReason(String.format("ID %s not found", id));
             }
         }
-
-        result.setSkippedCount(notFoundIds.size());
-
+        result.setSkippedCount(ids.size() - foundIds.size());
+        // Delete all found entities
+        if (!entitiesToDelete.isEmpty()) {
+            Query deleteQuery = Query.query(Criteria.where("_id").in(foundIds));
+            mongoTemplate.remove(deleteQuery, entityClass);
+            // Add deleted entities to result
+            result.getCreatedEntities().addAll(entitiesToDelete);
+        }
         long duration = System.currentTimeMillis() - startTime;
         log.info("Batch deletion completed: {} deleted, {} skipped | Time taken: {} ms",
                 result.getCreatedEntities().size(), result.getSkippedCount(), duration);
