@@ -1,27 +1,14 @@
-/*
- * Copyright 2025 Sachin Nimbal
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 package io.github.sachinnimbal.crudx.core.config;
 
+import io.github.sachinnimbal.crudx.core.dto.mapper.CrudXMapperRegistry;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.info.Contact;
 import io.swagger.v3.oas.models.info.Info;
 import io.swagger.v3.oas.models.info.License;
 import io.swagger.v3.oas.models.servers.Server;
 import lombok.extern.slf4j.Slf4j;
+import org.springdoc.core.customizers.OperationCustomizer;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
@@ -30,10 +17,13 @@ import org.springframework.core.env.Environment;
 
 import java.util.List;
 
-
 /**
+ * Swagger/OpenAPI configuration for CrudX Framework.
+ * Automatically detects and displays DTO schemas when DTO feature is enabled.
+ *
  * @author Sachin Nimbal
- * @see <a href="https://www.linkedin.com/in/sachin-nimbal/">LinkedIn Profile</a>
+ * @updated 1.0.2 - Added DTO schema detection
+ * @since 1.0.1
  */
 @Slf4j
 @Configuration
@@ -43,6 +33,9 @@ public class CrudXSwaggerConfiguration {
 
     private final Environment environment;
 
+    @Autowired(required = false)
+    private CrudXMapperRegistry dtoRegistry;
+
     public CrudXSwaggerConfiguration(Environment environment) {
         this.environment = environment;
         log.info("✓ CrudX Swagger/OpenAPI enabled");
@@ -50,7 +43,7 @@ public class CrudXSwaggerConfiguration {
 
     @Bean
     public OpenAPI crudxOpenAPI() {
-        String version = environment.getProperty("project.version", "1.0.0");
+        String version = environment.getProperty("project.version", "1.0.2");
         String serverUrl = getServerUrl();
 
         return new OpenAPI()
@@ -70,6 +63,19 @@ public class CrudXSwaggerConfiguration {
                                 .url(serverUrl)
                                 .description("Current Server")
                 ));
+    }
+
+    /**
+     * Register DTO schema customizer if DTO feature is enabled.
+     */
+    @Bean
+    @ConditionalOnClass(name = "io.github.sachinnimbal.crudx.core.dto.mapper.CrudXMapperRegistry")
+    public OperationCustomizer crudxDtoSchemaCustomizer() {
+        if (dtoRegistry != null) {
+            log.info("✓ Swagger DTO schema customization enabled");
+            return new io.github.sachinnimbal.crudx.core.config.CrudXSwaggerDTOCustomizer(dtoRegistry);
+        }
+        return (operation, handlerMethod) -> operation; // No-op if DTOs not enabled
     }
 
     private String getServerUrl() {

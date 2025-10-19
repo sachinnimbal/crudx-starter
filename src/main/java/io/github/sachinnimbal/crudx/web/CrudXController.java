@@ -16,9 +16,11 @@
 
 package io.github.sachinnimbal.crudx.web;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.sachinnimbal.crudx.core.config.CrudXProperties;
+import io.github.sachinnimbal.crudx.core.dto.mapper.CrudXMapper;
+import io.github.sachinnimbal.crudx.core.dto.mapper.CrudXMapperRegistry;
 import io.github.sachinnimbal.crudx.core.enums.DatabaseType;
-import io.github.sachinnimbal.crudx.core.exception.EntityNotFoundException;
 import io.github.sachinnimbal.crudx.core.model.CrudXBaseEntity;
 import io.github.sachinnimbal.crudx.core.model.CrudXMongoEntity;
 import io.github.sachinnimbal.crudx.core.model.CrudXMySQLEntity;
@@ -46,117 +48,18 @@ import org.springframework.web.bind.annotation.*;
 import java.io.Serializable;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
 
-import static io.github.sachinnimbal.crudx.core.enums.DatabaseType.*;
+import static io.github.sachinnimbal.crudx.core.enums.CrudXOperation.*;
 
 /**
  * Base REST controller providing zero-boilerplate CRUD operations.
  *
- * <p><b>Usage Examples:</b></p>
- *
- * <pre>
- * // Example 1: Simple controller with all default endpoints
- * {@literal @}RestController
- * {@literal @}RequestMapping("/api/users")
- * public class UserController extends CrudXController&lt;User, String&gt; {
- *     // No additional code needed - all CRUD endpoints are auto-generated
- * }
- *
- * // Example 2: Controller with lifecycle hooks
- * {@literal @}RestController
- * {@literal @}RequestMapping("/api/products")
- * public class ProductController extends CrudXController&lt;Product, Long&gt; {
- *
- *     {@literal @}Override
- *     protected void beforeCreate(Product product) {
- *         // Custom logic before creating product
- *         product.setSku(generateSku());
- *     }
- *
- *     {@literal @}Override
- *     protected void afterCreate(Product product) {
- *         // Send notification after product creation
- *         notificationService.sendProductCreated(product);
- *     }
- *
- *     {@literal @}Override
- *     protected void beforeDelete(Long id, Product product) {
- *         // Check if product can be deleted
- *         if (product.hasActiveOrders()) {
- *             throw new IllegalStateException("Cannot delete product with active orders");
- *         }
- *     }
- *
- *     {@literal @}Override
- *     protected void afterDelete(Long id, Product deletedProduct) {
- *         // Clean up related data after deletion
- *         cacheService.invalidateProduct(id);
- *         searchService.removeFromIndex(id);
- *     }
- * }
- *
- * // Example 3: Controller with custom endpoints
- * {@literal @}RestController
- * {@literal @}RequestMapping("/api/orders")
- * public class OrderController extends CrudXController&lt;Order, String&gt; {
- *
- *     {@literal @}Autowired
- *     private PaymentService paymentService;
- *
- *     // Custom endpoint in addition to CRUD operations
- *     {@literal @}PostMapping("/{id}/pay")
- *     public ResponseEntity&lt;ApiResponse&lt;Order&gt;&gt; processPayment(
- *             {@literal @}PathVariable String id,
- *             {@literal @}RequestBody PaymentRequest payment) {
- *
- *         Order order = crudService.findById(id);
- *         paymentService.process(order, payment);
- *
- *         return ResponseEntity.ok(ApiResponse.success(order, "Payment processed"));
- *     }
- * }
- * </pre>
- *
- * <p><b>Available Lifecycle Hooks:</b></p>
- * <ul>
- *   <li>{@code beforeCreate(T entity)} - Called before entity creation</li>
- *   <li>{@code afterCreate(T entity)} - Called after entity creation</li>
- *   <li>{@code beforeCreateBatch(List<T> entities)} - Called before batch creation</li>
- *   <li>{@code afterCreateBatch(List<T> entities)} - Called after batch creation</li>
- *   <li>{@code beforeUpdate(ID id, Map updates, T existing)} - Called before update</li>
- *   <li>{@code afterUpdate(T updated, T old)} - Called after update</li>
- *   <li>{@code beforeDelete(ID id, T entity)} - Called before deletion</li>
- *   <li>{@code afterDelete(ID id, T deleted)} - Called after deletion</li>
- *   <li>{@code beforeDeleteBatch(List<ID> ids)} - Called before batch deletion</li>
- *   <li>{@code afterDeleteBatch(List<ID> ids)} - Called after batch deletion</li>
- *   <li>{@code afterFindById(T entity)} - Called after finding by ID</li>
- *   <li>{@code afterFindAll(List<T> entities)} - Called after finding all</li>
- *   <li>{@code afterFindPaged(PageResponse<T> pageResponse)} - Called after paged find</li>
- * </ul>
- *
- * <p><b>Auto-generated Endpoints:</b></p>
- * <ul>
- *   <li>POST / - Create single entity</li>
- *   <li>POST /batch - Create multiple entities</li>
- *   <li>GET /{id} - Get entity by ID</li>
- *   <li>GET / - Get all entities (with sorting)</li>
- *   <li>GET /paged - Get paginated entities</li>
- *   <li>PATCH /{id} - Update entity</li>
- *   <li>DELETE /{id} - Delete entity</li>
- *   <li>DELETE /batch - Delete multiple entities</li>
- *   <li>DELETE /batch/force - Force delete without existence check</li>
- *   <li>GET /count - Count all entities</li>
- *   <li>GET /exists/{id} - Check if entity exists</li>
- * </ul>
- *
  * @param <T>  the entity type
  * @param <ID> the ID type
  * @author Sachin Nimbal
+ * @version 1.0.2
  */
 @Slf4j
 public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends Serializable> {
@@ -164,13 +67,20 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     @Autowired
     protected ApplicationContext applicationContext;
 
+    @Autowired(required = false)
+    protected CrudXMapperRegistry dtoRegistry;
+
     protected CrudXService<T, ID> crudService;
+    protected CrudXMapper<T, ?, ?> dtoMapper;
 
     private Class<T> entityClass;
     private Class<ID> idClass;
+    private boolean dtoPseudoEnabled = false;
 
     @Autowired
     protected CrudXProperties crudxProperties;
+
+    private ObjectMapper objectMapper;
 
     private static final int MAX_PAGE_SIZE = 100000;
     private static final int LARGE_DATASET_THRESHOLD = 1000;
@@ -185,9 +95,13 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                     "Could not resolve entity class for controller: " + getClass().getSimpleName()
             );
         }
-        // Determine DatabaseType based on entity class lineage
+
+        // Initialize ObjectMapper
+        objectMapper = new ObjectMapper();
+        objectMapper.registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule());
+
+        // Initialize service
         DatabaseType databaseType = getDatabaseType();
-        // Use entity name + database type for bean name
         String serviceBeanName = Character.toLowerCase(entityClass.getSimpleName().charAt(0)) +
                 entityClass.getSimpleName().substring(1) + "Service" + databaseType.name().toLowerCase();
 
@@ -197,62 +111,54 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                     applicationContext.getBean(serviceBeanName, CrudXService.class);
             crudService = service;
 
-            log.info("✓ Controller initialized: {} -> Service: {} (auto-wired)",
-                    getClass().getSimpleName(),
-                    serviceBeanName);
+            log.info("✓ Controller initialized: {} -> Service: {}",
+                    getClass().getSimpleName(), serviceBeanName);
         } catch (Exception e) {
             log.error("Failed to initialize service for controller: {}. Expected service bean: {}",
-                    getClass().getSimpleName(),
-                    serviceBeanName);
+                    getClass().getSimpleName(), serviceBeanName);
             throw new IllegalStateException(
-                    "Service bean not found: " + serviceBeanName +
-                            ". Ensure entity extends CrudXJPAEntity or CrudXMongoEntity", e
+                    "Service bean not found: " + serviceBeanName, e
             );
         }
-    }
 
-    private DatabaseType getDatabaseType() {
-        DatabaseType databaseType;
-        if (CrudXMongoEntity.class.isAssignableFrom(entityClass)) {
-            databaseType = MONGODB;
-        } else if (CrudXPostgreSQLEntity.class.isAssignableFrom(entityClass)) {
-            databaseType = POSTGRESQL;
-        } else if (CrudXMySQLEntity.class.isAssignableFrom(entityClass)) {
-            databaseType = MYSQL;
-        } else {
-            throw new IllegalStateException("Unknown entity database type for class: " + entityClass.getSimpleName());
-        }
-        return databaseType;
-    }
-
-    @SuppressWarnings("unchecked")
-    private void resolveGenericTypes() {
-        try {
-            Type genericSuperclass = getClass().getGenericSuperclass();
-            if (genericSuperclass instanceof ParameterizedType paramType) {
-                Type[] typeArgs = paramType.getActualTypeArguments();
-                if (typeArgs.length >= 2) {
-                    entityClass = (Class<T>) typeArgs[0];
-                    idClass = (Class<ID>) typeArgs[1];
-                    log.debug("Resolved types - Entity: {}, ID: {}",
-                            entityClass.getSimpleName(),
-                            idClass.getSimpleName());
-                }
+        // Initialize DTO mapper if available
+        if (dtoRegistry != null && dtoRegistry.hasDTOMapping(entityClass)) {
+            Optional<CrudXMapper<T, Object, Object>> mapper = dtoRegistry.getMapper(entityClass);
+            if (mapper.isPresent()) {
+                dtoMapper = mapper.get();
+                dtoPseudoEnabled = true;
+                log.info("✓ DTO mapping enabled for entity: {} (compile-time generated)",
+                        entityClass.getSimpleName());
             }
-        } catch (Exception e) {
-            log.error("Error resolving generic types", e);
+        } else {
+            log.debug("No DTO mappings found for entity: {} - using entity directly",
+                    entityClass.getSimpleName());
         }
     }
 
+    /**
+     * CREATE - Enhanced with DTO support
+     */
     @PostMapping
-    public ResponseEntity<ApiResponse<T>> create(@Valid @RequestBody T entity) {
+    public ResponseEntity<ApiResponse<?>> create(@Valid @RequestBody Map<String, Object> requestBody) {
         long startTime = System.currentTimeMillis();
 
         try {
-            log.debug("Creating entity: {}", entityClass.getSimpleName());
+            log.debug("Creating entity: {} (DTO enabled: {})",
+                    entityClass.getSimpleName(), dtoPseudoEnabled);
 
-            if (entity == null) {
-                throw new IllegalArgumentException("Entity cannot be null");
+            if (requestBody == null || requestBody.isEmpty()) {
+                throw new IllegalArgumentException("Request body cannot be null or empty");
+            }
+
+            T entity;
+
+            // DTO Mode: Convert Request DTO to Entity
+            if (dtoPseudoEnabled) {
+                entity = convertMapToEntity(requestBody);
+            } else {
+                // Legacy Mode: Convert map directly to entity
+                entity = convertMapToEntityDirectly(requestBody);
             }
 
             beforeCreate(entity);
@@ -261,29 +167,55 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
             long executionTime = System.currentTimeMillis() - startTime;
 
-            log.info("Entity created successfully with ID: {} | Time taken: {} ms", created.getId(), executionTime);
+            // DTO Mode: Convert Entity to Response DTO
+            Object response = dtoPseudoEnabled ?
+                    convertEntityToResponse(created) : created;
+
+            log.info("Entity created successfully with ID: {} | Time taken: {} ms",
+                    created.getId(), executionTime);
 
             return ResponseEntity.status(HttpStatus.CREATED)
-                    .body(ApiResponse.success(created, "Entity created successfully", HttpStatus.CREATED, executionTime));
+                    .body(ApiResponse.success(response, "Entity created successfully",
+                            HttpStatus.CREATED, executionTime));
+
         } catch (Exception e) {
             long executionTime = System.currentTimeMillis() - startTime;
-            log.error("Error creating entity: {} | Time taken: {} ms", e.getMessage(), executionTime, e);
+            log.error("Error creating entity: {} | Time taken: {} ms",
+                    e.getMessage(), executionTime, e);
             throw new RuntimeException("Failed to create entity: " + e.getMessage(), e);
         }
     }
 
+    /**
+     * BATCH CREATE - Enhanced with DTO support
+     */
     @PostMapping("/batch")
-    public ResponseEntity<ApiResponse<BatchResult<T>>> createBatch(
-            @Valid @RequestBody List<T> entities,
+    public ResponseEntity<ApiResponse<?>> createBatch(
+            @Valid @RequestBody List<Map<String, Object>> requestBodies,
             @RequestParam(required = false, defaultValue = "true") boolean skipDuplicates) {
 
         long startTime = System.currentTimeMillis();
 
         try {
-            log.debug("Creating batch of {} entities (skipDuplicates: {})", entities.size(), skipDuplicates);
+            log.debug("Creating batch of {} entities (DTO enabled: {}, skipDuplicates: {})",
+                    requestBodies.size(), dtoPseudoEnabled, skipDuplicates);
 
-            if (entities.isEmpty()) {
+            if (requestBodies.isEmpty()) {
                 throw new IllegalArgumentException("Entity list cannot be null or empty");
+            }
+
+            List<T> entities;
+
+            // DTO Mode: Convert Request DTOs to Entities
+            if (dtoPseudoEnabled) {
+                entities = requestBodies.stream()
+                        .map(this::convertMapToEntity)
+                        .collect(Collectors.toList());
+            } else {
+                // Legacy Mode: Convert maps directly to entities
+                entities = requestBodies.stream()
+                        .map(this::convertMapToEntityDirectly)
+                        .collect(Collectors.toList());
             }
 
             beforeCreateBatch(entities);
@@ -291,83 +223,84 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             final int MAX_BATCH_SIZE = crudxProperties.getMaxBatchSize();
             if (entities.size() > MAX_BATCH_SIZE) {
                 throw new IllegalArgumentException(
-                        String.format("Batch size exceeds maximum limit of %d (1 Lakh). Current size: %d. " +
-                                        "Please split your request into multiple batches.",
+                        String.format("Batch size exceeds maximum limit of %d. Current size: %d",
                                 MAX_BATCH_SIZE, entities.size())
                 );
             }
 
-            final int OPTIMAL_CHUNK_SIZE = crudxProperties.getBatchSize();
-            ;
-
+            // Process batch (existing chunking logic)
+            BatchResult<T> result;
             if (entities.size() > 100) {
-                log.info("Processing batch of {} entities in chunks of {} (Memory-optimized mode)",
-                        entities.size(), OPTIMAL_CHUNK_SIZE);
-
-                BatchResult<T> combinedResult = processChunkedBatch(
-                        entities, skipDuplicates, OPTIMAL_CHUNK_SIZE, startTime);
-
-                afterCreateBatch(combinedResult.getCreatedEntities());
-
-                long executionTime = System.currentTimeMillis() - startTime;
-                double recordsPerSecond = (combinedResult.getCreatedEntities().size() * 1000.0) / executionTime;
-
-                String message = formatBatchMessage(combinedResult, recordsPerSecond, OPTIMAL_CHUNK_SIZE);
-                log.info("{} | Total time: {} ms", message, executionTime);
-
-                return ResponseEntity.status(HttpStatus.CREATED)
-                        .body(ApiResponse.success(combinedResult, message, HttpStatus.CREATED, executionTime));
+                result = processChunkedBatch(entities, skipDuplicates,
+                        crudxProperties.getBatchSize(), startTime);
+            } else {
+                result = crudService.createBatch(entities, skipDuplicates);
             }
 
-            // For very small batches (≤ 100), process without chunking
-            BatchResult<T> result = crudService.createBatch(entities, skipDuplicates);
             afterCreateBatch(result.getCreatedEntities());
 
             long executionTime = System.currentTimeMillis() - startTime;
-            String message = formatSimpleMessage(result);
+            double recordsPerSecond = (result.getCreatedEntities().size() * 1000.0) / executionTime;
 
-            log.info("{} | Time taken: {} ms", message, executionTime);
+            // DTO Mode: Convert results to Response DTOs
+            Object responseData = dtoPseudoEnabled ?
+                    convertBatchResultToResponse(result) : result;
+
+            String message = result.hasSkipped() ?
+                    String.format("Batch creation completed: %d created, %d skipped | Performance: %.0f records/sec",
+                            result.getCreatedEntities().size(), result.getSkippedCount(), recordsPerSecond) :
+                    String.format("%d entities created successfully | Performance: %.0f records/sec",
+                            result.getCreatedEntities().size(), recordsPerSecond);
+
+            log.info("{} | Total time: {} ms", message, executionTime);
 
             return ResponseEntity.status(HttpStatus.CREATED)
-                    .body(ApiResponse.success(result, message, HttpStatus.CREATED, executionTime));
+                    .body(ApiResponse.success(responseData, message, HttpStatus.CREATED, executionTime));
 
         } catch (Exception e) {
             long executionTime = System.currentTimeMillis() - startTime;
-            log.error("Error creating batch: {} | Time taken: {} ms", e.getMessage(), executionTime, e);
+            log.error("Error creating batch: {} | Time taken: {} ms",
+                    e.getMessage(), executionTime, e);
             throw new RuntimeException("Failed to create batch: " + e.getMessage(), e);
         }
     }
 
+    /**
+     * GET BY ID - Enhanced with DTO support
+     */
     @GetMapping("/{id}")
-    public ResponseEntity<ApiResponse<T>> getById(@PathVariable ID id) {
+    public ResponseEntity<ApiResponse<?>> getById(@PathVariable ID id) {
         long startTime = System.currentTimeMillis();
         validateId(id);
-        try {
-            log.debug("Fetching entity by ID: {}", id);
 
-            if (id == null) {
-                throw new IllegalArgumentException("ID cannot be null");
-            }
+        try {
+            log.debug("Fetching entity by ID: {} (DTO enabled: {})", id, dtoPseudoEnabled);
 
             T entity = crudService.findById(id);
             afterFindById(entity);
 
-            if (entity == null) {
-                throw new EntityNotFoundException(entityClass.getSimpleName(), id);
-            }
-
             long executionTime = System.currentTimeMillis() - startTime;
+
+            // DTO Mode: Convert to Response DTO
+            Object response = dtoPseudoEnabled ?
+                    convertEntityToResponse(entity) : entity;
 
             log.info("Entity found with ID: {} | Time taken: {} ms", id, executionTime);
 
-            return ResponseEntity.ok(ApiResponse.success(entity, "Entity retrieved successfully", executionTime));
+            return ResponseEntity.ok(ApiResponse.success(response,
+                    "Entity retrieved successfully", executionTime));
+
         } catch (Exception e) {
             long executionTime = System.currentTimeMillis() - startTime;
-            log.error("Error fetching entity by ID {}: {} | Time taken: {} ms", id, e.getMessage(), executionTime, e);
+            log.error("Error fetching entity by ID {}: {} | Time taken: {} ms",
+                    id, e.getMessage(), executionTime, e);
             throw new RuntimeException("Failed to retrieve entity: " + e.getMessage(), e);
         }
     }
 
+    /**
+     * GET ALL - Enhanced with DTO support
+     */
     @GetMapping
     public ResponseEntity<ApiResponse<?>> getAll(
             @RequestParam(required = false) String sortBy,
@@ -376,81 +309,65 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         long startTime = System.currentTimeMillis();
 
         try {
-            log.debug("Fetching all entities with sortBy: {}, direction: {}", sortBy, sortDirection);
+            log.debug("Fetching all entities (DTO enabled: {})", dtoPseudoEnabled);
 
-            // Check total count first
             long totalCount = crudService.count();
 
-            // If dataset is large, automatically return paginated response with 50 records
+            // Auto-switch to pagination for large datasets
             if (totalCount > LARGE_DATASET_THRESHOLD) {
-                log.warn("Large dataset detected ({} records). Auto-switching to paginated response", totalCount);
+                log.warn("Large dataset detected ({} records). Auto-switching to paginated response",
+                        totalCount);
 
-                // Build pageable with 50 records for large datasets
-                Pageable pageable;
-                if (sortBy != null) {
-                    try {
-                        Sort.Direction direction = Sort.Direction.fromString(sortDirection);
-                        pageable = PageRequest.of(0, DEFAULT_PAGE_SIZE, Sort.by(direction, sortBy));
-                    } catch (IllegalArgumentException e) {
-                        throw new IllegalArgumentException("Invalid sort direction: " + sortDirection + ". Must be ASC or DESC");
-                    }
-                } else {
-                    pageable = PageRequest.of(0, 50);
-                }
-
+                Pageable pageable = createPageable(0, DEFAULT_PAGE_SIZE, sortBy, sortDirection);
                 Page<T> springPage = crudService.findAll(pageable);
                 PageResponse<T> pageResponse = PageResponse.from(springPage);
                 afterFindPaged(pageResponse);
 
                 long executionTime = System.currentTimeMillis() - startTime;
 
-                log.info("Retrieved first page of {} elements (total: {}) | Time taken: {} ms",
-                        pageResponse.getContent().size(), totalCount, executionTime);
+                // DTO Mode: Convert page content
+                Object response = dtoPseudoEnabled ?
+                        convertPageResponseToDTO(pageResponse) : pageResponse;
 
-                return ResponseEntity.ok(ApiResponse.success(pageResponse,
+                return ResponseEntity.ok(ApiResponse.success(response,
                         String.format("Large dataset detected (%d total records). " +
-                                        "Returning first %d records. Use /paged endpoint with page parameter for more data.",
+                                        "Returning first %d records. Use /paged endpoint for more data.",
                                 totalCount, pageResponse.getContent().size()),
                         executionTime));
             }
 
-            // For small datasets, return all data
-            List<T> entities;
-            if (sortBy != null) {
-                try {
-                    Sort.Direction direction = Sort.Direction.fromString(sortDirection);
-                    entities = crudService.findAll(Sort.by(direction, sortBy));
-                } catch (IllegalArgumentException e) {
-                    throw new IllegalArgumentException("Invalid sort direction: " + sortDirection + ". Must be ASC or DESC");
-                }
-            } else {
-                entities = crudService.findAll();
-            }
-
-            if (entities == null || entities.isEmpty()) {
-                log.info("No entities found");
-                throw new EntityNotFoundException("No " + entityClass.getSimpleName() + " entities found");
-            }
+            // Small dataset - return all
+            List<T> entities = sortBy != null ?
+                    crudService.findAll(Sort.by(Sort.Direction.fromString(sortDirection), sortBy)) :
+                    crudService.findAll();
 
             afterFindAll(entities);
 
             long executionTime = System.currentTimeMillis() - startTime;
 
+            // DTO Mode: Convert list
+            Object response = dtoPseudoEnabled ?
+                    convertEntitiesToResponse(entities) : entities;
+
             log.info("Retrieved {} entities | Time taken: {} ms", entities.size(), executionTime);
 
-            return ResponseEntity.ok(ApiResponse.success(entities,
+            return ResponseEntity.ok(ApiResponse.success(response,
                     String.format("Retrieved %d entities", entities.size()),
                     executionTime));
 
         } catch (Exception e) {
             long executionTime = System.currentTimeMillis() - startTime;
-            log.error("Error fetching all entities: {} | Time taken: {} ms", e.getMessage(), executionTime, e);
+            log.error("Error fetching all entities: {} | Time taken: {} ms",
+                    e.getMessage(), executionTime, e);
             throw new RuntimeException("Failed to retrieve entities: " + e.getMessage(), e);
         }
     }
 
+    /**
+     * GET PAGED - Enhanced with DTO support
+     */
     @GetMapping("/paged")
-    public ResponseEntity<ApiResponse<PageResponse<T>>> getPaged(
+    public ResponseEntity<ApiResponse<?>> getPaged(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size,
             @RequestParam(required = false) String sortBy,
@@ -459,64 +376,42 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         long startTime = System.currentTimeMillis();
 
         try {
-            log.debug("Fetching paged entities: page={}, size={}, sortBy={}, direction={}",
-                    page, size, sortBy, sortDirection);
+            log.debug("Fetching paged entities (DTO enabled: {})", dtoPseudoEnabled);
 
-            if (page < 0) {
-                throw new IllegalArgumentException("Page number cannot be negative");
-            }
+            validatePagination(page, size);
 
-            if (size <= 0) {
-                throw new IllegalArgumentException("Page size must be greater than 0");
-            }
-
-            if (size > MAX_PAGE_SIZE) {
-                throw new IllegalArgumentException("Page size cannot exceed " + MAX_PAGE_SIZE);
-            }
-
-            Pageable pageable;
-            if (sortBy != null) {
-                try {
-                    Sort.Direction direction = Sort.Direction.fromString(sortDirection);
-                    pageable = PageRequest.of(page, size, Sort.by(direction, sortBy));
-                } catch (IllegalArgumentException e) {
-                    throw new IllegalArgumentException("Invalid sort direction: " + sortDirection + ". Must be ASC or DESC");
-                }
-            } else {
-                pageable = PageRequest.of(page, size);
-            }
-
+            Pageable pageable = createPageable(page, size, sortBy, sortDirection);
             Page<T> springPage = crudService.findAll(pageable);
             PageResponse<T> pageResponse = PageResponse.from(springPage);
             afterFindPaged(pageResponse);
 
-            if (pageResponse.getTotalElements() == 0) {
-                log.info("No entities found for page request");
-                throw new EntityNotFoundException("No " + entityClass.getSimpleName() + " entities found");
-            }
-
             long executionTime = System.currentTimeMillis() - startTime;
 
-            log.info("Found page of {} {} entities (total: {}) | Time taken: {} ms",
-                    pageResponse.getContent().size(),
-                    entityClass.getSimpleName(),
-                    pageResponse.getTotalElements(),
-                    executionTime);
+            // DTO Mode: Convert page content
+            Object response = dtoPseudoEnabled ?
+                    convertPageResponseToDTO(pageResponse) : pageResponse;
+
+            log.info("Found page of {} entities (total: {}) | Time taken: {} ms",
+                    pageResponse.getContent().size(), pageResponse.getTotalElements(), executionTime);
 
             String message = String.format("Retrieved page %d with %d elements (total: %d)",
                     page, pageResponse.getContent().size(), pageResponse.getTotalElements());
 
-            return ResponseEntity.ok(ApiResponse.success(pageResponse, message, executionTime));
+            return ResponseEntity.ok(ApiResponse.success(response, message, executionTime));
 
         } catch (Exception e) {
             long executionTime = System.currentTimeMillis() - startTime;
-            log.error("Error fetching paged entities: {} | Time taken: {} ms", e.getMessage(), executionTime, e);
+            log.error("Error fetching paged entities: {} | Time taken: {} ms",
+                    e.getMessage(), executionTime, e);
             throw new RuntimeException("Failed to retrieve paged data: " + e.getMessage(), e);
         }
     }
 
+    /**
+     * UPDATE - Enhanced with DTO support
+     */
     @PatchMapping("/{id}")
-    public ResponseEntity<ApiResponse<T>> update(
+    public ResponseEntity<ApiResponse<?>> update(
             @PathVariable ID id,
             @RequestBody @NotEmpty Map<String, Object> updates) {
 
@@ -524,11 +419,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         validateId(id);
 
         try {
-            log.debug("Updating entity with ID: {}", id);
-
-            if (id == null) {
-                throw new IllegalArgumentException("ID cannot be null");
-            }
+            log.debug("Updating entity with ID: {} (DTO enabled: {})", id, dtoPseudoEnabled);
 
             if (updates == null || updates.isEmpty()) {
                 throw new IllegalArgumentException("Update data cannot be null or empty");
@@ -537,22 +428,67 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             T existingEntity = crudService.findById(id);
             beforeUpdate(id, updates, existingEntity);
             T oldEntity = cloneEntity(existingEntity);
+
             T updated = crudService.update(id, updates);
-
-            if (updated == null) {
-                throw new EntityNotFoundException(entityClass.getSimpleName(), id);
-            }
-
             afterUpdate(updated, oldEntity);
+
             long executionTime = System.currentTimeMillis() - startTime;
 
-            log.info("Entity updated successfully with ID: {} | Time taken: {} ms", id, executionTime);
+            // DTO Mode: Convert to Response DTO
+            Object response = dtoPseudoEnabled ?
+                    convertEntityToResponse(updated) : updated;
 
-            return ResponseEntity.ok(ApiResponse.success(updated, "Entity updated successfully", executionTime));
+            log.info("Entity updated successfully with ID: {} | Time taken: {} ms",
+                    id, executionTime);
+
+            return ResponseEntity.ok(ApiResponse.success(response,
+                    "Entity updated successfully", executionTime));
+
         } catch (Exception e) {
             long executionTime = System.currentTimeMillis() - startTime;
-            log.error("Error updating entity with ID {}: {} | Time taken: {} ms", id, e.getMessage(), executionTime, e);
+            log.error("Error updating entity with ID {}: {} | Time taken: {} ms",
+                    id, e.getMessage(), executionTime, e);
             throw new RuntimeException("Failed to update entity: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * BATCH UPDATE - Enhanced with DTO support
+     */
+    @PatchMapping("/batch")
+    public ResponseEntity<ApiResponse<?>> updateBatch(
+            @Valid @RequestBody Map<ID, Map<String, Object>> updates) {
+
+        long startTime = System.currentTimeMillis();
+
+        try {
+            log.debug("Processing batch update for {} entities (DTO enabled: {})",
+                    updates.size(), dtoPseudoEnabled);
+
+            if (updates.isEmpty()) {
+                throw new IllegalArgumentException("Updates map cannot be empty");
+            }
+
+            BatchResult<T> result = crudService.updateBatch(updates);
+
+            long executionTime = System.currentTimeMillis() - startTime;
+
+            // DTO Mode: Convert results
+            Object responseData = dtoPseudoEnabled ?
+                    convertBatchResultToResponse(result) : result;
+
+            String message = result.hasSkipped() ?
+                    String.format("Batch update completed: %d updated, %d skipped",
+                            result.getCreatedEntities().size(), result.getSkippedCount()) :
+                    String.format("%d entities updated successfully",
+                            result.getCreatedEntities().size());
+
+            return ResponseEntity.ok(ApiResponse.success(responseData, message, executionTime));
+
+        } catch (Exception e) {
+            long executionTime = System.currentTimeMillis() - startTime;
+            log.error("Error in batch update: {}", e.getMessage(), e);
+            throw new RuntimeException("Failed to update batch: " + e.getMessage(), e);
         }
     }
 
@@ -616,11 +552,8 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                 throw new IllegalArgumentException("ID cannot be null");
             }
 
-            // OPTIMIZED: Service returns entity before deleting (single DB hit)
             T deletedEntity = crudService.delete(id);
-            // Call lifecycle hooks with the already-fetched entity
             beforeDelete(id, deletedEntity);
-            // Note: Entity is already deleted by service at this point
             afterDelete(id, deletedEntity);
 
             long executionTime = System.currentTimeMillis() - startTime;
@@ -653,7 +586,6 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                     .collect(Collectors.toList());
             afterDeleteBatch(deletedIds);
 
-            // Convert to ID-based result for response
             BatchResult<ID> result = new BatchResult<>();
             result.setCreatedEntities(deletedIds);
             result.setSkippedCount(deletionResult.getSkippedCount());
@@ -696,10 +628,8 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                                 LARGE_DATASET_THRESHOLD, ids.size()));
             }
 
-            // Call beforeDeleteBatch lifecycle hook
             beforeDeleteBatch(ids);
 
-            // Process in smaller batches to minimize memory footprint
             int batchSize = crudxProperties.getBatchSize();
             int totalDeleted = 0;
             List<ID> actuallyDeletedIds = new ArrayList<>();
@@ -712,13 +642,11 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                 totalDeleted += batchIds.size();
                 actuallyDeletedIds.addAll(batchIds);
 
-                // Clear batch to allow GC
                 batchIds.clear();
 
                 log.debug("Force deleted batch {}/{} entities (memory optimized)", totalDeleted, ids.size());
             }
 
-            // Call afterDeleteBatch with all processed IDs
             afterDeleteBatch(actuallyDeletedIds);
 
             long executionTime = System.currentTimeMillis() - startTime;
@@ -737,38 +665,153 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         }
     }
 
-    @PatchMapping("/batch")
-    public ResponseEntity<ApiResponse<BatchResult<T>>> updateBatch(
-            @Valid @RequestBody Map<ID, Map<String, Object>> updates) {
-        long startTime = System.currentTimeMillis();
-        try {
-            log.debug("Processing batch update for {} entities", updates.size());
-            if (updates.isEmpty()) {
-                throw new IllegalArgumentException("Updates map cannot be empty");
-            }
-            BatchResult<T> result = crudService.updateBatch(updates);
-            long executionTime = System.currentTimeMillis() - startTime;
-            String message = result.hasSkipped()
-                    ? String.format("Batch update completed: %d updated, %d skipped",
-                    result.getCreatedEntities().size(), result.getSkippedCount())
-                    : String.format("%d entities updated successfully",
-                    result.getCreatedEntities().size());
-            return ResponseEntity.ok(ApiResponse.success(result, message, executionTime));
-        } catch (Exception e) {
-            long executionTime = System.currentTimeMillis() - startTime;
-            log.error("Error in batch update: {}", e.getMessage(), e);
-            throw new RuntimeException("Failed to update batch: " + e.getMessage(), e);
+    // ==================== DTO CONVERSION METHODS ====================
+
+    /**
+     * Convert Map (from JSON) to Entity using DTO mapper.
+     */
+    @SuppressWarnings("unchecked")
+    private T convertMapToEntity(Map<String, Object> map) {
+        if (dtoMapper == null) {
+            return convertMapToEntityDirectly(map);
+        }
+
+        Optional<Class<?>> requestDtoClass = dtoRegistry.getRequestDTO(entityClass, CREATE);
+
+        if (requestDtoClass.isPresent()) {
+            Object dto = convertMapToDto(map, requestDtoClass.get());
+            return ((CrudXMapper<T, Object, ?>) dtoMapper).toEntity(dto);
+        } else {
+            return convertMapToEntityDirectly(map);
         }
     }
 
-    // ===== Utility Methods =====
-
-    protected Class<T> getEntityClass() {
-        return entityClass;
+    /**
+     * Convert Map to DTO using ObjectMapper.
+     */
+    private Object convertMapToDto(Map<String, Object> map, Class<?> dtoClass) {
+        try {
+            return objectMapper.convertValue(map, dtoClass);
+        } catch (Exception e) {
+            log.error("Failed to convert map to DTO {}: {}", dtoClass.getSimpleName(), e.getMessage());
+            throw new IllegalArgumentException("Invalid request body format for " + dtoClass.getSimpleName(), e);
+        }
     }
 
-    protected Class<ID> getIdClass() {
-        return idClass;
+    /**
+     * Convert Map directly to Entity (fallback when no DTO).
+     */
+    private T convertMapToEntityDirectly(Map<String, Object> map) {
+        try {
+            return objectMapper.convertValue(map, entityClass);
+        } catch (Exception e) {
+            log.error("Failed to convert map to entity {}: {}", entityClass.getSimpleName(), e.getMessage());
+            throw new IllegalArgumentException("Invalid request body format for " + entityClass.getSimpleName(), e);
+        }
+    }
+
+    /**
+     * Convert Entity to Response DTO.
+     */
+    @SuppressWarnings("unchecked")
+    private Object convertEntityToResponse(T entity) {
+        if (dtoMapper == null) {
+            return entity;
+        }
+        return ((CrudXMapper<T, ?, Object>) dtoMapper).toResponse(entity);
+    }
+
+    /**
+     * Convert list of Entities to Response DTOs.
+     */
+    @SuppressWarnings("unchecked")
+    private List<?> convertEntitiesToResponse(List<T> entities) {
+        if (dtoMapper == null) {
+            return entities;
+        }
+        return ((CrudXMapper<T, ?, Object>) dtoMapper).toResponseList(entities);
+    }
+
+    /**
+     * Convert BatchResult with Entity to BatchResult with Response DTO.
+     */
+    @SuppressWarnings("unchecked")
+    private Object convertBatchResultToResponse(BatchResult<T> entityResult) {
+        if (dtoMapper == null) {
+            return entityResult;
+        }
+
+        List<?> responseDtos = ((CrudXMapper<T, ?, Object>) dtoMapper)
+                .toResponseList(entityResult.getCreatedEntities());
+
+        BatchResult<Object> dtoResult = new BatchResult<>();
+        dtoResult.setCreatedEntities((List<Object>) responseDtos);
+        dtoResult.setSkippedCount(entityResult.getSkippedCount());
+        dtoResult.setSkippedReasons(entityResult.getSkippedReasons());
+
+        return dtoResult;
+    }
+
+    /**
+     * Convert PageResponse with Entity to PageResponse with Response DTO.
+     */
+    @SuppressWarnings("unchecked")
+    private Object convertPageResponseToDTO(PageResponse<T> entityPage) {
+        if (dtoMapper == null) {
+            return entityPage;
+        }
+
+        List<?> dtoContent = ((CrudXMapper<T, ?, Object>) dtoMapper)
+                .toResponseList(entityPage.getContent());
+
+        return PageResponse.builder()
+                .content((List<Object>) dtoContent)
+                .currentPage(entityPage.getCurrentPage())
+                .pageSize(entityPage.getPageSize())
+                .totalElements(entityPage.getTotalElements())
+                .totalPages(entityPage.getTotalPages())
+                .first(entityPage.isFirst())
+                .last(entityPage.isLast())
+                .empty(entityPage.isEmpty())
+                .build();
+    }
+
+    // ==================== HELPER METHODS ====================
+
+    private void validatePagination(int page, int size) {
+        if (page < 0) {
+            throw new IllegalArgumentException("Page number cannot be negative");
+        }
+        if (size <= 0) {
+            throw new IllegalArgumentException("Page size must be greater than 0");
+        }
+        if (size > MAX_PAGE_SIZE) {
+            throw new IllegalArgumentException("Page size cannot exceed " + MAX_PAGE_SIZE);
+        }
+    }
+
+    private Pageable createPageable(int page, int size, String sortBy, String sortDirection) {
+        if (sortBy != null) {
+            try {
+                Sort.Direction direction = Sort.Direction.fromString(sortDirection);
+                return PageRequest.of(page, size, Sort.by(direction, sortBy));
+            } catch (IllegalArgumentException e) {
+                throw new IllegalArgumentException(
+                        "Invalid sort direction: " + sortDirection + ". Must be ASC or DESC");
+            }
+        }
+        return PageRequest.of(page, size);
+    }
+
+    private void validateId(ID id) {
+        switch (id) {
+            case null -> throw new IllegalArgumentException("ID cannot be null");
+            case String s when s.trim().isEmpty() -> throw new IllegalArgumentException("ID cannot be empty");
+            case Number number when number.longValue() <= 0 ->
+                    throw new IllegalArgumentException("ID must be positive");
+            default -> {
+            }
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -778,6 +821,36 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         } catch (Exception e) {
             log.warn("Could not clone entity for comparison", e);
             return null;
+        }
+    }
+
+    private DatabaseType getDatabaseType() {
+        if (CrudXMongoEntity.class.isAssignableFrom(entityClass)) {
+            return DatabaseType.MONGODB;
+        } else if (CrudXPostgreSQLEntity.class.isAssignableFrom(entityClass)) {
+            return DatabaseType.POSTGRESQL;
+        } else if (CrudXMySQLEntity.class.isAssignableFrom(entityClass)) {
+            return DatabaseType.MYSQL;
+        }
+        throw new IllegalStateException("Unknown entity database type for class: " +
+                entityClass.getSimpleName());
+    }
+
+    @SuppressWarnings("unchecked")
+    private void resolveGenericTypes() {
+        try {
+            Type genericSuperclass = getClass().getGenericSuperclass();
+            if (genericSuperclass instanceof ParameterizedType paramType) {
+                Type[] typeArgs = paramType.getActualTypeArguments();
+                if (typeArgs.length >= 2) {
+                    entityClass = (Class<T>) typeArgs[0];
+                    idClass = (Class<ID>) typeArgs[1];
+                    log.debug("Resolved types - Entity: {}, ID: {}",
+                            entityClass.getSimpleName(), idClass.getSimpleName());
+                }
+            }
+        } catch (Exception e) {
+            log.error("Error resolving generic types", e);
         }
     }
 
@@ -815,12 +888,10 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                 allSkippedReasons.addAll(result.getSkippedReasons());
             }
 
-            // Progress logging
             if (chunkNumber % 10 == 0 || entities.size() > 10000) {
                 logProgress(entities.size(), end, startTime);
             }
 
-            // GC hint for large batches
             if (chunkNumber % 10 == 0 && entities.size() > 10000) {
                 System.gc();
             }
@@ -890,45 +961,19 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                 currentEnd, totalSize, String.format("%.1f", progress), elapsed, estimated);
     }
 
-    private String formatBatchMessage(BatchResult<T> result, double recordsPerSecond, int chunkSize) {
-        int totalChunks = (result.getTotalProcessed() + chunkSize - 1) / chunkSize;
-
-        if (result.hasSkipped()) {
-            return String.format(
-                    "Batch creation completed: %d created, %d skipped (duplicates/errors) | " +
-                            "Processed in %d chunks | Performance: %.0f records/sec",
-                    result.getCreatedEntities().size(),
-                    result.getSkippedCount(),
-                    totalChunks,
-                    recordsPerSecond);
-        } else {
-            return String.format(
-                    "%d entities created successfully | Processed in %d chunks | Performance: %.0f records/sec",
-                    result.getCreatedEntities().size(),
-                    totalChunks,
-                    recordsPerSecond);
-        }
+    protected Class<T> getEntityClass() {
+        return entityClass;
     }
 
-    private String formatSimpleMessage(BatchResult<T> result) {
-        if (result.hasSkipped()) {
-            return String.format("Batch creation completed: %d created, %d skipped (duplicates/errors)",
-                    result.getCreatedEntities().size(), result.getSkippedCount());
-        } else {
-            return String.format("%d entities created successfully",
-                    result.getCreatedEntities().size());
-        }
+    protected Class<ID> getIdClass() {
+        return idClass;
     }
 
-    private void validateId(ID id) {
-        switch (id) {
-            case null -> throw new IllegalArgumentException("ID cannot be null");
-            case String s when s.trim().isEmpty() -> throw new IllegalArgumentException("ID cannot be empty");
-            case Number number when number.longValue() <= 0 ->
-                    throw new IllegalArgumentException("ID must be positive");
-            default -> {
-            }
-        }
+    /**
+     * Check if DTO mapping is enabled for this controller.
+     */
+    protected boolean isDTOEnabled() {
+        return dtoPseudoEnabled;
     }
 
     // ===== Lifecycle Hook Methods - Override these for custom logic =====
