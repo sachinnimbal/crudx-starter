@@ -23,17 +23,13 @@ import java.lang.annotation.*;
  *     private String email;
  *     private String password;
  * }
- *
- * // Custom mapper name
- * {@literal @}CrudXRequest(value = User.class, mapper = "userRegistrationMapper")
- * public class UserRegistrationRequest { }
  * </pre>
  *
  * @author Sachin Nimbal
  * @since 1.0.2
  */
 @Target(ElementType.TYPE)
-@Retention(RetentionPolicy.RUNTIME) // Changed to RUNTIME for discovery
+@Retention(RetentionPolicy.RUNTIME)
 @Documented
 public @interface CrudXRequest {
 
@@ -47,12 +43,6 @@ public @interface CrudXRequest {
      * Empty array means all operations.
      */
     CrudXOperation[] operations() default {};
-
-    /**
-     * Custom mapper bean name (optional).
-     * If not specified, uses: "{entity}MapperCrudX"
-     */
-    String mapper() default "";
 
     /**
      * Enable strict mode - fails if DTO has fields not in entity.

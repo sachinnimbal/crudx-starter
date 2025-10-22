@@ -15,9 +15,7 @@ public enum CrudXOperation {
     BATCH_DELETE,
     GET_ID,
     GET_ALL,
-    GET_PAGED,
-    COUNT,
-    EXISTS;
+    GET_PAGED;
 
     /**
      * Check if operation is a mutation (write).
@@ -33,7 +31,7 @@ public enum CrudXOperation {
      */
     public boolean isQuery() {
         return this == GET_ID || this == GET_ALL ||
-                this == GET_PAGED || this == COUNT || this == EXISTS;
+                this == GET_PAGED;
     }
 
     /**

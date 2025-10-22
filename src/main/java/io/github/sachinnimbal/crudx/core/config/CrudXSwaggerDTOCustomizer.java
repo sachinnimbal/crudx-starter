@@ -323,8 +323,6 @@ public class CrudXSwaggerDTOCustomizer implements OperationCustomizer {
             case "getPaged" -> CrudXOperation.GET_PAGED;
             case "delete" -> CrudXOperation.DELETE;
             case "deleteBatch" -> CrudXOperation.BATCH_DELETE;
-            case "count" -> CrudXOperation.COUNT;
-            case "exists" -> CrudXOperation.EXISTS;
             default -> null;
         };
     }
