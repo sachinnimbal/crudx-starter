@@ -53,7 +53,7 @@ dependencies {
     api 'org.springframework.boot:spring-boot-configuration-processor'
     api 'org.springframework.boot:spring-boot-autoconfigure'
     api 'org.springframework.boot:spring-boot-starter-web'
-    api 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.3.0'
+    api 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.4'
 
     compileOnly 'org.springframework.boot:spring-boot-starter-data-mongodb'
     compileOnly 'org.springframework.boot:spring-boot-starter-data-jpa'
@@ -69,7 +69,7 @@ dependencies {
     implementation 'com.fasterxml.jackson.core:jackson-databind'
     implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
 
-    testImplementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.3.0'
+    testImplementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.4'
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     testImplementation 'org.springframework.boot:spring-boot-starter-data-mongodb'
@@ -117,91 +117,7 @@ build.date=${new Date().format('yyyy-MM-dd HH:mm:ss')}
     }
 }
 
-// ============================================================
-// NEW: Generate META-INF/services for Annotation Processor
-// ============================================================
-tasks.register('generateAnnotationProcessorService') {
-    def serviceDir = layout.buildDirectory.dir('resources/main/META-INF/services')
-    def serviceFile = serviceDir.map { it.file('javax.annotation.processing.Processor') }
-    outputs.file(serviceFile)
-
-    doLast {
-        def file = serviceFile.get().asFile
-        file.parentFile.mkdirs()
-        file.text = """io.github.sachinnimbal.crudx.annotation.processor.CrudXDtoValidationProcessor
-"""
-        logger.lifecycle("✓ Generated Annotation Processor service file: ${file.absolutePath}")
-    }
-}
-
-tasks.named('compileJava') {
-    dependsOn 'generateVersionProperties', 'generateAnnotationProcessorService'
-}
-
-tasks.named('processResources') {
-    dependsOn 'generateVersionProperties', 'generateAnnotationProcessorService'
-}
-
 tasks.withType(JavaExec).configureEach {
     systemProperty 'crudx.version', project.version
     systemProperty 'crudx.group', project.group
-}
-
-tasks.withType(Test).configureEach {
-    systemProperty 'crudx.version', project.version
-    systemProperty 'crudx.group', project.group
-}
-
-tasks.named('clean') {
-    doLast {
-        def versionFile = layout.buildDirectory.file('resources/main/crudx-version.properties').get().asFile
-        def serviceFile = layout.buildDirectory.file('resources/main/META-INF/services/javax.annotation.processing.Processor').get().asFile
-
-        if (versionFile.exists()) {
-            versionFile.delete()
-            logger.lifecycle("✓ Cleaned version properties file")
-        }
-
-        if (serviceFile.exists()) {
-            serviceFile.delete()
-            logger.lifecycle("✓ Cleaned annotation processor service file")
-        }
-    }
-}
-
-tasks.register('verifyVersion') {
-    group = 'verification'
-    description = 'Verifies that the version and annotation processor are correctly configured'
-
-    doLast {
-        println """
-╔═══════════════════════════════════════════════════════════╗
-║           CrudX Framework Version Information             ║
-╠═══════════════════════════════════════════════════════════╣
-║ Version:     ${project.version}
-║ Group:       ${project.group}
-║ Artifact:    ${project.name}
-║ Description: ${project.description}
-║ Author:      ${project.findProperty('author.name')}
-║ Email:       ${project.findProperty('author.email')}
-║ LinkedIn:    ${project.findProperty('author.linkedin')}
-║ Copyright:   © ${project.findProperty('author.copyrightYear')} Sachin Nimbal
-╚═══════════════════════════════════════════════════════════╝
-"""
-
-        def versionFile = layout.buildDirectory.file('resources/main/crudx-version.properties').get().asFile
-        def serviceFile = layout.buildDirectory.file('resources/main/META-INF/services/javax.annotation.processing.Processor').get().asFile
-
-        if (versionFile.exists()) {
-            println "✓ Version properties file exists: ${versionFile.absolutePath}"
-        } else {
-            println "✗ Version properties file not found. Run './gradlew build'"
-        }
-
-        if (serviceFile.exists()) {
-            println "✓ Annotation Processor service file exists: ${serviceFile.absolutePath}"
-        } else {
-            println "✗ Annotation Processor service file not found. Run './gradlew build'"
-        }
-    }
 }
