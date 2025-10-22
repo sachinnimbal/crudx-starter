@@ -2,6 +2,8 @@ package io.github.sachinnimbal.crudx.core.dto.mapper;
 
 import io.github.sachinnimbal.crudx.core.dto.annotations.CrudXField;
 import io.github.sachinnimbal.crudx.core.dto.annotations.CrudXNested;
+import io.github.sachinnimbal.crudx.core.dto.annotations.CrudXRequest;
+import io.github.sachinnimbal.crudx.core.dto.annotations.CrudXResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -17,12 +19,14 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 🚀 Ultra-Fast Runtime DTO Mapper with MethodHandle Optimization
- *
+ * <p>
  * Features:
  * - MethodHandle for 10x faster reflection
  * - Field access caching
  * - Zero memory overhead
  * - Thread-safe concurrent operations
+ * - Full annotation support (required, maxDepth, strict mode, etc.)
+ * - Smart audit field detection from CrudXAudit base class
  *
  * @author Sachin Nimbal
  * @since 1.0.2
@@ -32,6 +36,9 @@ import java.util.concurrent.ConcurrentHashMap;
 public class CrudXMapperGenerator {
 
     private static final MethodHandles.Lookup LOOKUP = MethodHandles.lookup();
+
+    // Cache for audit fields detection
+    private final Map<Class<?>, Set<String>> auditFieldsCache = new ConcurrentHashMap<>(16);
 
     // Ultra-fast caches
     private final Map<String, DateTimeFormatter> formatters = new ConcurrentHashMap<>(8);
@@ -48,7 +55,7 @@ public class CrudXMapperGenerator {
 
         try {
             E entity = instantiateFast(entityClass);
-            copyFieldsFast(request, entity, request.getClass(), entityClass, false);
+            copyFieldsFast(request, entity, request.getClass(), entityClass, false, 0);
             return entity;
         } catch (Throwable e) {
             log.error("Failed to map {} to {}",
@@ -65,7 +72,7 @@ public class CrudXMapperGenerator {
         if (request == null || entity == null) return;
 
         try {
-            copyFieldsFast(request, entity, request.getClass(), entity.getClass(), true);
+            copyFieldsFast(request, entity, request.getClass(), entity.getClass(), true, 0);
         } catch (Throwable e) {
             log.error("Failed to update {} from {}",
                     entity.getClass().getSimpleName(),
@@ -82,12 +89,30 @@ public class CrudXMapperGenerator {
 
         try {
             S response = instantiateFast(responseClass);
-            copyFieldsFast(entity, response, entity.getClass(), responseClass, false);
+            copyFieldsFast(entity, response, entity.getClass(), responseClass, false, 0);
             return response;
         } catch (Throwable e) {
             log.error("Failed to map {} to {}",
                     entity.getClass().getSimpleName(),
                     responseClass.getSimpleName(), e);
+            throw new RuntimeException("DTO mapping failed", e);
+        }
+    }
+
+    /**
+     * Convert Entity to Response DTO with depth tracking
+     */
+    private <E, S> S toResponseWithDepth(E entity, Class<S> responseClass, int currentDepth) {
+        if (entity == null) return null;
+
+        try {
+            S response = instantiateFast(responseClass);
+            copyFieldsFast(entity, response, entity.getClass(), responseClass, false, currentDepth);
+            return response;
+        } catch (Throwable e) {
+            log.error("Failed to map {} to {} at depth {}",
+                    entity.getClass().getSimpleName(),
+                    responseClass.getSimpleName(), currentDepth, e);
             throw new RuntimeException("DTO mapping failed", e);
         }
     }
@@ -109,13 +134,23 @@ public class CrudXMapperGenerator {
     }
 
     /**
-     * 🚀 ULTRA-FAST field copying using MethodHandles
+     * 🚀 ULTRA-FAST field copying using MethodHandles with full annotation support
      */
     private void copyFieldsFast(Object source, Object target,
                                 Class<?> sourceClass, Class<?> targetClass,
-                                boolean updateMode) throws Throwable {
+                                boolean updateMode, int currentDepth) throws Throwable {
 
         Field[] targetFields = getCachedFields(targetClass);
+
+        // Get annotations for filtering
+        CrudXRequest requestAnnotation = targetClass.getAnnotation(CrudXRequest.class);
+        CrudXResponse responseAnnotation = targetClass.getAnnotation(CrudXResponse.class);
+        boolean isResponseMapping = responseAnnotation != null;
+        boolean isRequestMapping = requestAnnotation != null;
+
+        // Get audit fields for the entity (cached)
+        Set<String> auditFields = isRequestMapping || isResponseMapping ?
+                getAuditFields(sourceClass) : Collections.emptySet();
 
         for (Field targetField : targetFields) {
             int modifiers = targetField.getModifiers();
@@ -128,6 +163,27 @@ public class CrudXMapperGenerator {
                 continue;
             }
 
+            // Check includeId for Response DTOs
+            if (isResponseMapping && !responseAnnotation.includeId()) {
+                if (targetField.getName().equals("id")) {
+                    continue;
+                }
+            }
+
+            // Check includeAudit for Response DTOs
+            if (isResponseMapping && !responseAnnotation.includeAudit()) {
+                if (auditFields.contains(targetField.getName())) {
+                    continue;
+                }
+            }
+
+            // Check excludeAudit for Request DTOs
+            if (isRequestMapping && requestAnnotation.excludeAudit()) {
+                if (auditFields.contains(targetField.getName())) {
+                    continue;
+                }
+            }
+
             String sourceFieldName = getSourceFieldName(targetField, fieldAnnotation);
             Field sourceField = findFieldInHierarchy(sourceClass, sourceFieldName);
 
@@ -136,23 +192,109 @@ public class CrudXMapperGenerator {
                 continue;
             }
 
+            // Check excludeImmutable for Request DTOs (updateMode)
+            if (updateMode && isRequestMapping && requestAnnotation.excludeImmutable()) {
+                if (isFieldImmutable(sourceField)) {
+                    log.debug("Skipping immutable field: {}", sourceField.getName());
+                    continue;
+                }
+            }
+
             // Use MethodHandles for 10x speed boost
             Object sourceValue = getFieldValueFast(source, sourceField, sourceClass);
+
+            // Check required fields
+            if (fieldAnnotation != null && fieldAnnotation.required() && sourceValue == null) {
+                throw new IllegalArgumentException(
+                        "Required field '" + targetField.getName() + "' is null in " +
+                                source.getClass().getSimpleName()
+                );
+            }
 
             if (updateMode && sourceValue == null) {
                 continue;
             }
 
-            // Handle nested objects
+            // Handle nested objects with depth tracking
             if (targetField.isAnnotationPresent(CrudXNested.class)) {
-                Object nestedValue = handleNestedObjectFast(sourceValue, targetField);
+                Object nestedValue = handleNestedObjectFast(sourceValue, targetField, target, currentDepth);
                 setFieldValueFast(target, targetField, targetClass, nestedValue);
                 continue;
             }
 
             // Transform and set
-            Object transformedValue = transformValueFast(sourceValue, targetField, fieldAnnotation);
+            Object transformedValue = transformValueFast(sourceValue, targetField, fieldAnnotation, source);
             setFieldValueFast(target, targetField, targetClass, transformedValue);
+        }
+    }
+
+    /**
+     * Get audit fields from entity class by detecting CrudXAudit base class
+     */
+    private Set<String> getAuditFields(Class<?> entityClass) {
+        return auditFieldsCache.computeIfAbsent(entityClass, clazz -> {
+            Set<String> fields = new HashSet<>();
+
+            // Check if entity extends or embeds CrudXAudit
+            Class<?> current = clazz;
+            while (current != null && current != Object.class) {
+                // Check for CrudXAudit superclass
+                if (current.getSimpleName().equals("CrudXAudit")) {
+                    // Extract field names from CrudXAudit
+                    for (Field field : current.getDeclaredFields()) {
+                        if (!Modifier.isStatic(field.getModifiers())) {
+                            fields.add(field.getName());
+                        }
+                    }
+                    log.debug("Found CrudXAudit fields in {}: {}", clazz.getSimpleName(), fields);
+                    return fields;
+                }
+
+                // Check for embedded CrudXAudit fields
+                for (Field field : current.getDeclaredFields()) {
+                    if (field.getType().getSimpleName().equals("CrudXAudit")) {
+                        // If entity has a field of type CrudXAudit, get its fields
+                        for (Field auditField : field.getType().getDeclaredFields()) {
+                            if (!Modifier.isStatic(auditField.getModifiers())) {
+                                fields.add(auditField.getName());
+                            }
+                        }
+                        log.debug("Found embedded CrudXAudit fields in {}: {}", clazz.getSimpleName(), fields);
+                        return fields;
+                    }
+                }
+
+                current = current.getSuperclass();
+            }
+
+            // Fallback: If no CrudXAudit found, use common audit field names
+            if (fields.isEmpty()) {
+                // Check if entity has any of these common audit fields
+                for (String commonAuditField : List.of("createdAt", "createdBy", "updatedAt", "updatedBy")) {
+                    if (findFieldInHierarchy(clazz, commonAuditField) != null) {
+                        fields.add(commonAuditField);
+                    }
+                }
+                if (!fields.isEmpty()) {
+                    log.debug("Found common audit fields in {}: {}", clazz.getSimpleName(), fields);
+                }
+            }
+
+            return fields;
+        });
+    }
+
+    /**
+     * Check if field is marked as immutable
+     */
+    private boolean isFieldImmutable(Field field) {
+        // Check for custom @CrudXImmutable annotation if exists
+        try {
+            Class<?> immutableAnnotation = Class.forName("io.github.sachinnimbal.crudx.core.annotations.CrudXImmutable");
+            return field.isAnnotationPresent((Class<? extends java.lang.annotation.Annotation>) immutableAnnotation);
+        } catch (ClassNotFoundException e) {
+            // Annotation doesn't exist, check for final modifier
+            return Modifier.isFinal(field.getModifiers());
         }
     }
 
@@ -170,9 +312,17 @@ public class CrudXMapperGenerator {
                         MethodType.methodType(field.getType()));
                 getterCache.put(cacheKey, getter);
             } catch (NoSuchMethodException e) {
-                // Fallback to direct field access
-                field.setAccessible(true);
-                return field.get(obj);
+                // Try boolean getter
+                methodName = "is" + capitalize(field.getName());
+                try {
+                    getter = LOOKUP.findVirtual(clazz, methodName,
+                            MethodType.methodType(field.getType()));
+                    getterCache.put(cacheKey, getter);
+                } catch (NoSuchMethodException ex) {
+                    // Fallback to direct field access
+                    field.setAccessible(true);
+                    return field.get(obj);
+                }
             }
         }
 
@@ -206,31 +356,55 @@ public class CrudXMapperGenerator {
     }
 
     /**
-     * Handle nested objects with recursion protection
+     * Handle nested objects with recursion protection and depth tracking
      */
-    private Object handleNestedObjectFast(Object sourceValue, Field targetField) throws Throwable {
+    private Object handleNestedObjectFast(Object sourceValue, Field targetField, Object targetObject, int currentDepth) throws Throwable {
         if (sourceValue == null) {
             return handleNullStrategy(targetField);
         }
 
         CrudXNested nested = targetField.getAnnotation(CrudXNested.class);
+
+        // Check max depth to prevent infinite recursion
+        if (nested.maxDepth() > 0 && currentDepth >= nested.maxDepth()) {
+            log.debug("Max depth {} reached for field {}, stopping recursion",
+                    nested.maxDepth(), targetField.getName());
+            return handleNullStrategy(targetField);
+        }
+
+        // Check for lazy loading (Response DTOs)
+        CrudXResponse responseAnnotation = targetObject.getClass().getAnnotation(CrudXResponse.class);
+        if (responseAnnotation != null && responseAnnotation.lazyNested()) {
+            // For lazy loading, we would need proxy generation
+            // For now, log and proceed with eager loading
+            log.debug("Lazy loading requested for field {} but not yet implemented, using eager loading",
+                    targetField.getName());
+        }
+
+        // Check fetch strategy
+        if (nested.fetch() == CrudXNested.FetchStrategy.LAZY) {
+            // For lazy loading, we would need proxy generation
+            log.debug("Lazy fetch strategy for field {} not yet implemented, using eager loading",
+                    targetField.getName());
+        }
+
         Class<?> targetType = nested.dtoClass() != void.class ?
                 nested.dtoClass() : getGenericTypeFast(targetField);
 
         // Handle collections
         if (sourceValue instanceof Collection) {
-            return mapCollectionFast((Collection<?>) sourceValue, targetType, targetField.getType());
+            return mapCollectionFast((Collection<?>) sourceValue, targetType, targetField.getType(), currentDepth);
         }
 
         // Single nested object
-        return toResponse(sourceValue, targetType);
+        return toResponseWithDepth(sourceValue, targetType, currentDepth + 1);
     }
 
     /**
-     * Map collection with optimized memory allocation
+     * Map collection with optimized memory allocation and depth tracking
      */
     @SuppressWarnings("unchecked")
-    private Object mapCollectionFast(Collection<?> source, Class<?> dtoClass, Class<?> collectionType)
+    private Object mapCollectionFast(Collection<?> source, Class<?> dtoClass, Class<?> collectionType, int currentDepth)
             throws Throwable {
 
         // Pre-allocate exact size
@@ -246,21 +420,21 @@ public class CrudXMapperGenerator {
         }
 
         for (Object item : source) {
-            result.add(toResponse(item, dtoClass));
+            result.add(toResponseWithDepth(item, dtoClass, currentDepth + 1));
         }
 
         return result;
     }
 
     /**
-     * Transform value with optimized type conversion
+     * Transform value with optimized type conversion and custom transformers
      */
-    private Object transformValueFast(Object value, Field targetField, CrudXField fieldAnnotation) {
+    private Object transformValueFast(Object value, Field targetField, CrudXField fieldAnnotation, Object sourceObject) {
         if (value == null) return null;
 
         // Apply custom transformer
         if (fieldAnnotation != null && !fieldAnnotation.transformer().isEmpty()) {
-            value = applyTransformer(value, fieldAnnotation.transformer());
+            value = applyTransformer(value, fieldAnnotation.transformer(), sourceObject);
         }
 
         // Date formatting (cached formatters)
@@ -421,26 +595,59 @@ public class CrudXMapperGenerator {
         return value;
     }
 
+    /**
+     * Handle null strategy for nested objects
+     */
     private Object handleNullStrategy(Field targetField) {
         CrudXNested nested = targetField.getAnnotation(CrudXNested.class);
-        if (nested.nullStrategy() == CrudXNested.NullStrategy.EMPTY_COLLECTION) {
-            if (List.class.isAssignableFrom(targetField.getType())) {
-                return new ArrayList<>();
-            } else if (Set.class.isAssignableFrom(targetField.getType())) {
-                return new HashSet<>();
+        if (nested == null) return null;
+
+        return switch (nested.nullStrategy()) {
+            case EMPTY_COLLECTION -> {
+                if (List.class.isAssignableFrom(targetField.getType())) {
+                    yield new ArrayList<>();
+                } else if (Set.class.isAssignableFrom(targetField.getType())) {
+                    yield new HashSet<>();
+                }
+                yield null;
             }
-        }
-        return null;
+            case EXCLUDE_NULL -> null; // Field will be skipped in JSON serialization
+            default -> null; // INCLUDE_NULL
+        };
     }
 
-    private Object applyTransformer(Object value, String transformerName) {
+    /**
+     * Apply transformer - supports both built-in and custom transformers
+     */
+    private Object applyTransformer(Object value, String transformerName, Object sourceObject) {
         try {
-            return switch (transformerName) {
+            // First check built-in transformers
+            Object result = switch (transformerName) {
                 case "toUpperCase" -> value.toString().toUpperCase();
                 case "toLowerCase" -> value.toString().toLowerCase();
                 case "trim" -> value.toString().trim();
-                default -> value;
+                default -> null;
             };
+
+            if (result != null) return result;
+
+            // Try to invoke custom transformer method: String transform(Object value)
+            try {
+                Method method = sourceObject.getClass().getMethod(transformerName, Object.class);
+                method.setAccessible(true);
+                return method.invoke(sourceObject, value);
+            } catch (NoSuchMethodException e) {
+                // Try alternative signature: Object transform(Object value)
+                try {
+                    Method method = sourceObject.getClass().getDeclaredMethod(transformerName, Object.class);
+                    method.setAccessible(true);
+                    return method.invoke(sourceObject, value);
+                } catch (NoSuchMethodException ex) {
+                    log.warn("Transformer method '{}' not found in {}",
+                            transformerName, sourceObject.getClass().getSimpleName());
+                    return value;
+                }
+            }
         } catch (Exception e) {
             log.warn("Transformer '{}' failed: {}", transformerName, e.getMessage());
             return value;
@@ -461,6 +668,7 @@ public class CrudXMapperGenerator {
         fieldCache.clear();
         constructorCache.clear();
         formatters.clear();
+        auditFieldsCache.clear();
     }
 
     /**
@@ -473,6 +681,7 @@ public class CrudXMapperGenerator {
         stats.put("fieldCache", fieldCache.size());
         stats.put("constructorCache", constructorCache.size());
         stats.put("formatters", formatters.size());
+        stats.put("auditFieldsCache", auditFieldsCache.size());
         return stats;
     }
 }

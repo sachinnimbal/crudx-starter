@@ -19,7 +19,9 @@ package io.github.sachinnimbal.crudx.web;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.sachinnimbal.crudx.core.config.CrudXProperties;
 import io.github.sachinnimbal.crudx.core.dto.mapper.CrudXMapper;
+import io.github.sachinnimbal.crudx.core.dto.mapper.CrudXMapperGenerator;
 import io.github.sachinnimbal.crudx.core.dto.mapper.CrudXMapperRegistry;
+import io.github.sachinnimbal.crudx.core.enums.CrudXOperation;
 import io.github.sachinnimbal.crudx.core.enums.DatabaseType;
 import io.github.sachinnimbal.crudx.core.model.CrudXBaseEntity;
 import io.github.sachinnimbal.crudx.core.model.CrudXMongoEntity;
@@ -55,6 +57,7 @@ import static io.github.sachinnimbal.crudx.core.enums.CrudXOperation.*;
 
 /**
  * Base REST controller providing zero-boilerplate CRUD operations.
+ * 🔧 FIXED: Now properly selects Response DTOs based on operation
  *
  * @param <T>  the entity type
  * @param <ID> the ID type
@@ -69,6 +72,9 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
     @Autowired(required = false)
     protected CrudXMapperRegistry dtoRegistry;
+
+    @Autowired(required = false)
+    protected CrudXMapperGenerator mapperGenerator;
 
     protected CrudXService<T, ID> crudService;
     protected CrudXMapper<T, ?, ?> dtoMapper;
@@ -155,7 +161,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
             // DTO Mode: Convert Request DTO to Entity
             if (dtoPseudoEnabled) {
-                entity = convertMapToEntity(requestBody);
+                entity = convertMapToEntity(requestBody, CREATE);
             } else {
                 // Legacy Mode: Convert map directly to entity
                 entity = convertMapToEntityDirectly(requestBody);
@@ -167,9 +173,9 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
             long executionTime = System.currentTimeMillis() - startTime;
 
-            // DTO Mode: Convert Entity to Response DTO
+            // 🔧 FIX: Use operation-aware conversion
             Object response = dtoPseudoEnabled ?
-                    convertEntityToResponse(created) : created;
+                    convertEntityToResponse(created, CREATE) : created;
 
             log.info("Entity created successfully with ID: {} | Time taken: {} ms",
                     created.getId(), executionTime);
@@ -209,7 +215,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             // DTO Mode: Convert Request DTOs to Entities
             if (dtoPseudoEnabled) {
                 entities = requestBodies.stream()
-                        .map(this::convertMapToEntity)
+                        .map(map -> convertMapToEntity(map, BATCH_CREATE))
                         .collect(Collectors.toList());
             } else {
                 // Legacy Mode: Convert maps directly to entities
@@ -228,7 +234,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                 );
             }
 
-            // Process batch (existing chunking logic)
+            // Process batch
             BatchResult<T> result;
             if (entities.size() > 100) {
                 result = processChunkedBatch(entities, skipDuplicates,
@@ -242,9 +248,9 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             long executionTime = System.currentTimeMillis() - startTime;
             double recordsPerSecond = (result.getCreatedEntities().size() * 1000.0) / executionTime;
 
-            // DTO Mode: Convert results to Response DTOs
+            // 🔧 FIX: Use operation-aware conversion
             Object responseData = dtoPseudoEnabled ?
-                    convertBatchResultToResponse(result) : result;
+                    convertBatchResultToResponse(result, BATCH_CREATE) : result;
 
             String message = result.hasSkipped() ?
                     String.format("Batch creation completed: %d created, %d skipped | Performance: %.0f records/sec",
@@ -267,6 +273,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
     /**
      * GET BY ID - Enhanced with DTO support
+     * 🔧 FIX: Now uses GET_ID operation for DTO selection
      */
     @GetMapping("/{id}")
     public ResponseEntity<ApiResponse<?>> getById(@PathVariable ID id) {
@@ -281,9 +288,9 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
             long executionTime = System.currentTimeMillis() - startTime;
 
-            // DTO Mode: Convert to Response DTO
+            // 🔧 FIX: Use GET_ID operation
             Object response = dtoPseudoEnabled ?
-                    convertEntityToResponse(entity) : entity;
+                    convertEntityToResponse(entity, GET_ID) : entity;
 
             log.info("Entity found with ID: {} | Time taken: {} ms", id, executionTime);
 
@@ -300,6 +307,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
     /**
      * GET ALL - Enhanced with DTO support
+     * 🔧 FIX: Now uses GET_ALL operation for DTO selection
      */
     @GetMapping
     public ResponseEntity<ApiResponse<?>> getAll(
@@ -325,9 +333,9 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
                 long executionTime = System.currentTimeMillis() - startTime;
 
-                // DTO Mode: Convert page content
+                // 🔧 FIX: Use GET_PAGED operation when auto-switching
                 Object response = dtoPseudoEnabled ?
-                        convertPageResponseToDTO(pageResponse) : pageResponse;
+                        convertPageResponseToDTO(pageResponse, GET_PAGED) : pageResponse;
 
                 return ResponseEntity.ok(ApiResponse.success(response,
                         String.format("Large dataset detected (%d total records). " +
@@ -345,9 +353,9 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
             long executionTime = System.currentTimeMillis() - startTime;
 
-            // DTO Mode: Convert list
+            // 🔧 FIX: Use GET_ALL operation
             Object response = dtoPseudoEnabled ?
-                    convertEntitiesToResponse(entities) : entities;
+                    convertEntitiesToResponse(entities, GET_ALL) : entities;
 
             log.info("Retrieved {} entities | Time taken: {} ms", entities.size(), executionTime);
 
@@ -365,6 +373,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
     /**
      * GET PAGED - Enhanced with DTO support
+     * 🔧 FIX: Now uses GET_PAGED operation for DTO selection
      */
     @GetMapping("/paged")
     public ResponseEntity<ApiResponse<?>> getPaged(
@@ -387,9 +396,9 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
             long executionTime = System.currentTimeMillis() - startTime;
 
-            // DTO Mode: Convert page content
+            // 🔧 FIX: Use GET_PAGED operation
             Object response = dtoPseudoEnabled ?
-                    convertPageResponseToDTO(pageResponse) : pageResponse;
+                    convertPageResponseToDTO(pageResponse, GET_PAGED) : pageResponse;
 
             log.info("Found page of {} entities (total: {}) | Time taken: {} ms",
                     pageResponse.getContent().size(), pageResponse.getTotalElements(), executionTime);
@@ -434,9 +443,9 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
             long executionTime = System.currentTimeMillis() - startTime;
 
-            // DTO Mode: Convert to Response DTO
+            // 🔧 FIX: Use UPDATE operation
             Object response = dtoPseudoEnabled ?
-                    convertEntityToResponse(updated) : updated;
+                    convertEntityToResponse(updated, UPDATE) : updated;
 
             log.info("Entity updated successfully with ID: {} | Time taken: {} ms",
                     id, executionTime);
@@ -473,9 +482,9 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
             long executionTime = System.currentTimeMillis() - startTime;
 
-            // DTO Mode: Convert results
+            // 🔧 FIX: Use BATCH_UPDATE operation
             Object responseData = dtoPseudoEnabled ?
-                    convertBatchResultToResponse(result) : result;
+                    convertBatchResultToResponse(result, BATCH_UPDATE) : result;
 
             String message = result.hasSkipped() ?
                     String.format("Batch update completed: %d updated, %d skipped",
@@ -665,23 +674,31 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         }
     }
 
-    // ==================== DTO CONVERSION METHODS ====================
+    // ==================== 🔧 FIXED: OPERATION-AWARE DTO CONVERSION METHODS ====================
 
     /**
-     * Convert Map (from JSON) to Entity using DTO mapper.
+     * Convert Map (from JSON) to Entity using DTO mapper with operation awareness.
      */
     @SuppressWarnings("unchecked")
-    private T convertMapToEntity(Map<String, Object> map) {
-        if (dtoMapper == null) {
+    private T convertMapToEntity(Map<String, Object> map, CrudXOperation operation) {
+        if (dtoMapper == null || dtoRegistry == null) {
             return convertMapToEntityDirectly(map);
         }
 
-        Optional<Class<?>> requestDtoClass = dtoRegistry.getRequestDTO(entityClass, CREATE);
+        Optional<Class<?>> requestDtoClass = dtoRegistry.getRequestDTO(entityClass, operation);
 
         if (requestDtoClass.isPresent()) {
             Object dto = convertMapToDto(map, requestDtoClass.get());
             return ((CrudXMapper<T, Object, ?>) dtoMapper).toEntity(dto);
         } else {
+            // Fallback: Try runtime mapper if available
+            if (mapperGenerator != null) {
+                try {
+                    return mapperGenerator.toEntity(map, entityClass);
+                } catch (Exception e) {
+                    log.debug("Runtime mapper failed, falling back to direct conversion", e);
+                }
+            }
             return convertMapToEntityDirectly(map);
         }
     }
@@ -711,38 +728,77 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     }
 
     /**
-     * Convert Entity to Response DTO.
+     * 🔧 FIX: Convert Entity to Response DTO with OPERATION AWARENESS
      */
     @SuppressWarnings("unchecked")
-    private Object convertEntityToResponse(T entity) {
-        if (dtoMapper == null) {
+    private Object convertEntityToResponse(T entity, CrudXOperation operation) {
+        if (dtoMapper == null || dtoRegistry == null) {
             return entity;
         }
+
+        // Get the Response DTO class for this specific operation
+        Optional<Class<?>> responseDtoClass = dtoRegistry.getResponseDTO(entityClass, operation);
+
+        if (responseDtoClass.isPresent()) {
+            Class<?> dtoClass = responseDtoClass.get();
+            log.debug("Converting entity {} to {} for operation {}",
+                    entityClass.getSimpleName(), dtoClass.getSimpleName(), operation);
+
+            // Use runtime mapper generator for operation-specific conversion
+            if (mapperGenerator != null) {
+                try {
+                    return mapperGenerator.toResponse(entity, dtoClass);
+                } catch (Exception e) {
+                    log.error("Runtime mapper failed for operation {}: {}", operation, e.getMessage());
+                }
+            }
+        }
+
+        // Fallback to default mapper
         return ((CrudXMapper<T, ?, Object>) dtoMapper).toResponse(entity);
     }
 
     /**
-     * Convert list of Entities to Response DTOs.
+     * 🔧 FIX: Convert list of Entities to Response DTOs with OPERATION AWARENESS
      */
     @SuppressWarnings("unchecked")
-    private List<?> convertEntitiesToResponse(List<T> entities) {
-        if (dtoMapper == null) {
+    private List<?> convertEntitiesToResponse(List<T> entities, CrudXOperation operation) {
+        if (dtoMapper == null || dtoRegistry == null || entities.isEmpty()) {
             return entities;
         }
+
+        // Get the Response DTO class for this specific operation
+        Optional<Class<?>> responseDtoClass = dtoRegistry.getResponseDTO(entityClass, operation);
+
+        if (responseDtoClass.isPresent()) {
+            Class<?> dtoClass = responseDtoClass.get();
+            log.debug("Converting {} entities to {} for operation {}",
+                    entities.size(), dtoClass.getSimpleName(), operation);
+
+            // Use runtime mapper generator for operation-specific conversion
+            if (mapperGenerator != null) {
+                try {
+                    return mapperGenerator.toResponseList(entities, dtoClass);
+                } catch (Exception e) {
+                    log.error("Runtime mapper failed for operation {}: {}", operation, e.getMessage());
+                }
+            }
+        }
+
+        // Fallback to default mapper
         return ((CrudXMapper<T, ?, Object>) dtoMapper).toResponseList(entities);
     }
 
     /**
-     * Convert BatchResult with Entity to BatchResult with Response DTO.
+     * 🔧 FIX: Convert BatchResult with Entity to BatchResult with Response DTO (operation-aware)
      */
     @SuppressWarnings("unchecked")
-    private Object convertBatchResultToResponse(BatchResult<T> entityResult) {
-        if (dtoMapper == null) {
+    private Object convertBatchResultToResponse(BatchResult<T> entityResult, CrudXOperation operation) {
+        if (dtoMapper == null || dtoRegistry == null) {
             return entityResult;
         }
 
-        List<?> responseDtos = ((CrudXMapper<T, ?, Object>) dtoMapper)
-                .toResponseList(entityResult.getCreatedEntities());
+        List<?> responseDtos = convertEntitiesToResponse(entityResult.getCreatedEntities(), operation);
 
         BatchResult<Object> dtoResult = new BatchResult<>();
         dtoResult.setCreatedEntities((List<Object>) responseDtos);
@@ -753,16 +809,15 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     }
 
     /**
-     * Convert PageResponse with Entity to PageResponse with Response DTO.
+     * 🔧 FIX: Convert PageResponse with Entity to PageResponse with Response DTO (operation-aware)
      */
     @SuppressWarnings("unchecked")
-    private Object convertPageResponseToDTO(PageResponse<T> entityPage) {
-        if (dtoMapper == null) {
+    private Object convertPageResponseToDTO(PageResponse<T> entityPage, CrudXOperation operation) {
+        if (dtoMapper == null || dtoRegistry == null) {
             return entityPage;
         }
 
-        List<?> dtoContent = ((CrudXMapper<T, ?, Object>) dtoMapper)
-                .toResponseList(entityPage.getContent());
+        List<?> dtoContent = convertEntitiesToResponse(entityPage.getContent(), operation);
 
         return PageResponse.builder()
                 .content((List<Object>) dtoContent)
@@ -1044,11 +1099,6 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     /**
      * Called AFTER the entity is deleted but BEFORE the transaction commits.
      * The entity parameter contains the entity state before deletion.
-     * <p>
-     * NOTE: The entity is already deleted from the database at this point.
-     * This hook is for post-deletion operations like logging, cache invalidation,
-     * or triggering external events. If you need to PREVENT deletion, consider
-     * using a custom validation endpoint before calling delete.
      *
      * @param id            the ID of the entity that was deleted
      * @param deletedEntity the entity as it existed before deletion
@@ -1060,9 +1110,6 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     /**
      * Called after successfully deleting a single entity.
      * Override this method to clean up related data, invalidate caches, etc.
-     * <p>
-     * NOTE: The deletedEntity parameter contains the entity as it existed
-     * before deletion, giving you access to all fields for cleanup operations.
      *
      * @param id            the ID of the deleted entity
      * @param deletedEntity the entity that was deleted (state before deletion)

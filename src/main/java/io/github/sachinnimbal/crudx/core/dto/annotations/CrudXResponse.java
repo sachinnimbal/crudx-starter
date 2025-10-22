@@ -55,11 +55,6 @@ public @interface CrudXResponse {
     CrudXOperation[] operations() default {};
 
     /**
-     * Custom mapper bean name (optional).
-     */
-    String mapper() default "";
-
-    /**
      * Include ID field automatically.
      */
     boolean includeId() default true;
