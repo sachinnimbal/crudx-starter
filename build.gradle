@@ -19,6 +19,20 @@ java {
     }
     withSourcesJar()
     withJavadocJar()
+    tasks.withType(Jar).tap {
+        configureEach {
+            manifest {
+                attributes(
+                        'Implementation-Title': project.name,
+                        'Implementation-Version': project.version,
+                        'Implementation-Vendor': 'Sachin Nimbal',
+                        'Built-By': 'Sachin Nimbal',
+                        'Built-Date': new Date().format('yyyy-MM-dd HH:mm:ss'),
+                        'Copyright': "Copyright ${project.findProperty('author.copyrightYear')} Sachin Nimbal"
+                )
+            }
+        }
+    }
 }
 
 repositories {
@@ -32,7 +46,6 @@ dependencyManagement {
 }
 
 dependencies {
-    // ==================== PUBLIC API ====================
     api 'org.springframework.boot:spring-boot-starter-validation'
     api 'org.springframework.boot:spring-boot-starter-aop'
     api 'org.springframework:spring-context'
@@ -40,132 +53,43 @@ dependencies {
     api 'org.springframework.boot:spring-boot-configuration-processor'
     api 'org.springframework.boot:spring-boot-autoconfigure'
     api 'org.springframework.boot:spring-boot-starter-web'
-    api 'org.springframework.boot:spring-boot-starter-actuator'
     api 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.4'
     api 'jakarta.persistence:jakarta.persistence-api'
+    api 'org.springframework.boot:spring-boot-starter-actuator'
 
-    // ✨ CRITICAL: Annotation processor must be API dependency
-    api 'com.google.auto.service:auto-service-annotations:1.1.1'
-
-    // Annotation processor runtime
-    annotationProcessor 'com.google.auto.service:auto-service:1.1.1'
-
-    // ==================== OPTIONAL INTEGRATIONS ====================
     compileOnly 'org.springframework.boot:spring-boot-starter-data-mongodb'
     compileOnly 'org.springframework.boot:spring-boot-starter-data-jpa'
     compileOnly 'com.mysql:mysql-connector-j'
     compileOnly 'org.postgresql:postgresql'
-    compileOnly 'com.github.ben-manes.caffeine:caffeine:3.1.8'
-    compileOnly 'org.springframework.boot:spring-boot-starter-data-redis'
-    compileOnly 'com.hazelcast:hazelcast:5.3.6'
-    compileOnly 'org.ehcache:ehcache:3.10.8'
-    compileOnly 'net.spy:spymemcached:2.12.3'
-    compileOnly 'org.projectlombok:lombok'
-    compileOnly 'com.google.guava:guava:32.1.2-jre'
 
+    compileOnly 'org.projectlombok:lombok'
+    compileOnly 'com.google.auto.service:auto-service:1.1.1'
+
+    annotationProcessor 'com.google.auto.service:auto-service:1.1.1'
     annotationProcessor 'org.projectlombok:lombok'
 
-    // ==================== RUNTIME DEPENDENCIES ====================
     implementation 'org.springframework.boot:spring-boot-starter-thymeleaf'
     implementation 'org.slf4j:slf4j-api'
     implementation 'com.fasterxml.jackson.core:jackson-databind'
     implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
-
-    // ==================== TEST DEPENDENCIES ====================
-    testImplementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.4'
-    testImplementation 'org.springframework.boot:spring-boot-starter-test'
-    testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa'
-    testImplementation 'org.springframework.boot:spring-boot-starter-data-mongodb'
-    testImplementation 'org.testcontainers:junit-jupiter'
-    testImplementation 'org.testcontainers:mongodb'
-    testImplementation 'org.testcontainers:mysql'
-    testImplementation 'org.testcontainers:postgresql'
-    testImplementation 'com.mysql:mysql-connector-j'
-    testImplementation 'org.postgresql:postgresql'
-    testCompileOnly 'org.projectlombok:lombok'
-    testAnnotationProcessor 'org.projectlombok:lombok'
+    // JavaPoet - Type-safe Java code generation
+    implementation 'com.squareup:javapoet:1.13.0'
+    implementation 'org.springframework:spring-core'
 }
-
-// ========================================
-// 🎯 CRITICAL: Annotation Processing Configuration
-// ========================================
 
 tasks.withType(JavaCompile).configureEach {
-    // Enable full annotation processing
-    options.annotationProcessorPath = configurations.annotationProcessor
-
-    // Compiler arguments
-    options.compilerArgs.addAll([
-            '-proc:full',                    // Enable full processing
-            '-Xlint:-processing',            // Suppress processing warnings
-            '-parameters',                   // Preserve parameter names
-            '-Aproject=${project.name}',     // Pass project name
-            '-Aversion=${project.version}'   // Pass version
-    ])
-
     options.encoding = 'UTF-8'
-
-    // Show verbose annotation processing (optional - for debugging)
-    // options.compilerArgs.add('-verbose')
+    options.compilerArgs.add('-parameters')
 }
 
-// ========================================
-// 🎯 JAR Configuration - CRITICAL FOR PROCESSOR
-// ========================================
-
-tasks.named('jar') {
-    dependsOn tasks.named('compileJava')
-
-    // MUST exclude duplicates
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-
-    // Include processor service file
-    from(sourceSets.main.output) {
-        include 'META-INF/services/**'
-    }
-
-    manifest {
-        attributes(
-                'Implementation-Title': project.name,
-                'Implementation-Version': project.version,
-                'Implementation-Vendor': 'Sachin Nimbal',
-                'Built-By': 'Sachin Nimbal',
-                'Built-Date': new Date().format('yyyy-MM-dd HH:mm:ss'),
-                'Copyright': "Copyright ${project.findProperty('author.copyrightYear')} Sachin Nimbal"
-        )
-    }
-}
-
-// ========================================
-// Sources JAR
-// ========================================
-
-tasks.named('sourcesJar') {
-    dependsOn tasks.named('compileJava')
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-}
-
-// ========================================
-// Javadoc Configuration
-// ========================================
-
-tasks.named('javadoc') {
-    dependsOn tasks.named('compileJava')
+tasks.withType(Javadoc).configureEach {
     options.encoding = 'UTF-8'
     options.addBooleanOption('Xdoclint:none', true)
-
-    // Exclude generated sources
-    exclude '**/generated/**'
 }
 
-tasks.named('javadocJar') {
-    dependsOn tasks.named('javadoc')
+jar {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
-
-// ========================================
-// Version Properties Generation
-// ========================================
 
 tasks.register('generateVersionProperties') {
     def propertiesFile = layout.buildDirectory.file('resources/main/crudx-version.properties')
@@ -175,150 +99,17 @@ tasks.register('generateVersionProperties') {
         def file = propertiesFile.get().asFile
         file.parentFile.mkdirs()
         file.text = """# CrudX Framework Version
+# Auto-generated - DO NOT EDIT
 version=${project.version}
 group=${project.group}
 artifact=${project.name}
 description=${project.description}
 author.name=${project.findProperty('author.name')}
 author.email=${project.findProperty('author.email')}
+author.linkedin=${project.findProperty('author.linkedin')}
+copyright.year=${project.findProperty('author.copyrightYear')}
 build.date=${new Date().format('yyyy-MM-dd HH:mm:ss')}
 """
-        logger.lifecycle("✓ Generated version properties")
-    }
-}
-
-tasks.named('processResources') {
-    dependsOn tasks.named('generateVersionProperties')
-}
-
-// ========================================
-// 🎯 Verification Tasks
-// ========================================
-
-tasks.register('verifyProcessorPackaging') {
-    dependsOn tasks.named('jar')
-
-    doLast {
-        def jarFile = tasks.jar.archiveFile.get().asFile
-
-        if (!jarFile.exists()) {
-            logger.error("❌ JAR file not found: ${jarFile}")
-            return
-        }
-
-        def serviceFile = 'META-INF/services/javax.annotation.processing.Processor'
-        def processorClass = 'io/github/sachinnimbal/crudx/core/dto/processor/CrudXDTOProcessor.class'
-
-        new java.util.zip.ZipFile(jarFile).withCloseable { zip ->
-            // Check service file
-            def entry = zip.getEntry(serviceFile)
-            if (entry == null) {
-                logger.error("❌ ERROR: Processor service file not found!")
-                logger.error("   Expected: ${serviceFile}")
-            } else {
-                def content = zip.getInputStream(entry).text.trim()
-                logger.lifecycle("✓ Processor registered: ${content}")
-            }
-
-            // Check processor class
-            def classEntry = zip.getEntry(processorClass)
-            if (classEntry == null) {
-                logger.error("❌ ERROR: Processor class not found!")
-                logger.error("   Expected: ${processorClass}")
-            } else {
-                logger.lifecycle("✓ Processor class packaged: ${processorClass}")
-            }
-        }
-    }
-}
-
-tasks.register('testAnnotationProcessor') {
-    group = 'verification'
-    description = 'Test annotation processor configuration'
-    dependsOn tasks.named('compileJava')
-
-    doLast {
-        def serviceFile = file('build/classes/java/main/META-INF/services/javax.annotation.processing.Processor')
-
-        if (!serviceFile.exists()) {
-            logger.error("❌ Processor service file not generated!")
-            throw new GradleException("Annotation processor service file missing!")
-        }
-
-        def content = serviceFile.text.trim()
-        def expectedProcessor = 'io.github.sachinnimbal.crudx.core.dto.processor.CrudXDTOProcessor'
-
-        if (!content.contains(expectedProcessor)) {
-            logger.error("❌ Processor service file has wrong content!")
-            throw new GradleException("Processor service file incorrect!")
-        }
-
-        logger.lifecycle("✓ Annotation processor verified: ${content}")
-    }
-}
-
-// ========================================
-// Build Enhancement
-// ========================================
-
-tasks.named('build') {
-    finalizedBy tasks.named('verifyProcessorPackaging')
-}
-
-tasks.named('check') {
-    dependsOn tasks.named('testAnnotationProcessor')
-}
-
-tasks.named('clean') {
-    delete 'build/generated'
-}
-
-// ========================================
-// 🎯 Build Info Task
-// ========================================
-
-tasks.register('buildInfo') {
-    group = 'help'
-    description = 'Display build information'
-
-    doLast {
-        println """
-╔════════════════════════════════════════════════════════════╗
-║          CrudX Framework - Production Build Info          ║
-╠════════════════════════════════════════════════════════════╣
-║ Project:         ${project.name}
-║ Version:         ${project.version}
-║ Group:           ${project.group}
-║ Description:     ${project.description}
-║ Java Version:    ${java.toolchain.languageVersion.get()}
-║ Processor:       Embedded ✅
-╚════════════════════════════════════════════════════════════╝
-
-✨ Features:
-  - Zero-configuration DTO mapping
-  - Compile-time code generation
-  - Automatic nested object handling
-  - 100% type-safe mappers
-  - Production-ready performance
-
-📦 Verification:
-   ./gradlew verifyProcessorPackaging
-
-🧪 Testing:
-   ./gradlew testAnnotationProcessor
-
-🚀 Build:
-   ./gradlew clean build publish
-        """
-    }
-}
-
-tasks.named('build') {
-    doLast {
-        logger.lifecycle("")
-        logger.lifecycle("✅ Build successful!")
-        logger.lifecycle("   🎯 Annotation processor: VERIFIED")
-        logger.lifecycle("   📦 JAR packaging: COMPLETE")
-        logger.lifecycle("   🚀 Ready for publication")
+        logger.lifecycle("✓ Generated version properties: ${file.absolutePath}")
     }
 }
