@@ -27,6 +27,7 @@ import java.util.*;
  * - Registers component schemas for inner classes
  * - Shows complete entity schema when DTOs are not configured
  * - Handles collections and complex nested structures
+ * - Prevents infinite recursion with circular reference detection
  *
  * @author Sachin Nimbal
  * @since 1.0.2
@@ -36,6 +37,7 @@ public class CrudXSwaggerDTOCustomizer implements OperationCustomizer {
 
     private final CrudXMapperRegistry dtoRegistry;
     private final Map<String, Schema> componentSchemas = new LinkedHashMap<>();
+    private static final int MAX_DEPTH = 5; // Maximum nesting depth to prevent stack overflow
 
     public CrudXSwaggerDTOCustomizer(CrudXMapperRegistry dtoRegistry) {
         this.dtoRegistry = dtoRegistry;
@@ -90,9 +92,9 @@ public class CrudXSwaggerDTOCustomizer implements OperationCustomizer {
         // Generate complete schema with nested classes
         Schema<?> schema;
         if (isBatchOperation(methodName)) {
-            schema = new ArraySchema().items(generateCompleteSchema(schemaClass));
+            schema = new ArraySchema().items(generateCompleteSchema(schemaClass, new HashSet<>(), 0));
         } else {
-            schema = generateCompleteSchema(schemaClass);
+            schema = generateCompleteSchema(schemaClass, new HashSet<>(), 0);
         }
 
         mediaType.setSchema(schema);
@@ -137,10 +139,35 @@ public class CrudXSwaggerDTOCustomizer implements OperationCustomizer {
 
     /**
      * Generate complete inline schema without $ref references.
-     * This resolves all nested classes inline.
+     * This resolves all nested classes inline with circular reference protection.
+     *
+     * @param clazz The class to generate schema for
+     * @param visited Set of classes already being processed in this path
+     * @param depth Current recursion depth
+     * @return Schema for the class
      */
-    private Schema<?> generateCompleteSchema(Class<?> clazz) {
+    private Schema<?> generateCompleteSchema(Class<?> clazz, Set<Class<?>> visited, int depth) {
+        // Check for circular reference
+        if (visited.contains(clazz)) {
+            log.debug("Circular reference detected for {}, using $ref", clazz.getSimpleName());
+            Schema<?> refSchema = new Schema<>();
+            refSchema.set$ref("#/components/schemas/" + clazz.getSimpleName());
+            return refSchema;
+        }
+
+        // Check maximum depth
+        if (depth > MAX_DEPTH) {
+            log.debug("Maximum depth {} reached for {}, using $ref", MAX_DEPTH, clazz.getSimpleName());
+            Schema<?> refSchema = new Schema<>();
+            refSchema.set$ref("#/components/schemas/" + clazz.getSimpleName());
+            return refSchema;
+        }
+
         try {
+            // Add to visited set
+            Set<Class<?>> newVisited = new HashSet<>(visited);
+            newVisited.add(clazz);
+
             Schema<?> schema = new Schema<>();
             schema.setType("object");
             schema.setName(clazz.getSimpleName());
@@ -156,7 +183,7 @@ public class CrudXSwaggerDTOCustomizer implements OperationCustomizer {
                 }
 
                 String fieldName = field.getName();
-                Schema<?> fieldSchema = generateFieldSchema(field);
+                Schema<?> fieldSchema = generateFieldSchema(field, newVisited, depth + 1);
                 properties.put(fieldName, fieldSchema);
             }
 
@@ -173,7 +200,7 @@ public class CrudXSwaggerDTOCustomizer implements OperationCustomizer {
     /**
      * Generate schema for a field, handling all types including nested objects and collections.
      */
-    private Schema<?> generateFieldSchema(Field field) {
+    private Schema<?> generateFieldSchema(Field field, Set<Class<?>> visited, int depth) {
         Class<?> fieldType = field.getType();
         Type genericType = field.getGenericType();
 
@@ -182,7 +209,7 @@ public class CrudXSwaggerDTOCustomizer implements OperationCustomizer {
             if (genericType instanceof ParameterizedType paramType) {
                 Type[] typeArgs = paramType.getActualTypeArguments();
                 if (typeArgs.length > 0 && typeArgs[0] instanceof Class<?> itemClass) {
-                    Schema<?> itemSchema = generateSchemaForType(itemClass);
+                    Schema<?> itemSchema = generateSchemaForType(itemClass, visited, depth);
                     return new ArraySchema().items(itemSchema);
                 }
             }
@@ -190,13 +217,13 @@ public class CrudXSwaggerDTOCustomizer implements OperationCustomizer {
         }
 
         // Handle regular types
-        return generateSchemaForType(fieldType);
+        return generateSchemaForType(fieldType, visited, depth);
     }
 
     /**
-     * Generate schema for a specific type.
+     * Generate schema for a specific type with circular reference protection.
      */
-    private Schema<?> generateSchemaForType(Class<?> type) {
+    private Schema<?> generateSchemaForType(Class<?> type, Set<Class<?>> visited, int depth) {
         // Handle null or Object.class
         if (type == null || type == Object.class) {
             return new Schema<>().type("object");
@@ -243,17 +270,25 @@ public class CrudXSwaggerDTOCustomizer implements OperationCustomizer {
             // Fallback for other Java built-in types
             return new Schema<>().type("string");
         } else {
-            // Complex nested object - generate inline schema
-            // But first check if it has any declared fields to avoid infinite recursion
+            // Complex nested object - check for circular reference before generating
+            if (visited.contains(type)) {
+                log.debug("Circular reference detected for nested type {}, using $ref", type.getSimpleName());
+                Schema<?> refSchema = new Schema<>();
+                refSchema.set$ref("#/components/schemas/" + type.getSimpleName());
+                return refSchema;
+            }
+
+            // Check if it has any declared fields to avoid processing empty classes
             List<Field> fields = getAllFields(type);
             if (fields.isEmpty() || fields.stream().allMatch(f -> java.lang.reflect.Modifier.isStatic(f.getModifiers()))) {
                 // Empty object or only static fields
                 return new Schema<>().type("object");
             }
-            return generateCompleteSchema(type);
+
+            // Generate inline schema with circular reference protection
+            return generateCompleteSchema(type, visited, depth);
         }
     }
-
 
     /**
      * Get all fields including inherited ones.
@@ -280,9 +315,9 @@ public class CrudXSwaggerDTOCustomizer implements OperationCustomizer {
 
         Schema<?> dataSchema;
         if (isList) {
-            dataSchema = new ArraySchema().items(generateCompleteSchema(dataClass));
+            dataSchema = new ArraySchema().items(generateCompleteSchema(dataClass, new HashSet<>(), 0));
         } else {
-            dataSchema = generateCompleteSchema(dataClass);
+            dataSchema = generateCompleteSchema(dataClass, new HashSet<>(), 0);
         }
 
         Map<String, Schema> properties = new LinkedHashMap<>();

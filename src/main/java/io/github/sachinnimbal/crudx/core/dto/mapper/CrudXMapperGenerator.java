@@ -185,23 +185,32 @@ public class CrudXMapperGenerator {
             }
 
             String sourceFieldName = getSourceFieldName(targetField, fieldAnnotation);
-            Field sourceField = findFieldInHierarchy(sourceClass, sourceFieldName);
 
-            if (sourceField == null) {
+            // 🔧 FIX: Try direct field first
+            Field sourceField = findFieldInHierarchy(sourceClass, sourceFieldName);
+            Object sourceValue = null;
+
+            if (sourceField != null) {
+                // Direct field match found
+                sourceValue = getFieldValueFast(source, sourceField, sourceClass);
+            } else {
+                // 🔧 NEW: Try to find field in nested objects (for flattened DTOs)
+                sourceValue = findValueInNestedObjects(source, sourceClass, sourceFieldName, 3);
+            }
+
+            if (sourceValue == null && sourceField == null) {
+                // No source field found at all
                 handleDefaultValue(target, targetField, fieldAnnotation);
                 continue;
             }
 
             // Check excludeImmutable for Request DTOs (updateMode)
             if (updateMode && isRequestMapping && requestAnnotation.excludeImmutable()) {
-                if (isFieldImmutable(sourceField)) {
+                if (sourceField != null && isFieldImmutable(sourceField)) {
                     log.debug("Skipping immutable field: {}", sourceField.getName());
                     continue;
                 }
             }
-
-            // Use MethodHandles for 10x speed boost
-            Object sourceValue = getFieldValueFast(source, sourceField, sourceClass);
 
             // Check required fields
             if (fieldAnnotation != null && fieldAnnotation.required() && sourceValue == null) {
@@ -226,6 +235,81 @@ public class CrudXMapperGenerator {
             Object transformedValue = transformValueFast(sourceValue, targetField, fieldAnnotation, source);
             setFieldValueFast(target, targetField, targetClass, transformedValue);
         }
+    }
+
+    private Object findValueInNestedObjects(Object source, Class<?> sourceClass,
+                                            String targetFieldName, int maxDepth) throws Throwable {
+        return searchNestedForField(source, sourceClass, targetFieldName, 0, maxDepth, new HashSet<>());
+    }
+
+    private Object searchNestedForField(Object obj, Class<?> clazz, String fieldName,
+                                        int currentDepth, int maxDepth, Set<Class<?>> visited) throws Throwable {
+        if (obj == null || currentDepth >= maxDepth || visited.contains(clazz)) {
+            return null;
+        }
+
+        visited.add(clazz);
+
+        // Get all fields of this class
+        Field[] fields = getCachedFields(clazz);
+
+        for (Field field : fields) {
+            if (Modifier.isStatic(field.getModifiers())) {
+                continue;
+            }
+
+            // Check if this nested object might contain our target field
+            if (isComplexTypeField(field)) {
+                try {
+                    Object nestedValue = getFieldValueFast(obj, field, clazz);
+                    if (nestedValue != null) {
+                        Class<?> nestedClass = nestedValue.getClass();
+
+                        // Check if nested object has the target field
+                        Field targetField = findFieldInHierarchy(nestedClass, fieldName);
+                        if (targetField != null) {
+                            Object value = getFieldValueFast(nestedValue, targetField, nestedClass);
+                            if (value != null) {
+                                log.debug("Found field '{}' in nested object '{}'",
+                                        fieldName, field.getName());
+                                return value;
+                            }
+                        }
+
+                        // Recurse deeper
+                        Object deepValue = searchNestedForField(nestedValue, nestedClass, fieldName,
+                                currentDepth + 1, maxDepth, visited);
+                        if (deepValue != null) {
+                            return deepValue;
+                        }
+                    }
+                } catch (Exception e) {
+                    // Continue searching in other fields
+                    log.trace("Error accessing nested field {}: {}", field.getName(), e.getMessage());
+                }
+            }
+        }
+
+        visited.remove(clazz);
+        return null;
+    }
+
+    private boolean isComplexTypeField(Field field) {
+        Class<?> fieldType = field.getType();
+
+        // Skip primitives and common types
+        if (fieldType.isPrimitive() ||
+                fieldType.getName().startsWith("java.lang.") ||
+                fieldType.getName().startsWith("java.util.") ||
+                fieldType.getName().startsWith("java.time.") ||
+                fieldType.getName().startsWith("java.math.") ||
+                fieldType.isEnum() ||
+                Collection.class.isAssignableFrom(fieldType) ||
+                Map.class.isAssignableFrom(fieldType)) {
+            return false;
+        }
+
+        return true;
     }
 
     /**
