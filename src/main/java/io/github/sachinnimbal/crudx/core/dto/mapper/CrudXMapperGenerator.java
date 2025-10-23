@@ -251,7 +251,7 @@ public class CrudXMapperGenerator {
     }
 
     /**
-     * 🚀 ULTRA-FAST PATH RESOLUTION - 50% faster with early exits
+     * 🚀 ULTRA-FAST PATH RESOLUTION with better caching
      */
     private FieldPathInfo resolveFieldPathIntelligent(Class<?> sourceClass, Field targetField,
                                                       CrudXField fieldAnnotation,
@@ -261,7 +261,7 @@ public class CrudXMapperGenerator {
         String sourceFieldName = fieldAnnotation != null && !fieldAnnotation.source().isEmpty()
                 ? fieldAnnotation.source() : targetFieldName;
 
-        // 🚀 CACHE KEY with source field name
+        // 🚀 CACHE KEY
         String cacheKey = sourceClass.getName() + "#" + sourceFieldName + "#" + direction;
         FieldPathInfo cached = pathResolutionCache.get(cacheKey);
         if (cached != null) return cached;
@@ -285,16 +285,16 @@ public class CrudXMapperGenerator {
             return result;
         }
 
-        // 🔥 PRIORITY 3: Search in nested objects (depth-first)
-        result = searchNestedPathOptimized(sourceClass, sourceFieldName, new ArrayList<>(),
-                MAX_SEARCH_DEPTH, 0, new HashSet<>());
+        // 🔥 PRIORITY 3: Flattened field decomposition (customerName → customer.name)
+        result = tryFlattenedDecompositionOptimized(sourceClass, sourceFieldName);
         if (result != null) {
             pathResolutionCache.put(cacheKey, result);
             return result;
         }
 
-        // 🔥 PRIORITY 4: Flattened field decomposition (patientFirstName → patient.firstName)
-        result = tryFlattenedDecompositionOptimized(sourceClass, sourceFieldName);
+        // 🔥 PRIORITY 4: Search in nested objects (deep search)
+        result = searchNestedPathOptimized(sourceClass, sourceFieldName, new ArrayList<>(),
+                MAX_SEARCH_DEPTH, 0, new HashSet<>());
         if (result != null) {
             pathResolutionCache.put(cacheKey, result);
             return result;
@@ -367,8 +367,14 @@ public class CrudXMapperGenerator {
         return null;
     }
 
+    /**
+     * 🔥 OPTIMIZED FLATTENED DECOMPOSITION
+     * Examples:
+     * - customerName → customer.name
+     * - shippingCity → shipping.address.city OR shippingDetails.address.city
+     */
     private FieldPathInfo tryFlattenedDecompositionOptimized(Class<?> sourceClass, String fieldName) {
-        // Smart prefix detection
+        // Try all possible CamelCase split points
         for (int i = 1; i < fieldName.length(); i++) {
             if (Character.isUpperCase(fieldName.charAt(i))) {
                 String prefix = fieldName.substring(0, i);
@@ -376,16 +382,43 @@ public class CrudXMapperGenerator {
 
                 Field prefixField = findFieldInHierarchy(sourceClass, prefix);
                 if (prefixField != null && isComplexType(prefixField.getType())) {
-                    FieldPathInfo result = searchNestedPathOptimized(
-                            prefixField.getType(), suffix, Collections.singletonList(prefix),
-                            MAX_SEARCH_DEPTH, 0, new HashSet<>()
+                    Class<?> prefixType = prefixField.getType();
+
+                    // STRATEGY A: Direct match in nested object
+                    Field suffixField = findFieldInHierarchy(prefixType, suffix);
+                    if (suffixField != null) {
+                        return new FieldPathInfo(
+                                Arrays.asList(prefix, suffix),
+                                suffixField,
+                                true
+                        );
+                    }
+
+                    // STRATEGY B: Recursive decomposition (shippingCity → shipping.address.city)
+                    FieldPathInfo deepPath = tryFlattenedDecompositionOptimized(prefixType, suffix);
+                    if (deepPath != null) {
+                        List<String> fullPath = new ArrayList<>();
+                        fullPath.add(prefix);
+                        fullPath.addAll(deepPath.path);
+                        return new FieldPathInfo(fullPath, deepPath.finalField, true);
+                    }
+
+                    // STRATEGY C: Search all nested objects
+                    FieldPathInfo searchPath = searchNestedPathOptimized(
+                            prefixType,
+                            suffix,
+                            Collections.singletonList(prefix),
+                            MAX_SEARCH_DEPTH,
+                            0,
+                            new HashSet<>()
                     );
-                    if (result != null) {
-                        return result;
+                    if (searchPath != null) {
+                        return searchPath;
                     }
                 }
             }
         }
+
         return null;
     }
 
