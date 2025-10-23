@@ -98,44 +98,65 @@ public class CrudXMapperRegistry {
         scanner.addIncludeFilter(new AnnotationTypeFilter(CrudXRequest.class));
         scanner.addIncludeFilter(new AnnotationTypeFilter(CrudXResponse.class));
 
+        // 🔥 PARALLEL SCANNING for faster startup
         String[] packages = basePackages.split(",");
-        int totalDTOs = 0;
-
-        for (String pkg : packages) {
-            pkg = pkg.trim();
-            if (pkg.isEmpty()) continue;
-
-            log.debug("📂 Scanning package: {}", pkg);
-
-            try {
-                var candidates = scanner.findCandidateComponents(pkg);
-
-                for (var beanDef : candidates) {
-                    try {
-                        Class<?> dtoClass = Class.forName(beanDef.getBeanClassName());
-
-                        if (dtoClass.isAnnotationPresent(CrudXRequest.class)) {
-                            registerRequestDTO(dtoClass);
-                            totalDTOs++;
-                        }
-
-                        if (dtoClass.isAnnotationPresent(CrudXResponse.class)) {
-                            registerResponseDTO(dtoClass);
-                            totalDTOs++;
-                        }
-                    } catch (ClassNotFoundException e) {
-                        log.error("❌ Failed to load DTO class: {}", beanDef.getBeanClassName(), e);
-                    }
-                }
-
-                log.debug("   ✓ Found {} DTO(s) in {}", candidates.size(), pkg);
-
-            } catch (Exception e) {
-                log.error("❌ Error scanning package {}: {}", pkg, e.getMessage());
-            }
-        }
+        int totalDTOs = packages.length > 1 ?
+                scanPackagesParallel(scanner, packages) :
+                scanPackagesSequential(scanner, packages);
 
         log.info("📊 Total DTOs discovered: {}", totalDTOs);
+    }
+
+    private int scanPackagesParallel(ClassPathScanningCandidateComponentProvider scanner,
+                                     String[] packages) {
+        return Arrays.stream(packages)
+                .parallel()
+                .mapToInt(pkg -> scanSinglePackage(scanner, pkg.trim()))
+                .sum();
+    }
+
+    private int scanPackagesSequential(ClassPathScanningCandidateComponentProvider scanner,
+                                       String[] packages) {
+        int total = 0;
+        for (String pkg : packages) {
+            total += scanSinglePackage(scanner, pkg.trim());
+        }
+        return total;
+    }
+
+    private int scanSinglePackage(ClassPathScanningCandidateComponentProvider scanner, String pkg) {
+        if (pkg.isEmpty()) return 0;
+
+        log.debug("📂 Scanning package: {}", pkg);
+        int count = 0;
+
+        try {
+            var candidates = scanner.findCandidateComponents(pkg);
+
+            for (var beanDef : candidates) {
+                try {
+                    Class<?> dtoClass = Class.forName(beanDef.getBeanClassName());
+
+                    if (dtoClass.isAnnotationPresent(CrudXRequest.class)) {
+                        registerRequestDTO(dtoClass);
+                        count++;
+                    }
+
+                    if (dtoClass.isAnnotationPresent(CrudXResponse.class)) {
+                        registerResponseDTO(dtoClass);
+                        count++;
+                    }
+                } catch (ClassNotFoundException e) {
+                    log.error("❌ Failed to load DTO: {}", beanDef.getBeanClassName());
+                }
+            }
+
+            log.debug("   ✓ Found {} DTO(s) in {}", candidates.size(), pkg);
+        } catch (Exception e) {
+            log.error("❌ Error scanning package {}: {}", pkg, e.getMessage());
+        }
+
+        return count;
     }
 
     /**

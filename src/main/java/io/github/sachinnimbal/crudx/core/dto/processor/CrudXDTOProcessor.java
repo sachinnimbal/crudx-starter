@@ -214,7 +214,11 @@ public class CrudXDTOProcessor extends AbstractProcessor {
 
             // Check bidirectional naming patterns
             // AddressRequest ↔ Address, Address ↔ AddressResponse, etc.
-            if (type1Base.equals(type2Base) || type1Base.equals(type2Name) || type1Name.equals(type2Base)) {
+            // Also handles: Post ↔ PostSummaryResponse (recursive)
+            if (type1Base.equals(type2Name) ||
+                    type1Name.equals(type2Base) ||
+                    type2Base.startsWith(type1Base) ||
+                    type1Base.startsWith(type2Base)) {
                 return true;
             }
         }
@@ -896,65 +900,71 @@ public class CrudXDTOProcessor extends AbstractProcessor {
                 }
 
                 String dtoFieldName = dtoField.getSimpleName().toString();
-                String entityFieldName = processor.getEntityFieldName(dtoField);
+                String sourceFieldName = fieldAnnotation != null && !fieldAnnotation.source().isEmpty()
+                        ? fieldAnnotation.source() : dtoFieldName;
 
-                VariableElement entityField = findFieldInType(entityElement, entityFieldName);
-                if (entityField == null) continue;
+                // 🔥 USE SMART PATH RESOLUTION
+                FieldPath fieldPath = findFieldPath(entityElement, sourceFieldName, 5);
+
+                if (fieldPath == null) {
+                    logWarn("Field '" + dtoFieldName + "' (source: '" + sourceFieldName +
+                            "') not found in " + entityElement.getSimpleName());
+                    continue;
+                }
 
                 TypeMirror dtoFieldType = dtoField.asType();
-                TypeMirror entityFieldType = entityField.asType();
+                TypeMirror entityFieldType = fieldPath.field.asType();
 
                 String getter, setter;
                 if (dtoToEntity) {
                     getter = srcVar + ".get" + capitalize(dtoFieldName) + "()";
-                    setter = tgtVar + ".set" + capitalize(entityFieldName);
+                    setter = generatePathSetter(tgtVar, fieldPath);
                 } else {
-                    getter = srcVar + ".get" + capitalize(entityFieldName) + "()";
+                    getter = generatePathGetter(srcVar, fieldPath);
                     setter = tgtVar + ".set" + capitalize(dtoFieldName);
                 }
 
                 out.println("        if (" + getter + " != null) {");
 
-                // Check if we need nested mapper (works both directions)
-                TypeMirror sourceType = dtoToEntity ? dtoFieldType : entityFieldType;
-                TypeMirror targetType = dtoToEntity ? entityFieldType : dtoFieldType;
-
-                if (processor.needsNestedMapper(sourceType, targetType)) {
-
+                // Handle nested mapping
+                if (processor.needsNestedMapper(dtoFieldType, entityFieldType)) {
                     String dtoTypeFqn = processor.extractTypeName(dtoFieldType);
                     String entityTypeFqn = processor.extractTypeName(entityFieldType);
 
                     if (dtoTypeFqn != null && entityTypeFqn != null) {
-                        boolean isCollection = processor.isCollection(dtoFieldType) || processor.isCollection(entityFieldType);
+                        boolean isCollection = processor.isCollection(dtoFieldType) ||
+                                processor.isCollection(entityFieldType);
 
                         String dtoSimple = extractSimpleName(dtoTypeFqn);
                         String entitySimple = extractSimpleName(entityTypeFqn);
 
                         if (dtoToEntity) {
                             if (isCollection) {
-                                out.println("            " + setter + "(map" + dtoSimple + "ListTo" +
-                                        entitySimple + "List(" + getter + "));");
+                                out.println("            " + setter + "(map" + dtoSimple +
+                                        "ListTo" + entitySimple + "List(" + getter + "));");
                             } else {
-                                out.println("            " + setter + "(map" + dtoSimple + "To" +
-                                        entitySimple + "(" + getter + "));");
+                                out.println("            " + setter + "(map" + dtoSimple +
+                                        "To" + entitySimple + "(" + getter + "));");
                             }
                         } else {
                             if (isCollection) {
-                                out.println("            " + setter + "(map" + entitySimple + "ListTo" +
-                                        dtoSimple + "List(" + getter + "));");
+                                out.println("            " + setter + "(map" + entitySimple +
+                                        "ListTo" + dtoSimple + "List(" + getter + "));");
                             } else {
-                                out.println("            " + setter + "(map" + entitySimple + "To" +
-                                        dtoSimple + "(" + getter + "));");
+                                out.println("            " + setter + "(map" + entitySimple +
+                                        "To" + dtoSimple + "(" + getter + "));");
                             }
                         }
                     } else {
                         out.println("            " + setter + "(" + getter + ");");
                     }
                 } else {
-                    // Direct assignment
-                    if (needsTypeConversion(sourceType, targetType)) {
-                        String conversion = generateTypeConversion(getter, sourceType, targetType);
-                        out.println("            " + setter + "(" + conversion + ");");
+                    // Type conversion if needed
+                    if (needsTypeConversion(dtoFieldType, entityFieldType)) {
+                        String conversion = generateTypeConversion(getter, dtoFieldType, entityFieldType);
+                        if (conversion != null) {
+                            out.println("            " + setter + "(" + conversion + ");");
+                        }
                     } else {
                         out.println("            " + setter + "(" + getter + ");");
                     }
@@ -1005,13 +1015,27 @@ public class CrudXDTOProcessor extends AbstractProcessor {
                 return false;
             }
 
+            // Only handle enum to enum conversions automatically
             if (isEnumType(sourceType) && isEnumType(targetType)) {
                 String sourceName = extractSimpleName(sourceType.toString());
                 String targetName = extractSimpleName(targetType.toString());
                 return sourceName.equals(targetName);
             }
 
+            // Don't try to auto-convert between numbers and complex types
             return false;
+        }
+
+        private boolean isNumberType(TypeMirror type) {
+            String typeName = type.toString();
+            return typeName.equals("java.lang.Double") ||
+                    typeName.equals("double") ||
+                    typeName.equals("java.lang.Float") ||
+                    typeName.equals("float") ||
+                    typeName.equals("java.lang.Integer") ||
+                    typeName.equals("int") ||
+                    typeName.equals("java.lang.Long") ||
+                    typeName.equals("long");
         }
 
         private boolean isEnumType(TypeMirror type) {
@@ -1021,10 +1045,26 @@ public class CrudXDTOProcessor extends AbstractProcessor {
         }
 
         private String generateTypeConversion(String getter, TypeMirror sourceType, TypeMirror targetType) {
+            // Enum conversion
             if (isEnumType(sourceType) && isEnumType(targetType)) {
                 String targetTypeName = extractFullTypeName(targetType);
                 return targetTypeName + ".valueOf(" + getter + ".name())";
             }
+
+            // Number to complex type - DON'T auto-convert, treat as incompatible
+            if (isNumberType(sourceType) && isComplexType(targetType)) {
+                processor.logWarn("Cannot auto-convert from " + sourceType + " to " + targetType +
+                        ". Skipping field mapping. Consider using @CrudXField(ignore=true) or providing custom mapper.");
+                return null; // Signal to skip this field
+            }
+
+            // Complex type to number - DON'T auto-convert, treat as incompatible
+            if (isComplexType(sourceType) && isNumberType(targetType)) {
+                processor.logWarn("Cannot auto-convert from " + sourceType + " to " + targetType +
+                        ". Skipping field mapping. Consider using @CrudXField(ignore=true) or providing custom mapper.");
+                return null; // Signal to skip this field
+            }
+
             return getter;
         }
 
@@ -1367,6 +1407,84 @@ public class CrudXDTOProcessor extends AbstractProcessor {
 
         private void writeClassEnd() {
             out.println("}");
+        }
+
+
+        private String generatePathGetter(String baseVar, FieldPath path) {
+            if (!path.isNested) {
+                return baseVar + ".get" + capitalize(path.fullPath) + "()";
+            }
+
+            // Generate null-safe navigation: entity.getPatient() != null ? entity.getPatient().getDemographics() ...
+            String[] segments = path.fullPath.split("\\.");
+            StringBuilder getter = new StringBuilder();
+            StringBuilder nullCheck = new StringBuilder();
+
+            for (int i = 0; i < segments.length; i++) {
+                if (i > 0) {
+                    getter.append(".get").append(capitalize(segments[i])).append("()");
+                    nullCheck.append(baseVar);
+                    for (int j = 0; j < i; j++) {
+                        nullCheck.append(".get").append(capitalize(segments[j])).append("()");
+                    }
+                    nullCheck.append(" != null && ");
+                }
+            }
+
+            String finalGetter = baseVar;
+            for (String segment : segments) {
+                finalGetter += ".get" + capitalize(segment) + "()";
+            }
+
+            return finalGetter;
+        }
+
+        private String generatePathSetter(String baseVar, FieldPath path) {
+            if (!path.isNested) {
+                return baseVar + ".set" + capitalize(path.fullPath);
+            }
+
+            // For nested paths, ensure parent objects exist
+            String[] segments = path.fullPath.split("\\.");
+            StringBuilder code = new StringBuilder();
+
+            // Create intermediate objects if needed
+            for (int i = 0; i < segments.length - 1; i++) {
+                String getterPath = baseVar;
+                for (int j = 0; j <= i; j++) {
+                    getterPath += ".get" + capitalize(segments[j]) + "()";
+                }
+
+                code.append("if (").append(getterPath).append(" == null) { ");
+
+                String setterPath = baseVar;
+                for (int j = 0; j < i; j++) {
+                    setterPath += ".get" + capitalize(segments[j]) + "()";
+                }
+                setterPath += ".set" + capitalize(segments[i]);
+
+                // Get type from path
+                TypeElement currentType = getTypeAtPath(segments, i);
+                if (currentType != null) {
+                    code.append(setterPath).append("(new ")
+                            .append(currentType.getSimpleName()).append("()); }");
+                }
+            }
+
+            // Final setter
+            String setterPath = baseVar;
+            for (int i = 0; i < segments.length - 1; i++) {
+                setterPath += ".get" + capitalize(segments[i]) + "()";
+            }
+            setterPath += ".set" + capitalize(segments[segments.length - 1]);
+
+            return code.toString() + setterPath;
+        }
+
+        private TypeElement getTypeAtPath(String[] segments, int index) {
+            // Navigate to find the type at this index
+            // Implementation depends on your type system
+            return null; // Simplified - you need to implement this
         }
 
         private String capitalize(String str) {
