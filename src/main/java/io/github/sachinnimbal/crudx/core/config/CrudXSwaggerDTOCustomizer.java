@@ -1,5 +1,6 @@
 package io.github.sachinnimbal.crudx.core.config;
 
+import io.github.sachinnimbal.crudx.core.dto.annotations.CrudXRequest;
 import io.github.sachinnimbal.crudx.core.dto.mapper.CrudXMapperRegistry;
 import io.github.sachinnimbal.crudx.core.enums.CrudXOperation;
 import io.swagger.v3.oas.models.Operation;
@@ -20,14 +21,7 @@ import java.lang.reflect.Type;
 import java.util.*;
 
 /**
- * Customizes Swagger/OpenAPI to show complete schemas with nested objects.
- * <p>
- * Fixes:
- * - Resolves all nested class references (Address, Order, CrudXAudit)
- * - Registers component schemas for inner classes
- * - Shows complete entity schema when DTOs are not configured
- * - Handles collections and complex nested structures
- * - Prevents infinite recursion with circular reference detection
+ * Enhanced Swagger customizer with proper audit field handling.
  *
  * @author Sachin Nimbal
  * @since 1.0.2
@@ -36,8 +30,13 @@ import java.util.*;
 public class CrudXSwaggerDTOCustomizer implements OperationCustomizer {
 
     private final CrudXMapperRegistry dtoRegistry;
-    private final Map<String, Schema> componentSchemas = new LinkedHashMap<>();
-    private static final int MAX_DEPTH = 5; // Maximum nesting depth to prevent stack overflow
+    private static final int MAX_DEPTH = 5;
+
+    // Define audit fields that can be user-provided
+    private static final Set<String> USER_PROVIDABLE_AUDIT_FIELDS = Set.of("createdBy", "updatedBy");
+
+    // Define audit fields that are system-managed
+    private static final Set<String> SYSTEM_AUDIT_FIELDS = Set.of("createdAt", "updatedAt");
 
     public CrudXSwaggerDTOCustomizer(CrudXMapperRegistry dtoRegistry) {
         this.dtoRegistry = dtoRegistry;
@@ -87,14 +86,42 @@ public class CrudXSwaggerDTOCustomizer implements OperationCustomizer {
         Class<?> schemaClass = requestDtoClass.orElse(entityClass);
         boolean usingDto = requestDtoClass.isPresent();
 
-        log.debug("✓ Using {} schema: {} for {}", usingDto ? "Request DTO" : "Entity", schemaClass.getSimpleName(), crudOperation);
+        // 🔧 Get annotation from the ACTUAL DTO class (or entity if no DTO)
+        CrudXRequest annotation = schemaClass.getAnnotation(CrudXRequest.class);
 
-        // Generate complete schema with nested classes
+        // Determine filtering flags
+        boolean excludeAudit;
+        boolean excludeImmutable;
+
+        if (annotation != null) {
+            // Use explicit annotation values
+            excludeAudit = annotation.excludeAudit();
+            excludeImmutable = annotation.excludeImmutable();
+            log.debug("✓ Request DTO annotation found: excludeAudit={}, excludeImmutable={}",
+                    excludeAudit, excludeImmutable);
+        } else {
+            // Default behavior when no annotation (using entity directly)
+            excludeAudit = false;  // Show all fields by default
+            excludeImmutable = false;
+            log.debug("✓ No @CrudXRequest annotation, using defaults: excludeAudit=false, excludeImmutable=false");
+        }
+
+        log.debug("✓ Using {} schema: {} for {} (excludeAudit={}, excludeImmutable={})",
+                usingDto ? "Request DTO" : "Entity",
+                schemaClass.getSimpleName(),
+                crudOperation,
+                excludeAudit,
+                excludeImmutable);
+
+        // Generate schema with filtering
         Schema<?> schema;
         if (isBatchOperation(methodName)) {
-            schema = new ArraySchema().items(generateCompleteSchema(schemaClass, new HashSet<>(), 0));
+            schema = new ArraySchema().items(
+                    generateCompleteSchema(schemaClass, entityClass, new HashSet<>(), 0,
+                            excludeAudit, excludeImmutable, true));
         } else {
-            schema = generateCompleteSchema(schemaClass, new HashSet<>(), 0);
+            schema = generateCompleteSchema(schemaClass, entityClass, new HashSet<>(), 0,
+                    excludeAudit, excludeImmutable, true);
         }
 
         mediaType.setSchema(schema);
@@ -110,8 +137,10 @@ public class CrudXSwaggerDTOCustomizer implements OperationCustomizer {
         Class<?> schemaClass = responseDtoClass.orElse(entityClass);
         boolean usingDto = responseDtoClass.isPresent();
 
-        log.debug("✓ Using {} schema: {} for {}", usingDto ? "Response DTO" : "Entity", schemaClass.getSimpleName(), crudOperation);
+        log.debug("✓ Using {} schema: {} for {}", usingDto ? "Response DTO" : "Entity",
+                schemaClass.getSimpleName(), crudOperation);
 
+        // Response DTOs don't need audit filtering in schema
         for (Map.Entry<String, ApiResponse> entry : operation.getResponses().entrySet()) {
             String statusCode = entry.getKey();
 
@@ -125,9 +154,9 @@ public class CrudXSwaggerDTOCustomizer implements OperationCustomizer {
                     if (mediaType != null) {
                         Schema<?> wrappedSchema;
                         if (isBatchOperation(methodName) || isGetAllOperation(methodName)) {
-                            wrappedSchema = createApiResponseSchema(schemaClass, true);
+                            wrappedSchema = createApiResponseSchema(schemaClass, entityClass, true);
                         } else {
-                            wrappedSchema = createApiResponseSchema(schemaClass, false);
+                            wrappedSchema = createApiResponseSchema(schemaClass, entityClass, false);
                         }
 
                         mediaType.setSchema(wrappedSchema);
@@ -138,44 +167,36 @@ public class CrudXSwaggerDTOCustomizer implements OperationCustomizer {
     }
 
     /**
-     * Generate complete inline schema without $ref references.
-     * This resolves all nested classes inline with circular reference protection.
-     *
-     * @param clazz The class to generate schema for
-     * @param visited Set of classes already being processed in this path
-     * @param depth Current recursion depth
-     * @return Schema for the class
+     * Generate complete schema with audit and immutable field filtering.
      */
-    private Schema<?> generateCompleteSchema(Class<?> clazz, Set<Class<?>> visited, int depth) {
-        // Check for circular reference
-        if (visited.contains(clazz)) {
-            log.debug("Circular reference detected for {}, using $ref", clazz.getSimpleName());
+    private Schema<?> generateCompleteSchema(Class<?> schemaClass, Class<?> entityClass,
+                                             Set<Class<?>> visited, int depth,
+                                             boolean excludeAudit, boolean excludeImmutable,
+                                             boolean isRequest) {
+        if (visited.contains(schemaClass)) {
+            log.debug("Circular reference detected for {}, using $ref", schemaClass.getSimpleName());
             Schema<?> refSchema = new Schema<>();
-            refSchema.set$ref("#/components/schemas/" + clazz.getSimpleName());
+            refSchema.set$ref("#/components/schemas/" + schemaClass.getSimpleName());
             return refSchema;
         }
 
-        // Check maximum depth
         if (depth > MAX_DEPTH) {
-            log.debug("Maximum depth {} reached for {}, using $ref", MAX_DEPTH, clazz.getSimpleName());
+            log.debug("Maximum depth {} reached for {}, using $ref", MAX_DEPTH, schemaClass.getSimpleName());
             Schema<?> refSchema = new Schema<>();
-            refSchema.set$ref("#/components/schemas/" + clazz.getSimpleName());
+            refSchema.set$ref("#/components/schemas/" + schemaClass.getSimpleName());
             return refSchema;
         }
 
         try {
-            // Add to visited set
             Set<Class<?>> newVisited = new HashSet<>(visited);
-            newVisited.add(clazz);
+            newVisited.add(schemaClass);
 
             Schema<?> schema = new Schema<>();
             schema.setType("object");
-            schema.setName(clazz.getSimpleName());
+            schema.setName(schemaClass.getSimpleName());
 
             Map<String, Schema> properties = new LinkedHashMap<>();
-
-            // Get all fields including inherited ones
-            List<Field> allFields = getAllFields(clazz);
+            List<Field> allFields = getAllFields(schemaClass);
 
             for (Field field : allFields) {
                 if (java.lang.reflect.Modifier.isStatic(field.getModifiers())) {
@@ -183,7 +204,41 @@ public class CrudXSwaggerDTOCustomizer implements OperationCustomizer {
                 }
 
                 String fieldName = field.getName();
-                Schema<?> fieldSchema = generateFieldSchema(field, newVisited, depth + 1);
+
+                // 🔧 KEY FIX: Only filter if isRequest AND filtering is enabled
+                if (isRequest && excludeAudit && shouldExcludeAuditField(fieldName, entityClass)) {
+                    log.debug("Excluding audit field '{}' from schema (excludeAudit=true)", fieldName);
+                    continue;
+                }
+
+                if (isRequest && excludeImmutable && isFieldImmutable(field, entityClass, fieldName)) {
+                    log.debug("Excluding immutable field '{}' from schema (excludeImmutable=true)", fieldName);
+                    continue;
+                }
+
+                // 🔧 NEW: Show audit fields from entity when excludeAudit=false
+                if (isRequest && !excludeAudit) {
+                    // Check if this field needs to be fetched from entity's audit object
+                    Field entityField = findFieldInHierarchy(entityClass, fieldName);
+                    if (entityField == null && isAuditFieldName(fieldName)) {
+                        // Field might be in entity's audit object
+                        Field auditField = findFieldInHierarchy(entityClass, "audit");
+                        if (auditField != null) {
+                            Field auditSubField = findFieldInHierarchy(auditField.getType(), fieldName);
+                            if (auditSubField != null) {
+                                log.debug("✓ Including audit field '{}' from entity.audit (excludeAudit=false)",
+                                        fieldName);
+                                Schema<?> fieldSchema = generateFieldSchema(auditSubField, newVisited,
+                                        depth + 1, excludeAudit, excludeImmutable, isRequest);
+                                properties.put(fieldName, fieldSchema);
+                                continue;
+                            }
+                        }
+                    }
+                }
+
+                Schema<?> fieldSchema = generateFieldSchema(field, newVisited, depth + 1,
+                        excludeAudit, excludeImmutable, isRequest);
                 properties.put(fieldName, fieldSchema);
             }
 
@@ -192,39 +247,130 @@ public class CrudXSwaggerDTOCustomizer implements OperationCustomizer {
 
         } catch (Exception e) {
             log.warn("Failed to generate complete schema for {}: {}",
-                    clazz.getSimpleName(), e.getMessage());
-            return new Schema<>().type("object").name(clazz.getSimpleName());
+                    schemaClass.getSimpleName(), e.getMessage());
+            return new Schema<>().type("object").name(schemaClass.getSimpleName());
         }
     }
 
     /**
-     * Generate schema for a field, handling all types including nested objects and collections.
+     * Check if field name is an audit field name.
      */
-    private Schema<?> generateFieldSchema(Field field, Set<Class<?>> visited, int depth) {
+    private boolean isAuditFieldName(String fieldName) {
+        return USER_PROVIDABLE_AUDIT_FIELDS.contains(fieldName) ||
+                SYSTEM_AUDIT_FIELDS.contains(fieldName);
+    }
+
+    /**
+     * Determine if an audit field should be excluded from schema.
+     * ⚠️ This is only called when excludeAudit = true
+     */
+    private boolean shouldExcludeAuditField(String fieldName, Class<?> entityClass) {
+        // Never exclude user-providable fields
+        if (USER_PROVIDABLE_AUDIT_FIELDS.contains(fieldName)) {
+            log.debug("Keeping user-providable audit field: {}", fieldName);
+            return false;
+        }
+
+        // Exclude system-managed fields
+        if (SYSTEM_AUDIT_FIELDS.contains(fieldName)) {
+            return true;
+        }
+
+        // Exclude the "audit" object itself if it exists
+        if ("audit".equals(fieldName)) {
+            Field auditField = findFieldInHierarchy(entityClass, "audit");
+            if (auditField != null && isCrudXAuditType(auditField.getType())) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Check if a field is marked as immutable.
+     */
+    private boolean isFieldImmutable(Field dtoField, Class<?> entityClass, String fieldName) {
+        // Always exclude 'id' field when excludeImmutable = true
+        if ("id".equals(fieldName)) {
+            return true;
+        }
+
+        // Check DTO field for @CrudXImmutable
+        if (hasImmutableAnnotation(dtoField)) {
+            return true;
+        }
+
+        // Check corresponding entity field
+        Field entityField = findFieldInHierarchy(entityClass, fieldName);
+        if (entityField != null && hasImmutableAnnotation(entityField)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    @SuppressWarnings("unchecked")
+    private boolean hasImmutableAnnotation(Field field) {
+        try {
+            Class<?> immutableAnnotation = Class.forName(
+                    "io.github.sachinnimbal.crudx.core.annotations.CrudXImmutable");
+            return field.isAnnotationPresent(
+                    (Class<? extends java.lang.annotation.Annotation>) immutableAnnotation);
+        } catch (ClassNotFoundException e) {
+            return false;
+        }
+    }
+
+    private Field findFieldInHierarchy(Class<?> clazz, String fieldName) {
+        Class<?> current = clazz;
+        while (current != null && current != Object.class) {
+            try {
+                return current.getDeclaredField(fieldName);
+            } catch (NoSuchFieldException e) {
+                current = current.getSuperclass();
+            }
+        }
+        return null;
+    }
+
+    private boolean isCrudXAuditType(Class<?> type) {
+        if (type == null) return false;
+        if (type.getName().endsWith(".CrudXAudit")) return true;
+        return isCrudXAuditType(type.getSuperclass());
+    }
+
+    /**
+     * Generate field schema with filtering support.
+     */
+    private Schema<?> generateFieldSchema(Field field, Set<Class<?>> visited, int depth,
+                                          boolean excludeAudit, boolean excludeImmutable,
+                                          boolean isRequest) {
         Class<?> fieldType = field.getType();
         Type genericType = field.getGenericType();
 
-        // Handle collections (List, Set, etc.)
         if (Collection.class.isAssignableFrom(fieldType)) {
             if (genericType instanceof ParameterizedType paramType) {
                 Type[] typeArgs = paramType.getActualTypeArguments();
                 if (typeArgs.length > 0 && typeArgs[0] instanceof Class<?> itemClass) {
-                    Schema<?> itemSchema = generateSchemaForType(itemClass, visited, depth);
+                    Schema<?> itemSchema = generateSchemaForType(itemClass, visited, depth,
+                            excludeAudit, excludeImmutable, isRequest);
                     return new ArraySchema().items(itemSchema);
                 }
             }
             return new ArraySchema().items(new Schema<>().type("object"));
         }
 
-        // Handle regular types
-        return generateSchemaForType(fieldType, visited, depth);
+        return generateSchemaForType(fieldType, visited, depth, excludeAudit,
+                excludeImmutable, isRequest);
     }
 
     /**
-     * Generate schema for a specific type with circular reference protection.
+     * Generate schema for a type with filtering.
      */
-    private Schema<?> generateSchemaForType(Class<?> type, Set<Class<?>> visited, int depth) {
-        // Handle null or Object.class
+    private Schema<?> generateSchemaForType(Class<?> type, Set<Class<?>> visited, int depth,
+                                            boolean excludeAudit, boolean excludeImmutable,
+                                            boolean isRequest) {
         if (type == null || type == Object.class) {
             return new Schema<>().type("object");
         }
@@ -263,36 +409,29 @@ public class CrudXSwaggerDTOCustomizer implements OperationCustomizer {
             }
             enumSchema.setEnum(enumValues);
             return enumSchema;
-        } else if (type.isPrimitive()) {
-            // Handle other primitive types not covered above
-            return new Schema<>().type("string");
-        } else if (type.getPackage() != null && type.getPackage().getName().startsWith("java.")) {
-            // Fallback for other Java built-in types
+        } else if (type.isPrimitive() ||
+                (type.getPackage() != null && type.getPackage().getName().startsWith("java."))) {
             return new Schema<>().type("string");
         } else {
-            // Complex nested object - check for circular reference before generating
+            // Complex nested object
             if (visited.contains(type)) {
-                log.debug("Circular reference detected for nested type {}, using $ref", type.getSimpleName());
                 Schema<?> refSchema = new Schema<>();
                 refSchema.set$ref("#/components/schemas/" + type.getSimpleName());
                 return refSchema;
             }
 
-            // Check if it has any declared fields to avoid processing empty classes
             List<Field> fields = getAllFields(type);
-            if (fields.isEmpty() || fields.stream().allMatch(f -> java.lang.reflect.Modifier.isStatic(f.getModifiers()))) {
-                // Empty object or only static fields
+            if (fields.isEmpty() || fields.stream().allMatch(
+                    f -> java.lang.reflect.Modifier.isStatic(f.getModifiers()))) {
                 return new Schema<>().type("object");
             }
 
-            // Generate inline schema with circular reference protection
-            return generateCompleteSchema(type, visited, depth);
+            // 🔧 Don't pass entity class for nested objects - use type itself
+            return generateCompleteSchema(type, type, visited, depth,
+                    false, false, false); // Nested objects don't filter
         }
     }
 
-    /**
-     * Get all fields including inherited ones.
-     */
     private List<Field> getAllFields(Class<?> clazz) {
         List<Field> fields = new ArrayList<>();
         Class<?> current = clazz;
@@ -305,19 +444,20 @@ public class CrudXSwaggerDTOCustomizer implements OperationCustomizer {
         return fields;
     }
 
-    /**
-     * Create ApiResponse wrapper schema.
-     */
     @SuppressWarnings({"rawtypes", "unchecked"})
-    private Schema<?> createApiResponseSchema(Class<?> dataClass, boolean isList) {
+    private Schema<?> createApiResponseSchema(Class<?> dataClass, Class<?> entityClass,
+                                              boolean isList) {
         Schema<?> apiResponseSchema = new Schema<>();
         apiResponseSchema.setType("object");
 
         Schema<?> dataSchema;
         if (isList) {
-            dataSchema = new ArraySchema().items(generateCompleteSchema(dataClass, new HashSet<>(), 0));
+            dataSchema = new ArraySchema().items(
+                    generateCompleteSchema(dataClass, entityClass, new HashSet<>(), 0,
+                            false, false, false)); // Response never filters
         } else {
-            dataSchema = generateCompleteSchema(dataClass, new HashSet<>(), 0);
+            dataSchema = generateCompleteSchema(dataClass, entityClass, new HashSet<>(), 0,
+                    false, false, false); // Response never filters
         }
 
         Map<String, Schema> properties = new LinkedHashMap<>();
@@ -338,7 +478,6 @@ public class CrudXSwaggerDTOCustomizer implements OperationCustomizer {
 
         if (genericSuperclass instanceof ParameterizedType paramType) {
             Type[] typeArgs = paramType.getActualTypeArguments();
-
             if (typeArgs.length > 0 && typeArgs[0] instanceof Class<?> entityClass) {
                 return entityClass;
             }
