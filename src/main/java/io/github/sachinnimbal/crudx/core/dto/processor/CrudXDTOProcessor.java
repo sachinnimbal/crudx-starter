@@ -166,18 +166,21 @@ public class CrudXDTOProcessor extends AbstractProcessor {
             CrudXNested annotation = field.getAnnotation(CrudXNested.class);
 
             if (annotation != null) {
-                // Validate maxDepth
                 if (annotation.maxDepth() < 0) {
                     error("@CrudXNested maxDepth must be >= 0 for field: " + field.getSimpleName(), field);
                 }
 
-                // Validate dtoClass if specified
-                if (annotation.dtoClass() != void.class) {
-                    TypeMirror dtoClassType = extractDtoClass(annotation);
-                    validateNestedDtoClass(field, dtoClassType);
+                // ✅ Only validate dtoClass if it's NOT void.class
+                try {
+                    annotation.dtoClass();
+                } catch (javax.lang.model.type.MirroredTypeException mte) {
+                    TypeMirror dtoClassType = mte.getTypeMirror();
+
+                    if (dtoClassType.getKind() != javax.lang.model.type.TypeKind.VOID) {
+                        validateNestedDtoClass(field, dtoClassType);
+                    }
                 }
 
-                // Validate nullStrategy for collections
                 if (annotation.nullStrategy() == CrudXNested.NullStrategy.EMPTY_COLLECTION) {
                     if (!isCollectionType(field.asType())) {
                         logWarn("Field " + field.getSimpleName() +
@@ -187,6 +190,7 @@ public class CrudXDTOProcessor extends AbstractProcessor {
             }
         }
     }
+
 
     private void validateDefaultValue(VariableElement field, String defaultValue) {
         Class<?> fieldType = getFieldJavaClass(field.asType());
@@ -361,11 +365,30 @@ public class CrudXDTOProcessor extends AbstractProcessor {
             String entityTypeFqn = extractTypeName(entityFieldType);
 
             if (dtoTypeFqn != null && entityTypeFqn != null) {
-                String mappingKey = dtoTypeFqn + "|" + entityTypeFqn;
+                // ✅ Check if user specified explicit dtoClass
+                String targetDtoFqn = dtoTypeFqn;
+                if (annotation != null) {
+                    try {
+                        annotation.dtoClass();
+                    } catch (javax.lang.model.type.MirroredTypeException mte) {
+                        TypeMirror explicitDtoClass = mte.getTypeMirror();
+
+                        // Only use explicit class if it's NOT void.class
+                        if (explicitDtoClass.getKind() != javax.lang.model.type.TypeKind.VOID) {
+                            TypeElement explicitElement = (TypeElement) typeUtils.asElement(explicitDtoClass);
+                            if (explicitElement != null) {
+                                targetDtoFqn = explicitElement.getQualifiedName().toString();
+                            }
+                        }
+                    }
+                }
+
+                String mappingKey = targetDtoFqn + "|" + entityTypeFqn;
                 if (!context.nestedMappings.containsKey(mappingKey)) {
-                    NestedMapping mapping = new NestedMapping(dtoTypeFqn, entityTypeFqn, isRequest, annotation);
+                    NestedMapping mapping = new NestedMapping(targetDtoFqn, entityTypeFqn, isRequest, annotation);
                     context.nestedMappings.put(mappingKey, mapping);
-                    logInfo("✓ Nested: " + extractSimpleName(dtoTypeFqn) + " ↔ " + extractSimpleName(entityTypeFqn) +
+                    logInfo("✓ Nested: " + extractSimpleName(targetDtoFqn) + " ↔ " +
+                            extractSimpleName(entityTypeFqn) +
                             (annotation != null ? " (maxDepth=" + annotation.maxDepth() + ")" : ""));
                 }
             }
@@ -766,6 +789,7 @@ public class CrudXDTOProcessor extends AbstractProcessor {
             writeNestedMapperMethods();
             writeRequestMappings();
             writeResponseMappings();
+            writeHelperMethods();
             writePolymorphicDispatchers();
             writeInterfaceMethods();
             writeClassEnd();
@@ -959,7 +983,7 @@ public class CrudXDTOProcessor extends AbstractProcessor {
                 return;
             }
 
-            out.println("    // ==================== NESTED OBJECT MAPPERS ====================");
+            out.println("    // ==================== NESTED MAPPERS ====================");
             out.println();
 
             Set<String> generatedMappers = new HashSet<>();
@@ -971,65 +995,62 @@ public class CrudXDTOProcessor extends AbstractProcessor {
                 String dtoSimpleName = getClassReference(dtoFqn);
                 String entitySimpleName = getClassReference(entityFqn);
 
-                String mapperKey = dtoFqn + "|" + entityFqn;
-                if (generatedMappers.contains(mapperKey)) {
-                    continue;
-                }
-                generatedMappers.add(mapperKey);
-
-                // DTO → Entity
-                out.println("    private " + entitySimpleName + " map" + extractSimpleName(dtoFqn) + "To" +
-                        extractSimpleName(entityFqn) + "(" + dtoSimpleName + " dto) {");
-                out.println("        if (dto == null) return null;");
-                out.println("        " + entitySimpleName + " entity = new " + entitySimpleName + "();");
+                String dtoSimpleNameClean = extractSimpleName(dtoFqn);
+                String entitySimpleNameClean = extractSimpleName(entityFqn);
 
                 TypeElement dtoElement = elementUtils.getTypeElement(dtoFqn);
                 TypeElement entityElement = elementUtils.getTypeElement(entityFqn);
 
-                if (dtoElement != null && entityElement != null) {
-                    copyFieldsWithAnnotationSupport(dtoElement, entityElement, "dto", "entity", true);
+                if (dtoElement == null || entityElement == null) {
+                    continue;
                 }
 
-                out.println("        return entity;");
-                out.println("    }");
-                out.println();
-
-                // Entity → DTO
-                out.println("    private " + dtoSimpleName + " map" + extractSimpleName(entityFqn) + "To" +
-                        extractSimpleName(dtoFqn) + "(" + entitySimpleName + " entity) {");
-                out.println("        if (entity == null) return null;");
-                out.println("        " + dtoSimpleName + " dto = new " + dtoSimpleName + "();");
-
-                if (dtoElement != null && entityElement != null) {
-                    copyFieldsWithAnnotationSupport(dtoElement, entityElement, "entity", "dto", false);
+                String singleMapperKey = dtoFqn + "|" + entityFqn + "|single";
+                if (!generatedMappers.contains(singleMapperKey)) {
+                    if (mapping.isRequest) {
+                        // Request DTO → Entity
+                        out.println("    private " + entitySimpleName + " to" + entitySimpleNameClean +
+                                "(" + dtoSimpleName + " dto) {");
+                        out.println("        if (dto == null) return null;");
+                        out.println("        " + entitySimpleName + " entity = new " + entitySimpleName + "();");
+                        copyFieldsWithAnnotationSupport(dtoElement, entityElement, "dto", "entity", true);
+                        out.println("        return entity;");
+                        out.println("    }");
+                        out.println();
+                    } else {
+                        // Entity → Response DTO
+                        out.println("    private " + dtoSimpleName + " to" + dtoSimpleNameClean +
+                                "(" + entitySimpleName + " entity) {");
+                        out.println("        if (entity == null) return null;");
+                        out.println("        " + dtoSimpleName + " dto = new " + dtoSimpleName + "();");
+                        copyFieldsWithAnnotationSupport(dtoElement, entityElement, "entity", "dto", false);
+                        out.println("        return dto;");
+                        out.println("    }");
+                        out.println();
+                    }
+                    generatedMappers.add(singleMapperKey);
                 }
 
-                out.println("        return dto;");
-                out.println("    }");
-                out.println();
-
-                // List mappers
-                writeListMappers(dtoSimpleName, entitySimpleName, dtoFqn, entityFqn);
+                String listMapperKey = dtoFqn + "|" + entityFqn + "|list";
+                if (!generatedMappers.contains(listMapperKey)) {
+                    if (mapping.isRequest) {
+                        out.println("    private List<" + entitySimpleName + "> to" + entitySimpleNameClean +
+                                "List(List<" + dtoSimpleName + "> dtos) {");
+                        out.println("        return dtos == null ? null : dtos.stream().map(this::to" +
+                                entitySimpleNameClean + ").collect(Collectors.toList());");
+                        out.println("    }");
+                        out.println();
+                    } else {
+                        out.println("    private List<" + dtoSimpleName + "> to" + dtoSimpleNameClean +
+                                "List(List<" + entitySimpleName + "> entities) {");
+                        out.println("        return entities == null ? null : entities.stream().map(this::to" +
+                                dtoSimpleNameClean + ").collect(Collectors.toList());");
+                        out.println("    }");
+                        out.println();
+                    }
+                    generatedMappers.add(listMapperKey);
+                }
             }
-        }
-
-        private void writeListMappers(String dtoSimpleName, String entitySimpleName,
-                                      String dtoFqn, String entityFqn) {
-            out.println("    private List<" + entitySimpleName + "> map" + extractSimpleName(dtoFqn) +
-                    "ListTo" + extractSimpleName(entityFqn) + "List(List<" + dtoSimpleName + "> dtos) {");
-            out.println("        if (dtos == null) return null;");
-            out.println("        return dtos.stream().map(this::map" + extractSimpleName(dtoFqn) + "To" +
-                    extractSimpleName(entityFqn) + ").collect(Collectors.toList());");
-            out.println("    }");
-            out.println();
-
-            out.println("    private List<" + dtoSimpleName + "> map" + extractSimpleName(entityFqn) +
-                    "ListTo" + extractSimpleName(dtoFqn) + "List(List<" + entitySimpleName + "> entities) {");
-            out.println("        if (entities == null) return null;");
-            out.println("        return entities.stream().map(this::map" + extractSimpleName(entityFqn) + "To" +
-                    extractSimpleName(dtoFqn) + ").collect(Collectors.toList());");
-            out.println("    }");
-            out.println();
         }
 
         private void copyFieldsWithAnnotationSupport(TypeElement dtoElement, TypeElement entityElement,
@@ -1060,98 +1081,74 @@ public class CrudXDTOProcessor extends AbstractProcessor {
                 TypeMirror dtoFieldType = dtoField.asType();
                 TypeMirror entityFieldType = entityField.asType();
 
-                // ✅ Determine source and target types correctly
                 TypeMirror sourceType = dtoToEntity ? dtoFieldType : entityFieldType;
                 TypeMirror targetType = dtoToEntity ? entityFieldType : dtoFieldType;
 
                 String sourceFieldNameFinal = dtoToEntity ? dtoFieldName : sourceFieldName;
                 String targetFieldNameFinal = dtoToEntity ? sourceFieldName : dtoFieldName;
 
-                // Generate getter/setter
                 String getter = generateGetter(srcVar, sourceFieldNameFinal, sourceType);
                 String setter = tgtVar + ".set" + capitalize(targetFieldNameFinal);
 
-                // Handle @CrudXField(defaultValue)
+                boolean needsNullCheck = !isPrimitiveType(sourceType);
+
                 if (dtoToEntity && fieldAnnotation != null && !fieldAnnotation.defaultValue().isEmpty()) {
-                    if (isPrimitiveType(dtoFieldType)) {
-                        out.println("        {");
-                        generateFieldMapping(getter, setter, sourceType, targetType,
-                                fieldAnnotation, dtoToEntity, "            ");
-                        out.println("        }");
-                    } else {
-                        out.println("        if (" + getter + " == null) {");
-                        out.println("            " + setter + "(" +
+                    if (needsNullCheck) {
+                        out.println("        " + setter + "(" + getter + " != null ? ");
+                        String conversion = generateFieldMappingExpression(getter, sourceType, targetType, fieldAnnotation, dtoToEntity);
+                        out.println("            " + conversion + " : " +
                                 generateDefaultValueLiteral(fieldAnnotation.defaultValue(), entityFieldType) + ");");
-                        out.println("        } else {");
-                        generateFieldMapping(getter, setter, sourceType, targetType,
-                                fieldAnnotation, dtoToEntity, "            ");
-                        out.println("        }");
+                    } else {
+                        String conversion = generateFieldMappingExpression(getter, sourceType, targetType, fieldAnnotation, dtoToEntity);
+                        out.println("        " + setter + "(" + conversion + ");");
                     }
                 } else {
-                    // ✅ For primitives, no null check needed
-                    if (isPrimitiveType(sourceType)) {
-                        out.println("        {");
-                        generateFieldMapping(getter, setter, sourceType, targetType,
-                                fieldAnnotation, dtoToEntity, "            ");
+                    if (needsNullCheck) {
+                        out.println("        if (" + getter + " != null) {");
+                        String conversion = generateFieldMappingExpression(getter, sourceType, targetType, fieldAnnotation, dtoToEntity);
+                        out.println("            " + setter + "(" + conversion + ");");
                         out.println("        }");
                     } else {
-                        out.println("        if (" + getter + " != null) {");
-                        generateFieldMapping(getter, setter, sourceType, targetType,
-                                fieldAnnotation, dtoToEntity, "            ");
-                        out.println("        }");
+                        String conversion = generateFieldMappingExpression(getter, sourceType, targetType, fieldAnnotation, dtoToEntity);
+                        out.println("        " + setter + "(" + conversion + ");");
                     }
                 }
             }
         }
 
-        private void generateFieldMapping(String getter, String setter,
-                                          TypeMirror sourceType, TypeMirror targetType,
-                                          CrudXField annotation, boolean dtoToEntity, String indent) {
+        private String generateFieldMappingExpression(String getter, TypeMirror sourceType,
+                                                      TypeMirror targetType, CrudXField annotation,
+                                                      boolean dtoToEntity) {
             // Check if nested mapping needed
             if (processor.needsNestedMapper(sourceType, targetType)) {
                 String sourceTypeFqn = processor.extractTypeName(sourceType);
                 String targetTypeFqn = processor.extractTypeName(targetType);
 
                 if (sourceTypeFqn != null && targetTypeFqn != null) {
-                    boolean isCollection = processor.isCollection(sourceType) ||
-                            processor.isCollection(targetType);
+                    boolean isCollection = processor.isCollection(sourceType) || processor.isCollection(targetType);
 
-                    String sourceSimple = extractSimpleName(sourceTypeFqn);
+                    // ✅ Use target type for method naming (what we're converting TO)
                     String targetSimple = extractSimpleName(targetTypeFqn);
 
-                    if (dtoToEntity) {
-                        if (isCollection) {
-                            out.println(indent + setter + "(map" + sourceSimple +
-                                    "ListTo" + targetSimple + "List(" + getter + "));");
-                        } else {
-                            out.println(indent + setter + "(map" + sourceSimple +
-                                    "To" + targetSimple + "(" + getter + "));");
-                        }
+                    if (isCollection) {
+                        // For collections, call toTargetTypeList()
+                        return "to" + targetSimple + "List(" + getter + ")";
                     } else {
-                        if (isCollection) {
-                            out.println(indent + setter + "(map" + targetSimple +
-                                    "ListTo" + sourceSimple + "List(" + getter + "));");
-                        } else {
-                            out.println(indent + setter + "(map" + targetSimple +
-                                    "To" + sourceSimple + "(" + getter + "));");
-                        }
+                        // For single objects, call toTargetType()
+                        return "to" + targetSimple + "(" + getter + ")";
                     }
-                } else {
-                    out.println(indent + setter + "(" + getter + ");");
-                }
-            } else {
-                // ✅ CRITICAL FIX: Always check if types are different and apply conversion
-                if (!typeUtils.isSameType(sourceType, targetType)) {
-                    String conversion = generateTypeConversionCode(getter, sourceType, targetType, annotation);
-                    out.println(indent + setter + "(" + conversion + ");");
-                } else {
-                    // ✅ Types are the same, but still apply transformer if exists
-                    String value = annotation != null && !annotation.transformer().isEmpty()
-                            ? applyTransformer(getter, annotation)
-                            : getter;
-                    out.println(indent + setter + "(" + value + ");");
                 }
             }
+
+            // Type conversion
+            if (!typeUtils.isSameType(sourceType, targetType)) {
+                return generateTypeConversionCode(getter, sourceType, targetType, annotation);
+            }
+
+            // Apply transformer if exists
+            return annotation != null && !annotation.transformer().isEmpty()
+                    ? applyTransformer(getter, annotation)
+                    : getter;
         }
 
         private String generateDefaultValueLiteral(String defaultValue, TypeMirror targetType) {
@@ -1183,13 +1180,14 @@ public class CrudXDTOProcessor extends AbstractProcessor {
             String sourceTypeName = sourceType.toString();
             String targetTypeName = targetType.toString();
 
-            // ✅ FIX: Handle String → Enum conversion
+            // ✅ FIX: Handle String → Enum conversion with case-insensitive support
             if (sourceTypeName.equals("java.lang.String") && isEnumType(targetType)) {
                 String enumClassName = getEnumClassName(targetType);
-                return applyTransformer(enumClassName + ".valueOf(" + getter + ")", annotation);
+                // Generate code that tries multiple case variations
+                return "parseEnum(" + getter + ", " + enumClassName + ".class)";
             }
 
-            // ✅ FIX: Handle Enum → String conversion (use .name() method)
+            // ✅ Handle Enum → String conversion
             if (isEnumType(sourceType) && targetTypeName.equals("java.lang.String")) {
                 return applyTransformer(getter + ".name()", annotation);
             }
@@ -1210,22 +1208,19 @@ public class CrudXDTOProcessor extends AbstractProcessor {
                 }
             }
 
-            // ✅ FIX: Enum to Enum conversion (same enum type, just use getter directly)
+            // Enum to Enum conversion
             if (isEnumType(sourceType) && isEnumType(targetType)) {
                 String sourceEnumFqn = getFullyQualifiedName(sourceType);
                 String targetEnumFqn = getFullyQualifiedName(targetType);
 
-                // Same enum type, no conversion needed
                 if (sourceEnumFqn != null && sourceEnumFqn.equals(targetEnumFqn)) {
                     return applyTransformer(getter, annotation);
                 }
 
-                // Different enum types with same values
                 String targetEnumClassName = getEnumClassName(targetType);
-                return applyTransformer(targetEnumClassName + ".valueOf(" + getter + ".name())", annotation);
+                return applyTransformer("parseEnum(" + getter + ".name(), " + targetEnumClassName + ".class)", annotation);
             }
 
-            // No conversion needed
             return applyTransformer(getter, annotation);
         }
 
@@ -1362,6 +1357,35 @@ public class CrudXDTOProcessor extends AbstractProcessor {
                 writeToResponseMethod(dtoElement);
                 writeToResponseListMethod(dtoElement);
             });
+        }
+
+        private void writeHelperMethods() {
+            out.println("    // ==================== HELPER METHODS ====================");
+            out.println();
+
+            // Add enum parser helper
+            out.println("    @SuppressWarnings({\"unchecked\", \"rawtypes\"})");
+            out.println("    private <E extends Enum<E>> E parseEnum(String value, Class<E> enumClass) {");
+            out.println("        if (value == null || value.isEmpty()) return null;");
+            out.println("        try {");
+            out.println("            return Enum.valueOf(enumClass, value);");
+            out.println("        } catch (IllegalArgumentException e) {");
+            out.println("            // Try case-insensitive match");
+            out.println("            for (E enumConstant : enumClass.getEnumConstants()) {");
+            out.println("                if (enumConstant.name().equalsIgnoreCase(value)) {");
+            out.println("                    return enumConstant;");
+            out.println("                }");
+            out.println("            }");
+            out.println("            // Try uppercase as last resort");
+            out.println("            try {");
+            out.println("                return Enum.valueOf(enumClass, value.toUpperCase());");
+            out.println("            } catch (IllegalArgumentException e2) {");
+            out.println("                throw new IllegalArgumentException(");
+            out.println("                    \"Invalid enum value '\" + value + \"' for type \" + enumClass.getSimpleName());");
+            out.println("            }");
+            out.println("        }");
+            out.println("    }");
+            out.println();
         }
 
         private void writeToResponseMethod(TypeElement dtoElement) {
@@ -1501,25 +1525,22 @@ public class CrudXDTOProcessor extends AbstractProcessor {
         private String generateGetter(String varName, String fieldName, TypeMirror fieldType) {
             String typeName = fieldType.toString();
 
-            // For boolean/Boolean, use isXxx() pattern
             if (typeName.equals("boolean") || typeName.equals("java.lang.Boolean")) {
+                // For fields like "isActive", "isPrimary", Lombok generates getIsActive(), getIsPrimary()
+                if (fieldName.startsWith("is") && fieldName.length() > 2 &&
+                        Character.isUpperCase(fieldName.charAt(2))) {
+                    return varName + ".get" + capitalize(fieldName) + "()";
+                }
+                // For standard boolean fields, use is + capitalized
                 return varName + ".is" + capitalize(fieldName) + "()";
             }
 
-            // Standard getXxx() pattern
+            // Standard getter for all other types
             return varName + ".get" + capitalize(fieldName) + "()";
         }
 
         private boolean isPrimitiveType(TypeMirror type) {
-            String typeName = type.toString();
-            return typeName.equals("boolean") ||
-                    typeName.equals("byte") ||
-                    typeName.equals("short") ||
-                    typeName.equals("int") ||
-                    typeName.equals("long") ||
-                    typeName.equals("float") ||
-                    typeName.equals("double") ||
-                    typeName.equals("char");
+            return type.getKind().isPrimitive();
         }
 
         private String extractSimpleName(String fqn) {

@@ -708,10 +708,9 @@ public class CrudXMapperGenerator {
 
             if (value instanceof String) return parseString((String) value, tType);
 
+            // ✅ CRITICAL FIX: Case-insensitive enum conversion
             if (tType.isEnum() && value instanceof String) {
-                @SuppressWarnings({"unchecked", "rawtypes"})
-                Object enumValue = Enum.valueOf((Class<Enum>) tType, (String) value);
-                return enumValue;
+                return parseEnumCaseInsensitive((String) value, (Class<Enum>) tType);
             }
 
             if ((tType == Boolean.class || tType == boolean.class)) return convertToBoolean(value);
@@ -720,6 +719,34 @@ public class CrudXMapperGenerator {
 
             return value;
         };
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private Object parseEnumCaseInsensitive(String value, Class<Enum> enumClass) {
+        if (value == null || value.isEmpty()) return null;
+
+        try {
+            // Try exact match first
+            return Enum.valueOf(enumClass, value);
+        } catch (IllegalArgumentException e) {
+            // Try case-insensitive match
+            for (Enum enumConstant : enumClass.getEnumConstants()) {
+                if (enumConstant.name().equalsIgnoreCase(value)) {
+                    return enumConstant;
+                }
+            }
+
+            // Try uppercase (common convention)
+            try {
+                return Enum.valueOf(enumClass, value.toUpperCase());
+            } catch (IllegalArgumentException e2) {
+                log.warn("Cannot convert '{}' to enum {}", value, enumClass.getSimpleName());
+                throw new IllegalArgumentException(
+                        String.format("Invalid enum value '%s' for type %s. Valid values: %s",
+                                value, enumClass.getSimpleName(),
+                                Arrays.toString(enumClass.getEnumConstants())));
+            }
+        }
     }
 
     private Object parseWithFormat(String value, Class<?> targetType, String format) {
@@ -781,6 +808,9 @@ public class CrudXMapperGenerator {
             if (targetType == Duration.class) return Duration.parse(str);
             if (targetType == Period.class) return Period.parse(str);
             if (targetType == UUID.class) return UUID.fromString(str);
+            if (targetType.isEnum()) {
+                return parseEnumCaseInsensitive(str, (Class<Enum>) targetType);
+            }
         } catch (Exception e) {
             log.debug("Type conversion failed: {} -> {}", str, targetType.getSimpleName());
         }

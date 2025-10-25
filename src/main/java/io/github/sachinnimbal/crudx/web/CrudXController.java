@@ -1,6 +1,8 @@
 package io.github.sachinnimbal.crudx.web;
 
+import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.github.sachinnimbal.crudx.core.config.CrudXProperties;
 import io.github.sachinnimbal.crudx.core.dto.annotations.CrudXField;
 import io.github.sachinnimbal.crudx.core.dto.annotations.CrudXResponse;
@@ -82,8 +84,10 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         }
 
         // Initialize ObjectMapper
-        objectMapper = new ObjectMapper();
-        objectMapper.registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule());
+        objectMapper = new ObjectMapper()
+                .registerModule(new JavaTimeModule())
+                .configure(MapperFeature.ACCEPT_CASE_INSENSITIVE_ENUMS, true)
+                .disable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
 
         // Initialize service
         DatabaseType databaseType = getDatabaseType();
@@ -106,7 +110,6 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             );
         }
 
-        // Initialize DTO mapper if available
         if (dtoRegistry != null && dtoRegistry.hasDTOMapping(entityClass)) {
             Optional<CrudXMapper<T, Object, Object>> mapper = dtoRegistry.getMapper(entityClass);
             if (mapper.isPresent()) {
@@ -666,13 +669,101 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     private T convertMapToEntityDirectly(Map<String, Object> map) {
         try {
             log.debug("Direct conversion: Map → {}", entityClass.getSimpleName());
-            return objectMapper.convertValue(map, entityClass);
+
+            // ✅ Pre-process enum fields to handle case-insensitive values
+            Map<String, Object> processedMap = preprocessEnumFields(map);
+
+            return objectMapper.convertValue(processedMap, entityClass);
+        } catch (IllegalArgumentException e) {
+            // Check if it's an enum error
+            if (e.getMessage() != null && e.getMessage().contains("not one of the values accepted")) {
+                String betterMessage = "Invalid enum value in request. " + e.getMessage() +
+                        ". Note: Use uppercase format (e.g., MALE, FEMALE, not Male, Female).";
+                log.error("Enum conversion error: {}", betterMessage);
+                throw new IllegalArgumentException(betterMessage, e);
+            }
+
+            log.error("Failed to convert map to entity {}: {}",
+                    entityClass.getSimpleName(), e.getMessage());
+            throw new IllegalArgumentException(
+                    "Invalid request body format for " + entityClass.getSimpleName() + ": " + e.getMessage(), e);
         } catch (Exception e) {
             log.error("Failed to convert map to entity {}: {}",
                     entityClass.getSimpleName(), e.getMessage());
             throw new IllegalArgumentException(
                     "Invalid request body format for " + entityClass.getSimpleName(), e);
         }
+    }
+
+    private Map<String, Object> preprocessEnumFields(Map<String, Object> map) {
+        Map<String, Object> processedMap = new LinkedHashMap<>(map);
+
+        try {
+            for (Field field : getFieldsFast(entityClass)) {
+                if (field.getType().isEnum()) {
+                    String fieldName = field.getName();
+                    Object value = processedMap.get(fieldName);
+
+                    if (value instanceof String) {
+                        String strValue = (String) value;
+                        // Try to find matching enum constant (case-insensitive)
+                        Object enumValue = findEnumConstant(field.getType(), strValue);
+                        if (enumValue != null) {
+                            processedMap.put(fieldName, ((Enum<?>) enumValue).name());
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.debug("Error preprocessing enum fields: {}", e.getMessage());
+        }
+
+        return processedMap;
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private Object findEnumConstant(Class<?> enumClass, String value) {
+        if (value == null || value.isEmpty()) return null;
+
+        try {
+            // Try exact match first
+            return Enum.valueOf((Class<Enum>) enumClass, value);
+        } catch (IllegalArgumentException e) {
+            // Try case-insensitive match
+            for (Object enumConstant : enumClass.getEnumConstants()) {
+                if (((Enum) enumConstant).name().equalsIgnoreCase(value)) {
+                    log.debug("Enum '{}' matched case-insensitively to '{}'", value, ((Enum) enumConstant).name());
+                    return enumConstant;
+                }
+            }
+
+            // Try uppercase as last resort
+            try {
+                return Enum.valueOf((Class<Enum>) enumClass, value.toUpperCase());
+            } catch (IllegalArgumentException e2) {
+                // List valid values for better error message
+                String validValues = Arrays.stream(enumClass.getEnumConstants())
+                        .map(c -> ((Enum) c).name())
+                        .collect(Collectors.joining(", "));
+
+                log.warn("Cannot find enum constant '{}' in {}. Valid values: {}",
+                        value, enumClass.getSimpleName(), validValues);
+                return null;
+            }
+        }
+    }
+
+    // ✅ NEW: Get all fields including inherited ones
+    private Field[] getFieldsFast(Class<?> clazz) {
+        List<Field> fields = new ArrayList<>();
+        Class<?> current = clazz;
+
+        while (current != null && current != Object.class) {
+            Collections.addAll(fields, current.getDeclaredFields());
+            current = current.getSuperclass();
+        }
+
+        return fields.toArray(new Field[0]);
     }
 
     private int countNonNullFields(Object obj) {
