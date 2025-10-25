@@ -11,6 +11,8 @@ import java.util.*;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.stream.Collectors;
 
+import static io.github.sachinnimbal.crudx.core.util.TimeUtils.formatExecutionTime;
+
 @Slf4j
 @Service
 @ConditionalOnProperty(prefix = "crudx.performance", name = "enabled", havingValue = "true")
@@ -37,22 +39,27 @@ public class CrudXPerformanceTracker {
 
     public void recordMetric(String endpoint, String method, String entityName,
                              long executionTimeMs, boolean success, String errorType,
-                             Long memoryDeltaKb) {
+                             Long memoryDeltaKb, Long dtoConversionTimeMs, boolean dtoUsed) {
 
         PerformanceMetric metric = PerformanceMetric.builder()
                 .endpoint(endpoint)
                 .method(method)
                 .entityName(entityName)
-                .executionTimeMs(executionTimeMs)
-                .timestamp(LocalDateTime.now())
                 .success(success)
                 .errorType(errorType)
+                .timestamp(LocalDateTime.now())
+                .dtoUsed(dtoUsed)
                 .build();
 
-        // Track memory delta (per-request allocation)
-        if (properties.isTrackMemory() && memoryDeltaKb != null) {
+        // Use setters to trigger formatting
+        metric.setExecutionTimeMs(executionTimeMs);
+
+        if (memoryDeltaKb != null && memoryDeltaKb > 0) {
             metric.setMemoryUsedKb(memoryDeltaKb);
-            metric.setMemoryUsedFormatted(metric.getFormattedMemory());
+        }
+
+        if (dtoConversionTimeMs != null && dtoConversionTimeMs > 0) {
+            metric.setDtoConversionTimeMs(dtoConversionTimeMs);
         }
 
         metrics.addLast(metric);
@@ -64,8 +71,17 @@ public class CrudXPerformanceTracker {
 
     // Backward compatibility
     public void recordMetric(String endpoint, String method, String entityName,
+                             long executionTimeMs, boolean success, String errorType,
+                             Long memoryDeltaKb) {
+        recordMetric(endpoint, method, entityName, executionTimeMs, success, errorType,
+                memoryDeltaKb, null, false);
+    }
+
+    // Backward compatibility
+    public void recordMetric(String endpoint, String method, String entityName,
                              long executionTimeMs, boolean success, String errorType) {
-        recordMetric(endpoint, method, entityName, executionTimeMs, success, errorType, null);
+        recordMetric(endpoint, method, entityName, executionTimeMs, success, errorType,
+                null, null, false);
     }
 
     public List<PerformanceMetric> getMetrics() {
@@ -84,6 +100,18 @@ public class CrudXPerformanceTracker {
         if (metricsList.isEmpty()) {
             return PerformanceSummary.builder()
                     .totalRequests(0L)
+                    .successRate(0.0)
+                    .totalExecutionTime("0ms")
+                    .avgExecutionTime("0ms")
+                    .minExecutionTime("0ms")
+                    .maxExecutionTime("0ms")
+                    .avgMemory("N/A")
+                    .minMemory("N/A")
+                    .maxMemory("N/A")
+                    .totalMemory("N/A")
+                    .totalDtoConversionTime("0ms")
+                    .avgDtoConversionTime("N/A")
+                    .totalDtoConversions(0L)
                     .monitoringStartTime(startTime)
                     .build();
         }
@@ -93,31 +121,38 @@ public class CrudXPerformanceTracker {
         long failed = total - successful;
         double successRate = (double) successful / total * 100;
 
-        long totalTime = metricsList.stream()
-                .mapToLong(PerformanceMetric::getExecutionTimeMs)
+        // Calculate execution time totals
+        long totalTimeMs = metricsList.stream()
+                .map(PerformanceMetric::getExecutionTimeMs)
+                .filter(Objects::nonNull)
+                .mapToLong(Long::longValue)
                 .sum();
 
-        double avgTime = (double) totalTime / total;
-
-        long minTime = metricsList.stream()
-                .mapToLong(PerformanceMetric::getExecutionTimeMs)
+        long minTimeMs = metricsList.stream()
+                .map(PerformanceMetric::getExecutionTimeMs)
+                .filter(Objects::nonNull)
+                .mapToLong(Long::longValue)
                 .min()
                 .orElse(0);
 
-        long maxTime = metricsList.stream()
-                .mapToLong(PerformanceMetric::getExecutionTimeMs)
+        long maxTimeMs = metricsList.stream()
+                .map(PerformanceMetric::getExecutionTimeMs)
+                .filter(Objects::nonNull)
+                .mapToLong(Long::longValue)
                 .max()
                 .orElse(0);
 
-        // Memory calculations
-        Long avgMemoryKb = null;
-        Long minMemoryKb = null;
-        Long maxMemoryKb = null;
-        Long totalMemoryKb = null;
+        double avgTimeMs = (double) totalTimeMs / total;
 
+        // Memory calculations
         List<PerformanceMetric> metricsWithMemory = metricsList.stream()
                 .filter(m -> m.getMemoryUsedKb() != null && m.getMemoryUsedKb() > 0)
                 .toList();
+
+        Long totalMemoryKb = null;
+        Long avgMemoryKb = null;
+        Long minMemoryKb = null;
+        Long maxMemoryKb = null;
 
         if (!metricsWithMemory.isEmpty()) {
             totalMemoryKb = metricsWithMemory.stream()
@@ -137,6 +172,22 @@ public class CrudXPerformanceTracker {
                     .orElse(0L);
         }
 
+        // DTO conversion calculations - FIXED
+        List<PerformanceMetric> metricsWithDto = metricsList.stream()
+                .filter(m -> m.getDtoConversionTimeMs() != null && m.getDtoConversionTimeMs() > 0)
+                .toList();
+
+        long totalDtoMs = 0L;  // Changed from Long to primitive long, initialized to 0
+        long avgDtoMs = 0L;    // Changed from Long to primitive long, initialized to 0
+
+        if (!metricsWithDto.isEmpty()) {
+            totalDtoMs = metricsWithDto.stream()
+                    .mapToLong(PerformanceMetric::getDtoConversionTimeMs)
+                    .sum();
+
+            avgDtoMs = totalDtoMs / metricsWithDto.size();
+        }
+
         LocalDateTime lastRequest = metricsList.stream()
                 .map(PerformanceMetric::getTimestamp)
                 .max(LocalDateTime::compareTo)
@@ -152,9 +203,10 @@ public class CrudXPerformanceTracker {
             ).addMetric(metric);
         }
 
-        // Top 5 slowest endpoints
+        // Top 5 slowest endpoints (by raw ms values for sorting)
         Map<String, Long> topSlowEndpoints = endpointStats.entrySet().stream()
-                .sorted((e1, e2) -> Long.compare(e2.getValue().getMaxExecutionTimeMs(),
+                .sorted((e1, e2) -> Long.compare(
+                        e2.getValue().getMaxExecutionTimeMs(),
                         e1.getValue().getMaxExecutionTimeMs()))
                 .limit(5)
                 .collect(Collectors.toMap(
@@ -167,7 +219,8 @@ public class CrudXPerformanceTracker {
         // Top 5 endpoints with most errors
         Map<String, Long> topErrorEndpoints = endpointStats.entrySet().stream()
                 .filter(e -> e.getValue().getFailedCalls() > 0)
-                .sorted((e1, e2) -> Long.compare(e2.getValue().getFailedCalls(),
+                .sorted((e1, e2) -> Long.compare(
+                        e2.getValue().getFailedCalls(),
                         e1.getValue().getFailedCalls()))
                 .limit(5)
                 .collect(Collectors.toMap(
@@ -179,9 +232,14 @@ public class CrudXPerformanceTracker {
 
         // Top 5 memory-intensive endpoints
         Map<String, Long> topMemoryEndpoints = endpointStats.entrySet().stream()
-                .filter(e -> e.getValue().getAvgMemoryKb() != null && e.getValue().getAvgMemoryKb() > 0)
-                .sorted((e1, e2) -> Long.compare(e2.getValue().getMaxMemoryKb(),
-                        e1.getValue().getMaxMemoryKb()))
+                .filter(e -> e.getValue().getMaxMemoryKb() != null && e.getValue().getMaxMemoryKb() > 0)
+                .sorted((e1, e2) -> {
+                    Long mem1 = e1.getValue().getMaxMemoryKb();
+                    Long mem2 = e2.getValue().getMaxMemoryKb();
+                    if (mem1 == null) return 1;
+                    if (mem2 == null) return -1;
+                    return Long.compare(mem2, mem1);
+                })
                 .limit(5)
                 .collect(Collectors.toMap(
                         Map.Entry::getKey,
@@ -195,14 +253,17 @@ public class CrudXPerformanceTracker {
                 .successfulRequests(successful)
                 .failedRequests(failed)
                 .successRate(successRate)
-                .totalExecutionTimeMs(totalTime)
-                .avgExecutionTimeMs(avgTime)
-                .minExecutionTimeMs(minTime)
-                .maxExecutionTimeMs(maxTime)
-                .avgMemoryKb(avgMemoryKb)
-                .minMemoryKb(minMemoryKb)
-                .maxMemoryKb(maxMemoryKb)
-                .totalMemoryKb(totalMemoryKb)
+                .totalExecutionTime(formatExecutionTime(totalTimeMs))
+                .avgExecutionTime(formatExecutionTime((long) avgTimeMs))
+                .minExecutionTime(formatExecutionTime(minTimeMs))
+                .maxExecutionTime(formatExecutionTime(maxTimeMs))
+                .avgMemory(formatMemory(avgMemoryKb))
+                .minMemory(formatMemory(minMemoryKb))
+                .maxMemory(formatMemory(maxMemoryKb))
+                .totalMemory(formatMemory(totalMemoryKb))
+                .totalDtoConversionTime(formatExecutionTime(totalDtoMs))  // Now passes primitive long, no NPE
+                .avgDtoConversionTime(formatExecutionTime(avgDtoMs))      // Now passes primitive long, no NPE
+                .totalDtoConversions((long) metricsWithDto.size())
                 .monitoringStartTime(startTime)
                 .lastRequestTime(lastRequest)
                 .endpointStats(endpointStats)
@@ -234,6 +295,18 @@ public class CrudXPerformanceTracker {
 
         if (removed > 0) {
             log.debug("Cleaned up {} old performance metrics", removed);
+        }
+    }
+
+    // Helper method to format memory
+    private String formatMemory(Long kb) {
+        if (kb == null || kb <= 0) return "N/A";
+
+        if (kb < 1024) {
+            return kb + " KB";
+        } else {
+            double mb = kb / 1024.0;
+            return String.format("%d KB (%.2f MB)", kb, mb);
         }
     }
 }

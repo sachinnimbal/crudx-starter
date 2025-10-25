@@ -17,16 +17,23 @@ public class PerformanceSummary {
     private long successfulRequests;
     private long failedRequests;
     private double successRate;
-    private long totalExecutionTimeMs;
-    private double avgExecutionTimeMs;
-    private long minExecutionTimeMs;
-    private long maxExecutionTimeMs;
 
-    // Memory metrics
-    private Long avgMemoryKb;
-    private Long minMemoryKb;
-    private Long maxMemoryKb;
-    private Long totalMemoryKb;
+    // Formatted time strings
+    private String totalExecutionTime;
+    private String avgExecutionTime;
+    private String minExecutionTime;
+    private String maxExecutionTime;
+
+    // Formatted memory strings
+    private String avgMemory;
+    private String minMemory;
+    private String maxMemory;
+    private String totalMemory;
+
+    // DTO conversion metrics
+    private String totalDtoConversionTime;
+    private String avgDtoConversionTime;
+    private long totalDtoConversions;
 
     private LocalDateTime monitoringStartTime;
     private LocalDateTime lastRequestTime;

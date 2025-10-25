@@ -20,6 +20,7 @@ import io.github.sachinnimbal.crudx.core.response.BatchResult;
 import io.github.sachinnimbal.crudx.core.response.PageResponse;
 import io.github.sachinnimbal.crudx.service.CrudXService;
 import jakarta.annotation.PostConstruct;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotEmpty;
 import lombok.AllArgsConstructor;
@@ -34,6 +35,8 @@ import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.io.Serializable;
 import java.lang.reflect.Field;
@@ -72,6 +75,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     private static final int MAX_PAGE_SIZE = 100000;
     private static final int LARGE_DATASET_THRESHOLD = 1000;
     private static final int DEFAULT_PAGE_SIZE = 50;
+    private ThreadLocal<Long> dtoConversionStartTime = new ThreadLocal<>();
 
     @PostConstruct
     protected void initializeService() {
@@ -153,7 +157,6 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
             long executionTime = System.currentTimeMillis() - startTime;
 
-            // 🔥 FIX: Smart response conversion (entity if no Response DTO)
             Object response = convertEntityToResponse(created, CREATE);
 
             log.info("Entity created successfully with ID: {} | Time taken: {} ms",
@@ -628,6 +631,8 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             return convertMapToEntityDirectly(map);
         }
 
+        long start = System.nanoTime();
+
         try {
             // 🔥 KEY FIX: Look up Request DTO class from registry
             Optional<Class<?>> requestDtoClassOpt = dtoRegistry.getRequestDTO(entityClass, operation);
@@ -651,11 +656,26 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                     requestDtoClass.getSimpleName());
 
             // Step 2: Use CrudXMapperGenerator to convert Request DTO → Entity
-            // This is where @CrudXField(source="...") annotations are applied
             T entity = mapperGenerator.toEntity(requestDto, entityClass);
 
-            log.debug("✓ Step 2: Request DTO → Entity (mapped {} fields)",
-                    countNonNullFields(entity));
+            // 🔥 FIX: Track conversion time and set request attributes
+            long durationNanos = System.nanoTime() - start;
+            long durationMs = durationNanos / 1_000_000;
+
+            try {
+                ServletRequestAttributes attrs = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+                if (attrs != null) {
+                    HttpServletRequest request = attrs.getRequest();
+                    request.setAttribute("dtoConversionTime", durationMs);
+                    request.setAttribute("dtoUsed", true);
+                    log.debug("✓ DTO conversion tracked: {} ms", durationMs);
+                }
+            } catch (Exception e) {
+                log.debug("Could not set request attributes for DTO tracking: {}", e.getMessage());
+            }
+
+            log.debug("✓ Step 2: Request DTO → Entity (mapped {} fields, took {} ms)",
+                    countNonNullFields(entity), durationMs);
 
             return entity;
 
@@ -802,28 +822,50 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         Optional<Class<?>> responseDtoClass = dtoRegistry.getResponseDTO(entityClass, operation);
 
         if (responseDtoClass.isPresent() && mapperGenerator != null) {
+            long start = System.nanoTime();
+
             try {
                 Class<?> dtoClass = responseDtoClass.get();
                 CrudXResponse annotation = dtoClass.getAnnotation(CrudXResponse.class);
+
+                Object response;
 
                 // Use Map-based response for auto-inclusion of ID/Audit fields
                 if (annotation != null && (annotation.includeId() || annotation.includeAudit())) {
                     Map<String, Object> responseMap = mapperGenerator.toResponseMap(entity, dtoClass);
                     log.debug("✓ Used Map-based response with auto-injected fields");
-                    return responseMap;
+                    response = responseMap;
+                } else {
+                    // Standard DTO mapping
+                    response = mapperGenerator.toResponse(entity, dtoClass);
+                    log.debug("✓ Entity→DTO mapping completed successfully");
                 }
 
-                // Standard DTO mapping
-                Object response = mapperGenerator.toResponse(entity, dtoClass);
-                log.debug("✓ Entity→DTO mapping completed successfully");
+                // 🔥 FIX: Track response DTO conversion time
+                long durationNanos = System.nanoTime() - start;
+                long durationMs = durationNanos / 1_000_000;
+
+                try {
+                    ServletRequestAttributes attrs = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+                    if (attrs != null) {
+                        HttpServletRequest request = attrs.getRequest();
+                        Long existingTime = (Long) request.getAttribute("dtoConversionTime");
+                        long totalTime = (existingTime != null ? existingTime : 0L) + durationMs;
+                        request.setAttribute("dtoConversionTime", totalTime);
+                        request.setAttribute("dtoUsed", true);
+                        log.debug("✓ Response DTO conversion tracked: {} ms (total: {} ms)",
+                                durationMs, totalTime);
+                    }
+                } catch (Exception e) {
+                    log.debug("Could not update request attributes for response DTO tracking: {}", e.getMessage());
+                }
+
                 return response;
 
             } catch (Exception e) {
                 log.error("Response mapper failed: {}", e.getMessage(), e);
             }
         }
-
-        // 🔥 KEY FIX: Return entity directly when no Response DTO or mapping failed
         log.debug("✓ Returning entity directly (no Response DTO for operation {})", operation);
         return entity;
     }
@@ -842,19 +884,43 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         Optional<Class<?>> responseDtoClass = dtoRegistry.getResponseDTO(entityClass, operation);
 
         if (responseDtoClass.isPresent() && mapperGenerator != null) {
+            long start = System.nanoTime();
+
             try {
                 Class<?> dtoClass = responseDtoClass.get();
                 CrudXResponse annotation = dtoClass.getAnnotation(CrudXResponse.class);
+
+                List<?> responses;
 
                 if (annotation != null && (annotation.includeId() || annotation.includeAudit())) {
                     List<Map<String, Object>> responseMaps =
                             mapperGenerator.toResponseMapList(entities, dtoClass);
                     log.debug("✓ Used Map-based response list with auto-injected fields");
-                    return responseMaps;
+                    responses = responseMaps;
+                } else {
+                    responses = mapperGenerator.toResponseList(entities, dtoClass);
+                    log.debug("✓ Converted {} entities to Response DTOs", entities.size());
                 }
 
-                List<?> responses = mapperGenerator.toResponseList(entities, dtoClass);
-                log.debug("✓ Converted {} entities to Response DTOs", entities.size());
+                // 🔥 FIX: Track batch response DTO conversion time
+                long durationNanos = System.nanoTime() - start;
+                long durationMs = durationNanos / 1_000_000;
+
+                try {
+                    ServletRequestAttributes attrs = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+                    if (attrs != null) {
+                        HttpServletRequest request = attrs.getRequest();
+                        Long existingTime = (Long) request.getAttribute("dtoConversionTime");
+                        long totalTime = (existingTime != null ? existingTime : 0L) + durationMs;
+                        request.setAttribute("dtoConversionTime", totalTime);
+                        request.setAttribute("dtoUsed", true);
+                        log.debug("✓ Batch response DTO conversion tracked: {} ms for {} entities (total: {} ms)",
+                                durationMs, entities.size(), totalTime);
+                    }
+                } catch (Exception e) {
+                    log.debug("Could not update request attributes for batch response DTO tracking: {}", e.getMessage());
+                }
+
                 return responses;
 
             } catch (Exception e) {
@@ -872,14 +938,33 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             return entityResult;
         }
 
-        List<?> responseDtos = convertEntitiesToResponse(entityResult.getCreatedEntities(), operation);
+        long start = System.nanoTime();
 
-        BatchResult<Object> dtoResult = new BatchResult<>();
-        dtoResult.setCreatedEntities((List<Object>) responseDtos);
-        dtoResult.setSkippedCount(entityResult.getSkippedCount());
-        dtoResult.setSkippedReasons(entityResult.getSkippedReasons());
+        try {
+            // Convert entities to DTOs (this will add its own tracking)
+            List<?> responseDtos = convertEntitiesToResponse(entityResult.getCreatedEntities(), operation);
 
-        return dtoResult;
+            BatchResult<Object> dtoResult = new BatchResult<>();
+            dtoResult.setCreatedEntities((List<Object>) responseDtos);
+            dtoResult.setSkippedCount(entityResult.getSkippedCount());
+            dtoResult.setSkippedReasons(entityResult.getSkippedReasons());
+
+            // 🔥 FIX: Track batch result wrapping time (minimal, but for completeness)
+            long durationNanos = System.nanoTime() - start;
+            long durationMs = durationNanos / 1_000_000;
+
+            // Note: convertEntitiesToResponse already tracked the main conversion
+            // This just tracks the BatchResult wrapping overhead
+            if (durationMs > 1) { // Only log if significant
+                log.debug("✓ Batch result wrapping took: {} ms", durationMs);
+            }
+
+            return dtoResult;
+
+        } catch (Exception e) {
+            log.error("Failed to convert batch result to response: {}", e.getMessage(), e);
+            return entityResult; // Fallback to entity result
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -888,18 +973,39 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             return entityPage;
         }
 
-        List<?> dtoContent = convertEntitiesToResponse(entityPage.getContent(), operation);
+        long start = System.nanoTime();
 
-        return PageResponse.builder()
-                .content((List<Object>) dtoContent)
-                .currentPage(entityPage.getCurrentPage())
-                .pageSize(entityPage.getPageSize())
-                .totalElements(entityPage.getTotalElements())
-                .totalPages(entityPage.getTotalPages())
-                .first(entityPage.isFirst())
-                .last(entityPage.isLast())
-                .empty(entityPage.isEmpty())
-                .build();
+        try {
+            // Convert page content to DTOs (this will add its own tracking)
+            List<?> dtoContent = convertEntitiesToResponse(entityPage.getContent(), operation);
+
+            PageResponse<Object> dtoPage = PageResponse.builder()
+                    .content((List<Object>) dtoContent)
+                    .currentPage(entityPage.getCurrentPage())
+                    .pageSize(entityPage.getPageSize())
+                    .totalElements(entityPage.getTotalElements())
+                    .totalPages(entityPage.getTotalPages())
+                    .first(entityPage.isFirst())
+                    .last(entityPage.isLast())
+                    .empty(entityPage.isEmpty())
+                    .build();
+
+            // 🔥 FIX: Track page response wrapping time (minimal, but for completeness)
+            long durationNanos = System.nanoTime() - start;
+            long durationMs = durationNanos / 1_000_000;
+
+            // Note: convertEntitiesToResponse already tracked the main conversion
+            // This just tracks the PageResponse wrapping overhead
+            if (durationMs > 1) { // Only log if significant
+                log.debug("✓ Page response wrapping took: {} ms", durationMs);
+            }
+
+            return dtoPage;
+
+        } catch (Exception e) {
+            log.error("Failed to convert page response to DTO: {}", e.getMessage(), e);
+            return entityPage; // Fallback to entity page
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -913,8 +1019,32 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             return null;
         }
 
+        long start = System.nanoTime();
+
         try {
-            return objectMapper.convertValue(map, requestDtoClassOpt.get());
+            Object dto = objectMapper.convertValue(map, requestDtoClassOpt.get());
+
+            // 🔥 FIX: Track validation DTO conversion time
+            long durationNanos = System.nanoTime() - start;
+            long durationMs = durationNanos / 1_000_000;
+
+            try {
+                ServletRequestAttributes attrs = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+                if (attrs != null) {
+                    HttpServletRequest request = attrs.getRequest();
+                    Long existingTime = (Long) request.getAttribute("dtoConversionTime");
+                    long totalTime = (existingTime != null ? existingTime : 0L) + durationMs;
+                    request.setAttribute("dtoConversionTime", totalTime);
+                    request.setAttribute("dtoUsed", true);
+                    log.debug("✓ Validation DTO conversion tracked: {} ms (total: {} ms)",
+                            durationMs, totalTime);
+                }
+            } catch (Exception e) {
+                log.debug("Could not update request attributes for validation DTO tracking: {}", e.getMessage());
+            }
+
+            return dto;
+
         } catch (Exception e) {
             log.debug("Could not convert to DTO for validation: {}", e.getMessage());
             return null;
@@ -1142,54 +1272,145 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
     // ===== Lifecycle Hook Methods - Override these for custom logic =====
 
+    /**
+     * Called before creating a single entity.
+     * Override this method to add custom validation or data transformation.
+     *
+     * @param entity the entity about to be created
+     */
     protected void beforeCreate(T entity) {
         // Default: no-op - override in subclass
     }
 
+    /**
+     * Called after successfully creating a single entity.
+     * Override this method to trigger notifications, cache updates, etc.
+     *
+     * @param entity the newly created entity with generated ID
+     */
     protected void afterCreate(T entity) {
         // Default: no-op - override in subclass
     }
 
+    /**
+     * Called before creating a batch of entities.
+     * Override this method to add batch-level validation or preprocessing.
+     *
+     * @param entities the list of entities about to be created
+     */
     protected void beforeCreateBatch(List<T> entities) {
         // Default: no-op - override in subclass
     }
 
+    /**
+     * Called after successfully creating a batch of entities.
+     * Override this method for batch-level post-processing.
+     *
+     * @param entities the list of successfully created entities
+     */
     protected void afterCreateBatch(List<T> entities) {
         // Default: no-op - override in subclass
     }
 
+    /**
+     * Called before updating an entity.
+     * Override this method to add custom validation or modify update data.
+     *
+     * @param id             the ID of the entity being updated
+     * @param updates        the map of field updates
+     * @param existingEntity the current state of the entity
+     */
     protected void beforeUpdate(ID id, Map<String, Object> updates, T existingEntity) {
         // Default: no-op - override in subclass
     }
 
+    /**
+     * Called after successfully updating an entity.
+     * Override this method to track changes, send notifications, etc.
+     *
+     * @param updatedEntity the entity after update
+     * @param oldEntity     the entity before update (may be null if cloning failed)
+     */
     protected void afterUpdate(T updatedEntity, T oldEntity) {
         // Default: no-op - override in subclass
     }
 
+    /**
+     * Called AFTER the entity is deleted but BEFORE the transaction commits.
+     * The entity parameter contains the entity state before deletion.
+     * <p>
+     * NOTE: The entity is already deleted from the database at this point.
+     * This hook is for post-deletion operations like logging, cache invalidation,
+     * or triggering external events. If you need to PREVENT deletion, consider
+     * using a custom validation endpoint before calling delete.
+     *
+     * @param id            the ID of the entity that was deleted
+     * @param deletedEntity the entity as it existed before deletion
+     */
     protected void beforeDelete(ID id, T deletedEntity) {
         // Default: no-op - override in subclass
     }
 
+    /**
+     * Called after successfully deleting a single entity.
+     * Override this method to clean up related data, invalidate caches, etc.
+     * <p>
+     * NOTE: The deletedEntity parameter contains the entity as it existed
+     * before deletion, giving you access to all fields for cleanup operations.
+     *
+     * @param id            the ID of the deleted entity
+     * @param deletedEntity the entity that was deleted (state before deletion)
+     */
     protected void afterDelete(ID id, T deletedEntity) {
         // Default: no-op - override in subclass
     }
 
+    /**
+     * Called before deleting a batch of entities.
+     * Override this method to add batch deletion validation.
+     *
+     * @param ids the list of IDs about to be deleted
+     */
     protected void beforeDeleteBatch(List<ID> ids) {
         // Default: no-op - override in subclass
     }
 
+    /**
+     * Called after successfully deleting a batch of entities.
+     * Override this method for batch-level cleanup operations.
+     *
+     * @param deletedIds the list of IDs that were successfully deleted
+     */
     protected void afterDeleteBatch(List<ID> deletedIds) {
         // Default: no-op - override in subclass
     }
 
+    /**
+     * Called after successfully finding an entity by ID.
+     * Override this method to add post-fetch processing.
+     *
+     * @param entity the entity that was found
+     */
     protected void afterFindById(T entity) {
         // Default: no-op - override in subclass
     }
 
+    /**
+     * Called after successfully finding all entities.
+     * Override this method to add post-fetch processing for full lists.
+     *
+     * @param entities the list of entities that were found
+     */
     protected void afterFindAll(List<T> entities) {
         // Default: no-op - override in subclass
     }
 
+    /**
+     * Called after successfully finding a page of entities.
+     * Override this method to add post-fetch processing for paginated results.
+     *
+     * @param pageResponse the page response containing the entities
+     */
     protected void afterFindPaged(PageResponse<T> pageResponse) {
         // Default: no-op - override in subclass
     }

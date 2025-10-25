@@ -17,37 +17,67 @@ public class PerformanceMetric {
     private String endpoint;
     private String method;
     private String entityName;
-    private long executionTimeMs;
+    private String executionTime; // Changed to String with format
     private LocalDateTime timestamp;
     private boolean success;
     private String errorType;
 
-    // Memory tracking - store raw KB value
-    private Long memoryUsedKb;
+    // Memory tracking - formatted strings
+    private String memoryUsed;
 
-    // Computed property - returns formatted string with both KB and MB
-    private String memoryUsedFormatted;
+    // DTO conversion metrics
+    private String dtoConversionTime;
+    private boolean dtoUsed;
 
     private Map<String, Object> additionalData;
 
-    // Helper method to format memory
+    // Internal storage (not serialized)
     @JsonIgnore
-    public String getFormattedMemory() {
-        if (memoryUsedKb == null) return null;
+    private Long executionTimeMs;
 
-        double mb = memoryUsedKb / 1024.0;
+    @JsonIgnore
+    private Long memoryUsedKb;
 
-        if (memoryUsedKb < 1024) {
-            // Less than 1 MB - show only KB
-            return String.format("%d KB", memoryUsedKb);
+    @JsonIgnore
+    private Long dtoConversionTimeMs;
+
+    // Format execution time on creation
+    public void setExecutionTimeMs(Long ms) {
+        this.executionTimeMs = ms;
+        this.executionTime = formatTime(ms);
+    }
+
+    public void setMemoryUsedKb(Long kb) {
+        this.memoryUsedKb = kb;
+        this.memoryUsed = formatMemory(kb);
+    }
+
+    public void setDtoConversionTimeMs(Long ms) {
+        this.dtoConversionTimeMs = ms;
+        this.dtoConversionTime = formatTime(ms);
+    }
+
+    private String formatTime(Long ms) {
+        if (ms == null) return null;
+        if (ms < 1000) {
+            return ms + "ms";
+        } else if (ms < 60000) {
+            double seconds = ms / 1000.0;
+            return String.format("%dms (%.2fs)", ms, seconds);
         } else {
-            // 1 MB or more - show both
-            return String.format("%d KB (%.2f MB)", memoryUsedKb, mb);
+            long minutes = ms / 60000;
+            long seconds = (ms % 60000) / 1000;
+            return String.format("%dms (%dm %ds)", ms, minutes, seconds);
         }
     }
 
-    // Computed MB value
-    public Double getMemoryUsedMb() {
-        return memoryUsedKb != null ? memoryUsedKb / 1024.0 : null;
+    private String formatMemory(Long kb) {
+        if (kb == null || kb <= 0) return null;
+        if (kb < 1024) {
+            return kb + " KB";
+        } else {
+            double mb = kb / 1024.0;
+            return String.format("%d KB (%.2f MB)", kb, mb);
+        }
     }
 }

@@ -97,29 +97,18 @@ public class CrudXPerformanceInterceptor implements HandlerInterceptor {
                 }
             }
 
-            // Calculate memory allocation
+            // Calculate memory
             Long memoryDeltaKb = null;
             if (startMemory != null && threadMXBean instanceof com.sun.management.ThreadMXBean sunThreadMXBean) {
                 try {
                     long threadId = Thread.currentThread().threadId();
                     long endMemory = sunThreadMXBean.getThreadAllocatedBytes(threadId);
                     long allocatedBytes = endMemory - startMemory;
-
-                    // Convert to KB
                     memoryDeltaKb = allocatedBytes / 1024;
 
-                    // For 100K batches: Allow up to 1.5GB before warning
-                    if (memoryDeltaKb > 1536000) { // 1.5GB in KB
-                        log.warn("Very high memory allocation: {} MB for {} {} - " +
-                                        "Large batch operation detected",
-                                memoryDeltaKb / 1024, method, endpoint);
-                    }
-
-                    // Only reject completely unrealistic values (> 3GB suggests measurement error)
-                    if (memoryDeltaKb > 3145728) { // 3GB in KB
-                        log.error("Unrealistic memory value: {} MB for {} {} - " +
-                                        "Measurement error, setting to null",
-                                memoryDeltaKb / 1024, method, endpoint);
+                    // Validate memory value
+                    if (memoryDeltaKb < 0 || memoryDeltaKb > 3145728) { // > 3GB is unrealistic
+                        log.debug("Invalid memory value detected: {} KB, setting to null", memoryDeltaKb);
                         memoryDeltaKb = null;
                     }
                 } catch (Exception e) {
@@ -127,8 +116,19 @@ public class CrudXPerformanceInterceptor implements HandlerInterceptor {
                 }
             }
 
+            // 🔥 FIX: Get DTO conversion time from request attribute (set by controller)
+            Long dtoConversionTime = (Long) request.getAttribute("dtoConversionTime");
+            Boolean dtoUsed = (Boolean) request.getAttribute("dtoUsed");
+
+            // 🔥 DEBUG: Log if DTO was used
+            if (dtoUsed != null && dtoUsed && dtoConversionTime != null) {
+                log.debug("DTO conversion detected: {} ms for endpoint: {} {}",
+                        dtoConversionTime, method, endpoint);
+            }
+
             tracker.recordMetric(endpoint, method, entityName, executionTime,
-                    success, errorType, memoryDeltaKb);
+                    success, errorType, memoryDeltaKb, dtoConversionTime,
+                    dtoUsed != null && dtoUsed);
         }
     }
 

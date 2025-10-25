@@ -1,12 +1,13 @@
 package io.github.sachinnimbal.crudx.web;
 
 import io.github.sachinnimbal.crudx.core.config.CrudXPerformanceProperties;
-import io.github.sachinnimbal.crudx.core.response.CrudxMetadataProperties;
 import io.github.sachinnimbal.crudx.core.metrics.CrudXPerformanceTracker;
 import io.github.sachinnimbal.crudx.core.metrics.PerformanceMetric;
 import io.github.sachinnimbal.crudx.core.metrics.PerformanceSummary;
 import io.github.sachinnimbal.crudx.core.response.ApiResponse;
+import io.github.sachinnimbal.crudx.core.response.CrudxMetadataProperties;
 import io.swagger.v3.oas.annotations.Hidden;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -14,7 +15,12 @@ import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -32,6 +38,7 @@ public class CrudXPerformanceController {
     private final CrudXPerformanceProperties properties;
     @Autowired
     private CrudxMetadataProperties metadataProperties;
+
     public CrudXPerformanceController(CrudXPerformanceTracker tracker, CrudXPerformanceProperties properties) {
         this.tracker = tracker;
         this.properties = properties;
@@ -115,5 +122,46 @@ public class CrudXPerformanceController {
         return ResponseEntity.ok()
                 .contentType(MediaType.TEXT_HTML)
                 .body(html);
+    }
+
+    @GetMapping("/test-dto-tracking")
+    public ResponseEntity<ApiResponse<?>> testDtoTracking() {
+        long start = System.currentTimeMillis();
+
+        try {
+            // Simulate DTO conversion work
+            long dtoStart = System.nanoTime();
+
+            // Simulate some DTO conversion work (e.g., 5-10ms)
+            Thread.sleep(5);
+
+            long dtoConversionMs = (System.nanoTime() - dtoStart) / 1_000_000;
+
+            // Set request attributes to simulate DTO usage
+            ServletRequestAttributes attrs = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+            if (attrs != null) {
+                HttpServletRequest request = attrs.getRequest();
+                request.setAttribute("dtoConversionTime", dtoConversionMs);
+                request.setAttribute("dtoUsed", true);
+
+                log.info("✓ Test DTO tracking set: {} ms", dtoConversionMs);
+            }
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("message", "DTO tracking test");
+            result.put("dtoConversionTimeMs", dtoConversionMs);
+            result.put("dtoUsed", true);
+
+            long executionTime = System.currentTimeMillis() - start;
+
+            return ResponseEntity.ok(ApiResponse.success(result,
+                    "Test completed - check performance metrics", executionTime));
+
+        } catch (Exception e) {
+            long executionTime = System.currentTimeMillis() - start;
+            log.error("Test failed: {} | Time taken: {} ms",
+                    e.getMessage(), executionTime, e);
+            throw new RuntimeException("Test failed: " + e.getMessage(), e);
+        }
     }
 }
