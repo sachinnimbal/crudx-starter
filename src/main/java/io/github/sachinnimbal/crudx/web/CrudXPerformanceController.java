@@ -1,6 +1,7 @@
 package io.github.sachinnimbal.crudx.web;
 
 import io.github.sachinnimbal.crudx.core.config.CrudXPerformanceProperties;
+import io.github.sachinnimbal.crudx.core.dto.metadata.CrudXDTOMetadataReader;
 import io.github.sachinnimbal.crudx.core.metrics.CrudXPerformanceTracker;
 import io.github.sachinnimbal.crudx.core.metrics.PerformanceMetric;
 import io.github.sachinnimbal.crudx.core.metrics.PerformanceSummary;
@@ -38,6 +39,8 @@ public class CrudXPerformanceController {
     private final CrudXPerformanceProperties properties;
     @Autowired
     private CrudxMetadataProperties metadataProperties;
+    @Autowired(required = false)
+    private CrudXDTOMetadataReader dtoMetadataReader;
 
     public CrudXPerformanceController(CrudXPerformanceTracker tracker, CrudXPerformanceProperties properties) {
         this.tracker = tracker;
@@ -52,6 +55,27 @@ public class CrudXPerformanceController {
         Map<String, Object> dashboardData = new HashMap<>();
         dashboardData.put("summary", summary);
         dashboardData.put("metrics", metrics);
+
+        if (dtoMetadataReader != null && dtoMetadataReader.isMetadataAvailable()) {
+            Map<String, Object> dtoInfo = new HashMap<>();
+            dtoInfo.put("available", true);
+            dtoInfo.put("entities", dtoMetadataReader.getAllMetadata());
+
+            int totalRequestDTOs = dtoMetadataReader.getAllMetadata().values().stream()
+                    .mapToInt(CrudXDTOMetadataReader.EntityDTOInfo::getRequestDTOCount)
+                    .sum();
+
+            int totalResponseDTOs = dtoMetadataReader.getAllMetadata().values().stream()
+                    .mapToInt(CrudXDTOMetadataReader.EntityDTOInfo::getResponseDTOCount)
+                    .sum();
+
+            dtoInfo.put("totalRequestDTOs", totalRequestDTOs);
+            dtoInfo.put("totalResponseDTOs", totalResponseDTOs);
+
+            dashboardData.put("dtoMetadata", dtoInfo);
+        } else {
+            dashboardData.put("dtoMetadata", Map.of("available", false));
+        }
 
         return ResponseEntity.ok(ApiResponse.success(dashboardData,
                 "Dashboard data retrieved"));
@@ -122,6 +146,41 @@ public class CrudXPerformanceController {
         return ResponseEntity.ok()
                 .contentType(MediaType.TEXT_HTML)
                 .body(html);
+    }
+
+    @Hidden
+    @GetMapping("/dto-metadata")
+    public ResponseEntity<ApiResponse<?>> getDTOMetadata() {
+        if (dtoMetadataReader == null || !dtoMetadataReader.isMetadataAvailable()) {
+            return ResponseEntity.ok(ApiResponse.success(
+                    Map.of(
+                            "available", false,
+                            "message", "No compile-time DTO metadata available"
+                    ),
+                    "DTO metadata not available"
+            ));
+        }
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("available", true);
+        response.put("entities", dtoMetadataReader.getAllMetadata());
+
+        int totalRequestDTOs = dtoMetadataReader.getAllMetadata().values().stream()
+                .mapToInt(CrudXDTOMetadataReader.EntityDTOInfo::getRequestDTOCount)
+                .sum();
+
+        int totalResponseDTOs = dtoMetadataReader.getAllMetadata().values().stream()
+                .mapToInt(CrudXDTOMetadataReader.EntityDTOInfo::getResponseDTOCount)
+                .sum();
+
+        response.put("summary", Map.of(
+                "totalEntities", dtoMetadataReader.getAllMetadata().size(),
+                "totalRequestDTOs", totalRequestDTOs,
+                "totalResponseDTOs", totalResponseDTOs
+        ));
+
+        return ResponseEntity.ok(ApiResponse.success(response,
+                "DTO metadata retrieved successfully"));
     }
 
     @GetMapping("/test-dto-tracking")

@@ -634,7 +634,6 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         long start = System.nanoTime();
 
         try {
-            // 🔥 KEY FIX: Look up Request DTO class from registry
             Optional<Class<?>> requestDtoClassOpt = dtoRegistry.getRequestDTO(entityClass, operation);
 
             if (requestDtoClassOpt.isEmpty()) {
@@ -649,33 +648,17 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                     requestDtoClass.getSimpleName(),
                     entityClass.getSimpleName());
 
-            // Step 1: Convert JSON Map → Request DTO object
+            // Step 1: Convert JSON Map → Request DTO
             Object requestDto = objectMapper.convertValue(map, requestDtoClass);
 
-            log.debug("✓ Step 1: Map → Request DTO ({})",
-                    requestDtoClass.getSimpleName());
-
-            // Step 2: Use CrudXMapperGenerator to convert Request DTO → Entity
+            // Step 2: Convert Request DTO → Entity using mapper
             T entity = mapperGenerator.toEntity(requestDto, entityClass);
 
-            // 🔥 FIX: Track conversion time and set request attributes
-            long durationNanos = System.nanoTime() - start;
-            long durationMs = durationNanos / 1_000_000;
+            // ✅ Track DTO conversion time
+            trackDtoConversion(start, true);
 
-            try {
-                ServletRequestAttributes attrs = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
-                if (attrs != null) {
-                    HttpServletRequest request = attrs.getRequest();
-                    request.setAttribute("dtoConversionTime", durationMs);
-                    request.setAttribute("dtoUsed", true);
-                    log.debug("✓ DTO conversion tracked: {} ms", durationMs);
-                }
-            } catch (Exception e) {
-                log.debug("Could not set request attributes for DTO tracking: {}", e.getMessage());
-            }
-
-            log.debug("✓ Step 2: Request DTO → Entity (mapped {} fields, took {} ms)",
-                    countNonNullFields(entity), durationMs);
+            log.debug("✓ DTO mapping completed: Map → {} → {}",
+                    requestDtoClass.getSimpleName(), entityClass.getSimpleName());
 
             return entity;
 
@@ -813,7 +796,6 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             return null;
         }
 
-        // Check if Response DTO exists
         if (dtoRegistry == null || !dtoRegistry.hasDTOMapping(entityClass)) {
             log.debug("✓ No Response DTO configured - returning entity directly");
             return entity;
@@ -830,35 +812,16 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
                 Object response;
 
-                // Use Map-based response for auto-inclusion of ID/Audit fields
                 if (annotation != null && (annotation.includeId() || annotation.includeAudit())) {
-                    Map<String, Object> responseMap = mapperGenerator.toResponseMap(entity, dtoClass);
+                    response = mapperGenerator.toResponseMap(entity, dtoClass);
                     log.debug("✓ Used Map-based response with auto-injected fields");
-                    response = responseMap;
                 } else {
-                    // Standard DTO mapping
                     response = mapperGenerator.toResponse(entity, dtoClass);
-                    log.debug("✓ Entity→DTO mapping completed successfully");
+                    log.debug("✓ Entity→Response DTO mapping completed");
                 }
 
-                // 🔥 FIX: Track response DTO conversion time
-                long durationNanos = System.nanoTime() - start;
-                long durationMs = durationNanos / 1_000_000;
-
-                try {
-                    ServletRequestAttributes attrs = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
-                    if (attrs != null) {
-                        HttpServletRequest request = attrs.getRequest();
-                        Long existingTime = (Long) request.getAttribute("dtoConversionTime");
-                        long totalTime = (existingTime != null ? existingTime : 0L) + durationMs;
-                        request.setAttribute("dtoConversionTime", totalTime);
-                        request.setAttribute("dtoUsed", true);
-                        log.debug("✓ Response DTO conversion tracked: {} ms (total: {} ms)",
-                                durationMs, totalTime);
-                    }
-                } catch (Exception e) {
-                    log.debug("Could not update request attributes for response DTO tracking: {}", e.getMessage());
-                }
+                // ✅ Track response DTO conversion
+                trackDtoConversion(start, true);
 
                 return response;
 
@@ -866,6 +829,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                 log.error("Response mapper failed: {}", e.getMessage(), e);
             }
         }
+
         log.debug("✓ Returning entity directly (no Response DTO for operation {})", operation);
         return entity;
     }
@@ -893,33 +857,15 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                 List<?> responses;
 
                 if (annotation != null && (annotation.includeId() || annotation.includeAudit())) {
-                    List<Map<String, Object>> responseMaps =
-                            mapperGenerator.toResponseMapList(entities, dtoClass);
+                    responses = mapperGenerator.toResponseMapList(entities, dtoClass);
                     log.debug("✓ Used Map-based response list with auto-injected fields");
-                    responses = responseMaps;
                 } else {
                     responses = mapperGenerator.toResponseList(entities, dtoClass);
                     log.debug("✓ Converted {} entities to Response DTOs", entities.size());
                 }
 
-                // 🔥 FIX: Track batch response DTO conversion time
-                long durationNanos = System.nanoTime() - start;
-                long durationMs = durationNanos / 1_000_000;
-
-                try {
-                    ServletRequestAttributes attrs = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
-                    if (attrs != null) {
-                        HttpServletRequest request = attrs.getRequest();
-                        Long existingTime = (Long) request.getAttribute("dtoConversionTime");
-                        long totalTime = (existingTime != null ? existingTime : 0L) + durationMs;
-                        request.setAttribute("dtoConversionTime", totalTime);
-                        request.setAttribute("dtoUsed", true);
-                        log.debug("✓ Batch response DTO conversion tracked: {} ms for {} entities (total: {} ms)",
-                                durationMs, entities.size(), totalTime);
-                    }
-                } catch (Exception e) {
-                    log.debug("Could not update request attributes for batch response DTO tracking: {}", e.getMessage());
-                }
+                // ✅ Track batch response conversion
+                trackDtoConversion(start, true);
 
                 return responses;
 
@@ -937,33 +883,23 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         if (dtoRegistry == null || !dtoRegistry.hasDTOMapping(entityClass)) {
             return entityResult;
         }
-
         long start = System.nanoTime();
-
         try {
-            // Convert entities to DTOs (this will add its own tracking)
+            // Convert entities to DTOs (this will call trackDtoConversion internally)
             List<?> responseDtos = convertEntitiesToResponse(entityResult.getCreatedEntities(), operation);
 
             BatchResult<Object> dtoResult = new BatchResult<>();
             dtoResult.setCreatedEntities((List<Object>) responseDtos);
             dtoResult.setSkippedCount(entityResult.getSkippedCount());
             dtoResult.setSkippedReasons(entityResult.getSkippedReasons());
-
-            // 🔥 FIX: Track batch result wrapping time (minimal, but for completeness)
-            long durationNanos = System.nanoTime() - start;
-            long durationMs = durationNanos / 1_000_000;
-
-            // Note: convertEntitiesToResponse already tracked the main conversion
-            // This just tracks the BatchResult wrapping overhead
-            if (durationMs > 1) { // Only log if significant
+            long durationMs = (System.nanoTime() - start) / 1_000_000;
+            if (durationMs > 1) { // Only log if significant overhead
                 log.debug("✓ Batch result wrapping took: {} ms", durationMs);
             }
-
             return dtoResult;
-
         } catch (Exception e) {
             log.error("Failed to convert batch result to response: {}", e.getMessage(), e);
-            return entityResult; // Fallback to entity result
+            return entityResult;
         }
     }
 
@@ -973,10 +909,15 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             return entityPage;
         }
 
+        // ✅ Check if there's content to convert
+        if (entityPage.getContent() == null || entityPage.getContent().isEmpty()) {
+            return entityPage;
+        }
+
         long start = System.nanoTime();
 
         try {
-            // Convert page content to DTOs (this will add its own tracking)
+            // Convert page content to DTOs - this will track DTO conversion time
             List<?> dtoContent = convertEntitiesToResponse(entityPage.getContent(), operation);
 
             PageResponse<Object> dtoPage = PageResponse.builder()
@@ -990,21 +931,15 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                     .empty(entityPage.isEmpty())
                     .build();
 
-            // 🔥 FIX: Track page response wrapping time (minimal, but for completeness)
-            long durationNanos = System.nanoTime() - start;
-            long durationMs = durationNanos / 1_000_000;
-
-            // Note: convertEntitiesToResponse already tracked the main conversion
-            // This just tracks the PageResponse wrapping overhead
-            if (durationMs > 1) { // Only log if significant
-                log.debug("✓ Page response wrapping took: {} ms", durationMs);
-            }
+            long durationMs = (System.nanoTime() - start) / 1_000_000;
+            log.debug("✓ Paged response conversion completed: {} items in {} ms",
+                    entityPage.getContent().size(), durationMs);
 
             return dtoPage;
 
         } catch (Exception e) {
             log.error("Failed to convert page response to DTO: {}", e.getMessage(), e);
-            return entityPage; // Fallback to entity page
+            return entityPage;
         }
     }
 
@@ -1024,24 +959,8 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         try {
             Object dto = objectMapper.convertValue(map, requestDtoClassOpt.get());
 
-            // 🔥 FIX: Track validation DTO conversion time
-            long durationNanos = System.nanoTime() - start;
-            long durationMs = durationNanos / 1_000_000;
-
-            try {
-                ServletRequestAttributes attrs = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
-                if (attrs != null) {
-                    HttpServletRequest request = attrs.getRequest();
-                    Long existingTime = (Long) request.getAttribute("dtoConversionTime");
-                    long totalTime = (existingTime != null ? existingTime : 0L) + durationMs;
-                    request.setAttribute("dtoConversionTime", totalTime);
-                    request.setAttribute("dtoUsed", true);
-                    log.debug("✓ Validation DTO conversion tracked: {} ms (total: {} ms)",
-                            durationMs, totalTime);
-                }
-            } catch (Exception e) {
-                log.debug("Could not update request attributes for validation DTO tracking: {}", e.getMessage());
-            }
+            // ✅ Track validation DTO conversion
+            trackDtoConversion(start, true);
 
             return dto;
 
@@ -1050,6 +969,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             return null;
         }
     }
+    
     // ==================== HELPER METHODS ====================
 
     private void validatePagination(int page, int size) {
@@ -1255,6 +1175,33 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             }
         } catch (IllegalAccessException e) {
             log.warn("Could not validate required fields: {}", e.getMessage());
+        }
+    }
+
+    // Add comprehensive DTO tracking helper that logs details
+    private void trackDtoConversion(long startNanos, boolean used) {
+        long durationMs = (System.nanoTime() - startNanos) / 1_000_000;
+
+        try {
+            ServletRequestAttributes attrs = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+            if (attrs != null) {
+                HttpServletRequest request = attrs.getRequest();
+
+                // Get existing time if any
+                Long existingTime = (Long) request.getAttribute("dtoConversionTime");
+                long totalTime = (existingTime != null ? existingTime : 0L) + durationMs;
+
+                // Set attributes
+                request.setAttribute("dtoConversionTime", totalTime);
+                request.setAttribute("dtoUsed", used || (request.getAttribute("dtoUsed") != null && (Boolean) request.getAttribute("dtoUsed")));
+
+                if (log.isDebugEnabled()) {
+                    log.debug("✓ DTO conversion tracked: +{} ms = {} ms total [Entity: {}, DTO: {}]",
+                            durationMs, totalTime, entityClass.getSimpleName(), used ? "YES" : "NO");
+                }
+            }
+        } catch (Exception e) {
+            log.debug("Could not track DTO conversion: {}", e.getMessage());
         }
     }
 

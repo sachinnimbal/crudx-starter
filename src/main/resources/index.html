@@ -1050,7 +1050,7 @@ public class EmployeeController extends CrudXController&lt;Employee, Long&gt; { 
                 </div>
             </div>
         </div>
-
+        <div id="dtoMetadataContainer" class="mb-8"></div>
         <div class="card rounded-2xl p-6 shadow-xl">
             <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
                 <div>
@@ -1547,7 +1547,6 @@ public class EmployeeController extends CrudXController&lt;Employee, Long&gt; { 
     function updateTable() {
         const tbody = document.getElementById('endpointList');
         tbody.innerHTML = '';
-
         document.getElementById('totalCount').textContent = filteredEndpointStats.length;
 
         if (filteredEndpointStats.length === 0) {
@@ -1570,6 +1569,9 @@ public class EmployeeController extends CrudXController&lt;Employee, Long&gt; { 
 
             const safeKey = stats.key.replace(/[^a-zA-Z0-9]/g, '_');
 
+            // Check if this endpoint uses DTOs
+            const hasDtoConversion = stats.dtoConversionCount > 0;
+
             const row = document.createElement('tr');
             row.className = 'table-row border-b cursor-pointer';
             row.style.borderColor = 'var(--border-color)';
@@ -1582,8 +1584,11 @@ public class EmployeeController extends CrudXController&lt;Employee, Long&gt; { 
                 </td>
                 <td class="py-3 px-4">
                     <div class="flex items-center gap-2">
-                        <div>
-                            <div class="font-medium text-sm" style="color: var(--text-secondary);">${stats.endpoint}</div>
+                        <div class="flex-1">
+                            <div class="flex items-center gap-2">
+                                <span class="font-medium text-sm" style="color: var(--text-secondary);">${stats.endpoint}</span>
+                                ${hasDtoConversion ? '<span class="badge bg-pink-500/20 text-pink-400 border-pink-500/30 text-xs">DTO</span>' : ''}
+                            </div>
                             ${stats.entityName ? `<div class="text-xs" style="color: var(--text-muted);">${stats.entityName}</div>` : ''}
                         </div>
                     </div>
@@ -2037,7 +2042,161 @@ public class EmployeeController extends CrudXController&lt;Employee, Long&gt; { 
     loadData();
     startAutoRefresh();
 </script>
+<script>
+    // Add these variables at the top of your JavaScript
+    let dtoMetadata = null;
 
+    // Update loadData function to include DTO metadata
+    async function loadData(silent = false) {
+        try {
+            if (!silent) {
+                document.getElementById('loading').classList.remove('hidden');
+                document.getElementById('content').classList.add('hidden');
+            }
+
+            const response = await fetch(`${API_BASE}/dashboard-data`);
+            const result = await response.json();
+
+            if (result.success) {
+                const { summary, metrics, dtoMetadata: dtoMeta } = result.data;
+
+                metricsData = metrics;
+                dtoMetadata = dtoMeta; // Store DTO metadata
+
+                allEndpointStats = Object.entries(summary.endpointStats || {}).map(([key, stats]) => ({
+                    key,
+                    ...stats
+                }));
+                filteredEndpointStats = [...allEndpointStats];
+
+                updateKPIs(summary);
+                updateDTOMetadataDisplay(); // NEW: Update DTO info
+                updateCharts(summary, metrics);
+                sortEndpoints();
+
+                if (!silent) {
+                    document.getElementById('loading').classList.add('hidden');
+                    document.getElementById('content').classList.remove('hidden');
+                }
+                document.getElementById('error').classList.add('hidden');
+                document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
+            }
+        } catch (error) {
+            if (!silent) {
+                showError('Connection error: ' + error.message);
+            }
+        }
+    }
+
+    // NEW: Function to display DTO metadata
+    function updateDTOMetadataDisplay() {
+        const container = document.getElementById('dtoMetadataContainer');
+
+        if (!dtoMetadata || !dtoMetadata.available) {
+            container.innerHTML = `
+                <div class="card rounded-2xl p-6 shadow-xl">
+                    <div class="flex items-center gap-3 mb-4">
+                        <div class="p-3 bg-gray-500/20 rounded-xl">
+                            <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                      d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                            </svg>
+                        </div>
+                        <div>
+                            <h3 class="text-lg font-bold" style="color: var(--text-primary);">DTO Metadata</h3>
+                            <p class="text-sm" style="color: var(--text-muted);">Not available</p>
+                        </div>
+                    </div>
+                </div>
+            `;
+            return;
+        }
+
+        const { entities, totalRequestDTOs, totalResponseDTOs } = dtoMetadata;
+        const entityCount = Object.keys(entities || {}).length;
+
+        container.innerHTML = `
+            <div class="card rounded-2xl p-6 shadow-xl">
+                <div class="flex items-center justify-between mb-6">
+                    <div class="flex items-center gap-3">
+                        <div class="p-3 bg-indigo-500/20 rounded-xl">
+                            <svg class="w-6 h-6 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                      d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/>
+                            </svg>
+                        </div>
+                        <div>
+                            <h3 class="text-lg font-bold" style="color: var(--text-primary);">📦 DTO Configuration (Compile-Time)</h3>
+                            <p class="text-sm" style="color: var(--text-muted);">Generated at build time</p>
+                        </div>
+                    </div>
+                    <span class="badge bg-green-500/20 text-green-400 border-green-500/30">
+                        ✓ Available
+                    </span>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                    <div class="rounded-lg p-4" style="background: var(--bg-tertiary); border: 1px solid var(--border-color);">
+                        <p class="text-xs mb-2 uppercase font-semibold" style="color: var(--text-muted);">Total Entities</p>
+                        <p class="text-3xl font-bold" style="color: var(--text-primary);">${entityCount}</p>
+                    </div>
+                    <div class="rounded-lg p-4" style="background: var(--bg-tertiary); border: 1px solid var(--border-color);">
+                        <p class="text-xs mb-2 uppercase font-semibold" style="color: var(--text-muted);">Request DTOs</p>
+                        <p class="text-3xl font-bold text-blue-400">${totalRequestDTOs || 0}</p>
+                    </div>
+                    <div class="rounded-lg p-4" style="background: var(--bg-tertiary); border: 1px solid var(--border-color);">
+                        <p class="text-xs mb-2 uppercase font-semibold" style="color: var(--text-muted);">Response DTOs</p>
+                        <p class="text-3xl font-bold text-green-400">${totalResponseDTOs || 0}</p>
+                    </div>
+                </div>
+
+                <div class="space-y-3">
+                    <h4 class="text-sm font-semibold uppercase" style="color: var(--text-muted);">Entity → DTO Mappings</h4>
+                    <div class="space-y-2 max-h-96 overflow-y-auto">
+                        ${Object.entries(entities || {}).map(([entityName, info]) => {
+                            const simpleEntityName = entityName.split('.').pop();
+                            return `
+                                <div class="rounded-lg p-4 border" style="background: var(--bg-secondary); border-color: var(--border-color);">
+                                    <div class="flex items-center justify-between mb-3">
+                                        <span class="font-semibold" style="color: var(--text-primary);">${simpleEntityName}</span>
+                                        <div class="flex gap-2">
+                                            ${info.requestDTOCount > 0 ? `<span class="badge bg-blue-500/20 text-blue-400">${info.requestDTOCount} Request</span>` : ''}
+                                            ${info.responseDTOCount > 0 ? `<span class="badge bg-green-500/20 text-green-400">${info.responseDTOCount} Response</span>` : ''}
+                                        </div>
+                                    </div>
+                                    ${info.requestDTONames && info.requestDTONames.length > 0 ? `
+                                        <div class="mb-2">
+                                            <p class="text-xs mb-1" style="color: var(--text-muted);">Request DTOs:</p>
+                                            <div class="flex flex-wrap gap-1">
+                                                ${info.requestDTONames.map(name => `
+                                                    <span class="text-xs px-2 py-1 rounded" style="background: rgba(59, 130, 246, 0.1); color: var(--text-secondary);">
+                                                        ${name}
+                                                    </span>
+                                                `).join('')}
+                                            </div>
+                                        </div>
+                                    ` : ''}
+                                    ${info.responseDTONames && info.responseDTONames.length > 0 ? `
+                                        <div>
+                                            <p class="text-xs mb-1" style="color: var(--text-muted);">Response DTOs:</p>
+                                            <div class="flex flex-wrap gap-1">
+                                                ${info.responseDTONames.map(name => `
+                                                    <span class="text-xs px-2 py-1 rounded" style="background: rgba(34, 197, 94, 0.1); color: var(--text-secondary);">
+                                                        ${name}
+                                                    </span>
+                                                `).join('')}
+                                            </div>
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+</script>
 <script>
     // Check LinkedIn badge loading with interval
     let checkCount = 0;
