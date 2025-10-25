@@ -6,8 +6,8 @@ plugins {
     id 'com.gradleup.nmcp' version '0.0.8'
 }
 
-apply from : "gradle/author.gradle"
-apply from : "gradle/publishing.gradle"
+apply from: "gradle/author.gradle"
+apply from: "gradle/publishing.gradle"
 
 group = project.findProperty("group")
 version = project.findProperty("version")
@@ -46,6 +46,7 @@ dependencyManagement {
 }
 
 dependencies {
+    // ==================== PUBLIC API ====================
     api 'org.springframework.boot:spring-boot-starter-validation'
     api 'org.springframework.boot:spring-boot-starter-aop'
     api 'org.springframework:spring-context'
@@ -53,26 +54,42 @@ dependencies {
     api 'org.springframework.boot:spring-boot-configuration-processor'
     api 'org.springframework.boot:spring-boot-autoconfigure'
     api 'org.springframework.boot:spring-boot-starter-web'
+    api 'org.springframework.boot:spring-boot-starter-actuator'
     api 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.4'
+    api 'jakarta.persistence:jakarta.persistence-api'
+    api 'com.google.auto.service:auto-service-annotations:1.1.1'
 
+    // ==================== OPTIONAL INTEGRATIONS ====================
     compileOnly 'org.springframework.boot:spring-boot-starter-data-mongodb'
     compileOnly 'org.springframework.boot:spring-boot-starter-data-jpa'
     compileOnly 'com.mysql:mysql-connector-j'
     compileOnly 'org.postgresql:postgresql'
-    compileOnly 'jakarta.persistence:jakarta.persistence-api'
-
+    compileOnly 'com.github.ben-manes.caffeine:caffeine:3.1.8'
+    compileOnly 'org.springframework.boot:spring-boot-starter-data-redis'
+    compileOnly 'com.hazelcast:hazelcast:5.3.6'
+    compileOnly 'org.ehcache:ehcache:3.10.8'
+    compileOnly 'net.spy:spymemcached:2.12.3'
     compileOnly 'org.projectlombok:lombok'
+    compileOnly 'com.google.guava:guava:32.1.2-jre'
+    // Annotation processor runtime
+    annotationProcessor 'com.google.auto.service:auto-service:1.1.1'
     annotationProcessor 'org.projectlombok:lombok'
 
+    // ==================== RUNTIME DEPENDENCIES ====================
     implementation 'org.springframework.boot:spring-boot-starter-thymeleaf'
     implementation 'org.slf4j:slf4j-api'
     implementation 'com.fasterxml.jackson.core:jackson-databind'
     implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
+    // JavaPoet - Type-safe Java code generation
+    implementation 'com.squareup:javapoet:1.13.0'
+    implementation 'org.springframework:spring-core'
 
+    // ==================== TEST DEPENDENCIES ====================
     testImplementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.4'
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     testImplementation 'org.springframework.boot:spring-boot-starter-data-mongodb'
+    testImplementation 'org.springframework.boot:spring-boot-starter-jdbc'
     testImplementation 'org.testcontainers:junit-jupiter'
     testImplementation 'org.testcontainers:mongodb'
     testImplementation 'org.testcontainers:mysql'
@@ -93,6 +110,9 @@ tasks.withType(Javadoc).configureEach {
     options.addBooleanOption('Xdoclint:none', true)
 }
 
+jar {
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
 
 tasks.register('generateVersionProperties') {
     def propertiesFile = layout.buildDirectory.file('resources/main/crudx-version.properties')
@@ -115,9 +135,4 @@ build.date=${new Date().format('yyyy-MM-dd HH:mm:ss')}
 """
         logger.lifecycle("✓ Generated version properties: ${file.absolutePath}")
     }
-}
-
-tasks.withType(JavaExec).configureEach {
-    systemProperty 'crudx.version', project.version
-    systemProperty 'crudx.group', project.group
 }

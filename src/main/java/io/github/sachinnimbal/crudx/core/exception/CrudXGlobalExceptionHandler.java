@@ -1,24 +1,12 @@
-/*
- * Copyright 2025 Sachin Nimbal
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 package io.github.sachinnimbal.crudx.core.exception;
 
 import io.github.sachinnimbal.crudx.core.response.ApiResponse;
 import io.github.sachinnimbal.crudx.web.CrudXController;
+import jakarta.persistence.LockTimeoutException;
+import jakarta.persistence.OptimisticLockException;
+import jakarta.persistence.PessimisticLockException;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
@@ -39,10 +27,6 @@ import java.sql.SQLException;
 import java.util.HashMap;
 import java.util.Map;
 
-/**
- * @author Sachin Nimbal
- * @see <a href="https://www.linkedin.com/in/sachin-nimbal/">LinkedIn Profile</a>
- */
 @Slf4j
 @RestControllerAdvice(assignableTypes = CrudXController.class)
 public class CrudXGlobalExceptionHandler {
@@ -330,6 +314,51 @@ public class CrudXGlobalExceptionHandler {
                         HttpStatus.INTERNAL_SERVER_ERROR,
                         "INTERNAL_SERVER_ERROR",
                         ex.getMessage() != null ? ex.getMessage() : "Unknown error"
+                ));
+    }
+
+    @ExceptionHandler(PessimisticLockException.class)
+    public ResponseEntity<ApiResponse<Void>> handlePessimisticLock(
+            PessimisticLockException ex, WebRequest request) {
+
+        log.error("Database lock timeout: {}", ex.getMessage());
+
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.error(
+                        "Operation timed out due to database lock. Please retry.",
+                        HttpStatus.CONFLICT,
+                        "LOCK_TIMEOUT",
+                        "Database resource locked by another transaction"
+                ));
+    }
+
+    @ExceptionHandler(OptimisticLockException.class)
+    public ResponseEntity<ApiResponse<Void>> handleOptimisticLock(
+            OptimisticLockException ex, WebRequest request) {
+
+        log.warn("Optimistic lock failure: {}", ex.getMessage());
+
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.error(
+                        "Data was modified by another process. Please refresh and retry.",
+                        HttpStatus.CONFLICT,
+                        "OPTIMISTIC_LOCK_FAILURE",
+                        ex.getMessage()
+                ));
+    }
+
+    @ExceptionHandler({CannotAcquireLockException.class, LockTimeoutException.class})
+    public ResponseEntity<ApiResponse<Void>> handleDeadlock(
+            Exception ex, WebRequest request) {
+
+        log.error("Database deadlock detected: {}", ex.getMessage());
+
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.error(
+                        "Operation failed due to concurrent access. Please retry after a moment.",
+                        HttpStatus.CONFLICT,
+                        "DEADLOCK_DETECTED",
+                        "Multiple transactions accessing same resources"
                 ));
     }
 }

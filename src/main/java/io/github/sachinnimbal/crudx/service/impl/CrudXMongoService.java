@@ -1,23 +1,8 @@
-/*
- * Copyright 2025 Sachin Nimbal
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 package io.github.sachinnimbal.crudx.service.impl;
 
 import io.github.sachinnimbal.crudx.core.annotations.CrudXImmutable;
 import io.github.sachinnimbal.crudx.core.annotations.CrudXUniqueConstraint;
+import io.github.sachinnimbal.crudx.core.config.CrudXProperties;
 import io.github.sachinnimbal.crudx.core.exception.DuplicateEntityException;
 import io.github.sachinnimbal.crudx.core.exception.EntityNotFoundException;
 import io.github.sachinnimbal.crudx.core.model.CrudXMongoEntity;
@@ -37,6 +22,7 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.io.Serializable;
 import java.lang.reflect.Field;
@@ -45,10 +31,6 @@ import java.lang.reflect.Type;
 import java.util.*;
 import java.util.stream.Collectors;
 
-/**
- * @author Sachin Nimbal
- * @see <a href="https://www.linkedin.com/in/sachin-nimbal/">LinkedIn Profile</a>
- */
 @Slf4j
 public abstract class CrudXMongoService<T extends CrudXMongoEntity<ID>, ID extends Serializable>
         implements CrudXService<T, ID> {
@@ -61,8 +43,9 @@ public abstract class CrudXMongoService<T extends CrudXMongoEntity<ID>, ID exten
 
     protected Class<T> entityClass;
 
-    // Configurable default batch size - optimized for minimal memory usage
-    private static final int DEFAULT_BATCH_SIZE = 100;  // Smaller batches for lower memory
+    @Autowired
+    protected CrudXProperties crudxProperties;
+
     private static final int MAX_IN_MEMORY_THRESHOLD = 5000;  // Lower threshold
 
     @PostConstruct
@@ -91,6 +74,16 @@ public abstract class CrudXMongoService<T extends CrudXMongoEntity<ID>, ID exten
             return;
         }
 
+        if (mongoTemplate != null) {
+            try {
+                // Validate MongoDB connection
+                mongoTemplate.executeCommand("{ ping: 1 }");
+                log.info("MongoDB connection validated for {}", entityClass.getSimpleName());
+            } catch (Exception e) {
+                log.error("MongoDB connection validation failed", e);
+                throw new IllegalStateException("Cannot connect to MongoDB", e);
+            }
+        }
         throw new IllegalStateException(
                 "Could not resolve entity class for service: " + getClass().getSimpleName() +
                         ". Ensure service properly extends CrudXMongoService with concrete type parameters."
@@ -118,36 +111,31 @@ public abstract class CrudXMongoService<T extends CrudXMongoEntity<ID>, ID exten
         log.debug("Creating batch of {} MongoDB entities (skipDuplicates: {})", entities.size(), skipDuplicates);
 
         BatchResult<T> result = new BatchResult<>();
-        int batchSize = DEFAULT_BATCH_SIZE;
+        int batchSize = crudxProperties.getBatchSize();
 
         for (int i = 0; i < entities.size(); i += batchSize) {
             int end = Math.min(i + batchSize, entities.size());
             List<T> batchToProcess = entities.subList(i, end);
             List<T> validEntities = new ArrayList<>();
 
-            // Validate each entity in the batch
             for (int j = 0; j < batchToProcess.size(); j++) {
                 T entity = batchToProcess.get(j);
                 int globalIndex = i + j;
 
                 try {
-                    // Validate unique constraints - will throw DuplicateEntityException if duplicate found
                     validateUniqueConstraints(entity);
                     entity.onCreate();
                     validEntities.add(entity);
                 } catch (DuplicateEntityException e) {
                     if (skipDuplicates) {
-                        // Skip this duplicate and continue
                         result.addSkippedReason(String.format("Entity at index %d skipped - %s", globalIndex, e.getMessage()));
                         result.setSkippedCount(result.getSkippedCount() + 1);
                         log.debug("Skipped duplicate entity at index {}: {}", globalIndex, e.getMessage());
                     } else {
-                        // Don't skip - throw exception to fail the entire batch
                         log.error("Duplicate entity found at index {} - failing batch creation", globalIndex);
                         throw e;
                     }
                 } catch (Exception e) {
-                    // For other exceptions, skip if skipDuplicates is true, otherwise throw
                     if (skipDuplicates) {
                         result.addSkippedReason(String.format("Entity at index %d skipped - error: %s", globalIndex, e.getMessage()));
                         result.setSkippedCount(result.getSkippedCount() + 1);
@@ -159,7 +147,6 @@ public abstract class CrudXMongoService<T extends CrudXMongoEntity<ID>, ID exten
                 }
             }
 
-            // Insert only valid entities
             if (!validEntities.isEmpty()) {
                 long batchStartTime = System.currentTimeMillis();
                 result.getCreatedEntities().addAll(mongoTemplate.insertAll(validEntities));
@@ -243,7 +230,7 @@ public abstract class CrudXMongoService<T extends CrudXMongoEntity<ID>, ID exten
     private List<T> findAllBatched(Sort sort) {
         List<T> allEntities = new ArrayList<>();
         int skip = 0;
-        int batchSize = DEFAULT_BATCH_SIZE;
+        int batchSize = crudxProperties.getBatchSize();
 
         while (true) {
             Query query = new Query().skip(skip).limit(batchSize);
@@ -378,6 +365,71 @@ public abstract class CrudXMongoService<T extends CrudXMongoEntity<ID>, ID exten
         return result;
     }
 
+    @Override
+    @Transactional(timeout = 600)
+    public BatchResult<T> updateBatch(Map<ID, Map<String, Object>> updates) {
+        long startTime = System.currentTimeMillis();
+        log.debug("Updating batch of {} MongoDB entities", updates.size());
+
+        BatchResult<T> result = new BatchResult<>();
+        int processedCount = 0;
+        int batchSize = crudxProperties.getBatchSize();
+
+        // Process updates in batches for better performance
+        List<Map.Entry<ID, Map<String, Object>>> updatesList = new ArrayList<>(updates.entrySet());
+
+        for (int i = 0; i < updatesList.size(); i++) {
+            Map.Entry<ID, Map<String, Object>> entry = updatesList.get(i);
+
+            // Find the entity first (throws EntityNotFoundException if not found)
+            T entity = findById(entry.getKey());
+
+            // Validate updates (throws IllegalArgumentException if validation fails)
+            autoValidateUpdates(entry.getValue(), entity);
+
+            // Build update query
+            Query query = new Query(Criteria.where("_id").is(entry.getKey()));
+            Update update = new Update();
+
+            // Apply field updates
+            entry.getValue().forEach((key, value) -> {
+                if (!"id".equals(key) && !"_id".equals(key)) {
+                    update.set(key, value);
+                }
+            });
+
+            // Update audit timestamp
+            entity.onUpdate();
+            update.set("audit.updatedAt", entity.getAudit().getUpdatedAt());
+
+            // Execute update
+            mongoTemplate.updateFirst(query, update, entityClass);
+
+            // Fetch updated entity
+            T updatedEntity = findById(entry.getKey());
+            result.getCreatedEntities().add(updatedEntity);
+            processedCount++;
+
+            // Log progress every batch
+            if (processedCount % batchSize == 0 || (i + 1) == updatesList.size()) {
+                log.info("Processed batch {}/{} | Updated: {}",
+                        i + 1, updatesList.size(),
+                        result.getCreatedEntities().size());
+            }
+        }
+
+        long totalDuration = System.currentTimeMillis() - startTime;
+        double avgTimePerEntity = result.getTotalProcessed() > 0 ?
+                (double) totalDuration / result.getTotalProcessed() : 0;
+
+        log.info("Batch update completed: {} updated | Total time: {} ms | Avg time per entity: {} ms",
+                result.getCreatedEntities().size(),
+                totalDuration,
+                String.format("%.3f", avgTimePerEntity));
+
+        return result;
+    }
+
     private void validateUniqueConstraints(T entity) {
         CrudXUniqueConstraint[] constraints = entityClass.getAnnotationsByType(CrudXUniqueConstraint.class);
         for (CrudXUniqueConstraint constraint : constraints) {
@@ -427,9 +479,6 @@ public abstract class CrudXMongoService<T extends CrudXMongoEntity<ID>, ID exten
         return entityClass != null ? entityClass.getSimpleName() : "Unknown";
     }
 
-    /**
-     * AUTO-VALIDATES using annotations
-     */
     private void autoValidateUpdates(Map<String, Object> updates, T entity) {
         // 1. Smart default: Always protect these fields
         List<String> autoProtectedFields = List.of(
