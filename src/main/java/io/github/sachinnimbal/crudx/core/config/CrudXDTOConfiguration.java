@@ -10,12 +10,6 @@ import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 
-/**
- * Auto-configuration for CrudX DTO feature.
- *
- * @author Sachin Nimbal
- * @since 1.0.2
- */
 @Slf4j
 @Configuration
 @ConditionalOnProperty(prefix = "crudx.dto", name = "enabled", havingValue = "true", matchIfMissing = true)

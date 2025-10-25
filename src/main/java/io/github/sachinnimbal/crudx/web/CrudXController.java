@@ -43,19 +43,6 @@ import java.util.stream.Collectors;
 
 import static io.github.sachinnimbal.crudx.core.enums.CrudXOperation.*;
 
-/**
- * 🔥 FINAL FIXED VERSION - Enterprise-Grade CRUD Controller
- * <p>
- * Key Features:
- * - ✅ Smart DTO → Entity mapping with @CrudXField support
- * - ✅ Auto Entity response when no Response DTO defined
- * - ✅ Bidirectional field resolution (DTO↔Entity)
- * - ✅ Zero-configuration for simple cases
- * - ✅ Full annotation support for complex scenarios
- *
- * @author Sachin Nimbal
- * @since 1.0.2
- */
 @Slf4j
 public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends Serializable> {
 
@@ -134,9 +121,6 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         }
     }
 
-    /**
-     * CREATE - Enhanced with smart DTO mapping
-     */
     @PostMapping
     public ResponseEntity<ApiResponse<?>> create(@Valid @RequestBody Map<String, Object> requestBody) {
         long startTime = System.currentTimeMillis();
@@ -184,9 +168,6 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         }
     }
 
-    /**
-     * BATCH CREATE - Enhanced with DTO support
-     */
     @PostMapping("/batch")
     public ResponseEntity<ApiResponse<?>> createBatch(
             @Valid @RequestBody List<Map<String, Object>> requestBodies,
@@ -682,9 +663,6 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         }
     }
 
-    /**
-     * Direct Map → Entity conversion (fallback when no DTO is configured)
-     */
     private T convertMapToEntityDirectly(Map<String, Object> map) {
         try {
             log.debug("Direct conversion: Map → {}", entityClass.getSimpleName());
@@ -697,9 +675,6 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         }
     }
 
-    /**
-     * Helper: Count non-null fields for debugging
-     */
     private int countNonNullFields(Object obj) {
         if (obj == null) return 0;
 
@@ -762,10 +737,6 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         return entity;
     }
 
-    /**
-     * 🔥 CRITICAL FIX: Convert Entity list to Response list
-     * Returns entities directly if no Response DTO is configured
-     */
     @SuppressWarnings("unchecked")
     private List<?> convertEntitiesToResponse(List<T> entities, CrudXOperation operation) {
         if (entities == null || entities.isEmpty()) {
@@ -804,9 +775,6 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         return entities;
     }
 
-    /**
-     * Convert BatchResult to Response
-     */
     @SuppressWarnings("unchecked")
     private Object convertBatchResultToResponse(BatchResult<T> entityResult, CrudXOperation operation) {
         if (dtoRegistry == null || !dtoRegistry.hasDTOMapping(entityClass)) {
@@ -823,9 +791,6 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         return dtoResult;
     }
 
-    /**
-     * Convert PageResponse to DTO
-     */
     @SuppressWarnings("unchecked")
     private Object convertPageResponseToDTO(PageResponse<T> entityPage, CrudXOperation operation) {
         if (dtoRegistry == null || !dtoRegistry.hasDTOMapping(entityClass)) {
@@ -1080,146 +1045,60 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         return idClass;
     }
 
-    /**
-     * Check if DTO mapping is enabled for this controller.
-     */
     protected boolean isDTOEnabled() {
         return dtoPseudoEnabled;
     }
 
     // ===== Lifecycle Hook Methods - Override these for custom logic =====
 
-    /**
-     * Called before creating a single entity.
-     * Override this method to add custom validation or data transformation.
-     *
-     * @param entity the entity about to be created
-     */
     protected void beforeCreate(T entity) {
         // Default: no-op - override in subclass
     }
 
-    /**
-     * Called after successfully creating a single entity.
-     * Override this method to trigger notifications, cache updates, etc.
-     *
-     * @param entity the newly created entity with generated ID
-     */
     protected void afterCreate(T entity) {
         // Default: no-op - override in subclass
     }
 
-    /**
-     * Called before creating a batch of entities.
-     * Override this method to add batch-level validation or preprocessing.
-     *
-     * @param entities the list of entities about to be created
-     */
     protected void beforeCreateBatch(List<T> entities) {
         // Default: no-op - override in subclass
     }
 
-    /**
-     * Called after successfully creating a batch of entities.
-     * Override this method for batch-level post-processing.
-     *
-     * @param entities the list of successfully created entities
-     */
     protected void afterCreateBatch(List<T> entities) {
         // Default: no-op - override in subclass
     }
 
-    /**
-     * Called before updating an entity.
-     * Override this method to add custom validation or modify update data.
-     *
-     * @param id             the ID of the entity being updated
-     * @param updates        the map of field updates
-     * @param existingEntity the current state of the entity
-     */
     protected void beforeUpdate(ID id, Map<String, Object> updates, T existingEntity) {
         // Default: no-op - override in subclass
     }
 
-    /**
-     * Called after successfully updating an entity.
-     * Override this method to track changes, send notifications, etc.
-     *
-     * @param updatedEntity the entity after update
-     * @param oldEntity     the entity before update (may be null if cloning failed)
-     */
     protected void afterUpdate(T updatedEntity, T oldEntity) {
         // Default: no-op - override in subclass
     }
 
-    /**
-     * Called AFTER the entity is deleted but BEFORE the transaction commits.
-     * The entity parameter contains the entity state before deletion.
-     *
-     * @param id            the ID of the entity that was deleted
-     * @param deletedEntity the entity as it existed before deletion
-     */
     protected void beforeDelete(ID id, T deletedEntity) {
         // Default: no-op - override in subclass
     }
 
-    /**
-     * Called after successfully deleting a single entity.
-     * Override this method to clean up related data, invalidate caches, etc.
-     *
-     * @param id            the ID of the deleted entity
-     * @param deletedEntity the entity that was deleted (state before deletion)
-     */
     protected void afterDelete(ID id, T deletedEntity) {
         // Default: no-op - override in subclass
     }
 
-    /**
-     * Called before deleting a batch of entities.
-     * Override this method to add batch deletion validation.
-     *
-     * @param ids the list of IDs about to be deleted
-     */
     protected void beforeDeleteBatch(List<ID> ids) {
         // Default: no-op - override in subclass
     }
 
-    /**
-     * Called after successfully deleting a batch of entities.
-     * Override this method for batch-level cleanup operations.
-     *
-     * @param deletedIds the list of IDs that were successfully deleted
-     */
     protected void afterDeleteBatch(List<ID> deletedIds) {
         // Default: no-op - override in subclass
     }
 
-    /**
-     * Called after successfully finding an entity by ID.
-     * Override this method to add post-fetch processing.
-     *
-     * @param entity the entity that was found
-     */
     protected void afterFindById(T entity) {
         // Default: no-op - override in subclass
     }
 
-    /**
-     * Called after successfully finding all entities.
-     * Override this method to add post-fetch processing for full lists.
-     *
-     * @param entities the list of entities that were found
-     */
     protected void afterFindAll(List<T> entities) {
         // Default: no-op - override in subclass
     }
 
-    /**
-     * Called after successfully finding a page of entities.
-     * Override this method to add post-fetch processing for paginated results.
-     *
-     * @param pageResponse the page response containing the entities
-     */
     protected void afterFindPaged(PageResponse<T> pageResponse) {
         // Default: no-op - override in subclass
     }

@@ -7,24 +7,12 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "crudx")
 public class CrudXProperties {
 
-    /**
-     * Default batch size for bulk operations
-     */
     private int batchSize = 500;
 
-    /**
-     * Maximum allowed batch size
-     */
     private int maxBatchSize = 100000;
 
-    /**
-     * Query timeout in milliseconds
-     */
     private int queryTimeout = 30000;
 
-    /**
-     * Enable automatic database creation
-     */
     private Database database = new Database();
 
     @Data

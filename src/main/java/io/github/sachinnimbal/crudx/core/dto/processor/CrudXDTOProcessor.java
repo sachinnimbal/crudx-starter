@@ -131,9 +131,6 @@ public class CrudXDTOProcessor extends AbstractProcessor {
         }
     }
 
-    /**
-     * ✅ NEW: Validate @CrudXField annotations
-     */
     private void validateFieldAnnotations(TypeElement dtoElement, TypeElement entityElement) {
         for (Element element : dtoElement.getEnclosedElements()) {
             if (element.getKind() != ElementKind.FIELD) continue;
@@ -161,9 +158,6 @@ public class CrudXDTOProcessor extends AbstractProcessor {
         }
     }
 
-    /**
-     * ✅ NEW: Validate @CrudXNested annotations
-     */
     private void validateNestedAnnotations(TypeElement dtoElement) {
         for (Element element : dtoElement.getEnclosedElements()) {
             if (element.getKind() != ElementKind.FIELD) continue;
@@ -194,9 +188,6 @@ public class CrudXDTOProcessor extends AbstractProcessor {
         }
     }
 
-    /**
-     * ✅ NEW: Validate default value can be parsed
-     */
     private void validateDefaultValue(VariableElement field, String defaultValue) {
         Class<?> fieldType = getFieldJavaClass(field.asType());
 
@@ -217,9 +208,6 @@ public class CrudXDTOProcessor extends AbstractProcessor {
         }
     }
 
-    /**
-     * ✅ NEW: Validate format string
-     */
     private void validateFormatString(VariableElement field, String format) {
         try {
             // Try to create formatter to validate syntax
@@ -230,9 +218,6 @@ public class CrudXDTOProcessor extends AbstractProcessor {
         }
     }
 
-    /**
-     * ✅ NEW: Validate nested DTO class
-     */
     private void validateNestedDtoClass(VariableElement field, TypeMirror dtoClassType) {
         TypeElement dtoElement = (TypeElement) typeUtils.asElement(dtoClassType);
 
@@ -829,9 +814,6 @@ public class CrudXDTOProcessor extends AbstractProcessor {
             out.println();
         }
 
-        /**
-         * ✅ NEW: Collect all enum types used in DTOs and entity
-         */
         private void collectEnumImports(Set<String> imports) {
             // Collect from entity fields
             for (Element element : context.entityElement.getEnclosedElements()) {
@@ -1247,9 +1229,6 @@ public class CrudXDTOProcessor extends AbstractProcessor {
             return applyTransformer(getter, annotation);
         }
 
-        /**
-         * ✅ NEW: Get proper enum class name (handles inner classes)
-         */
         private String getEnumClassName(TypeMirror enumType) {
             TypeElement enumElement = (TypeElement) ((DeclaredType) enumType).asElement();
             String fqn = enumElement.getQualifiedName().toString();

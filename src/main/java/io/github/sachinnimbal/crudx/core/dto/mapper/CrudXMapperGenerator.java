@@ -25,7 +25,6 @@ import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-
 @Slf4j
 @Component
 public class CrudXMapperGenerator {

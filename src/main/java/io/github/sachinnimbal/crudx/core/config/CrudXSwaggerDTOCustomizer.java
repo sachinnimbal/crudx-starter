@@ -20,12 +20,6 @@ import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.util.*;
 
-/**
- * Enhanced Swagger customizer with proper audit field handling.
- *
- * @author Sachin Nimbal
- * @since 1.0.2
- */
 @Slf4j
 public class CrudXSwaggerDTOCustomizer implements OperationCustomizer {
 
@@ -166,9 +160,6 @@ public class CrudXSwaggerDTOCustomizer implements OperationCustomizer {
         }
     }
 
-    /**
-     * Generate complete schema with audit and immutable field filtering.
-     */
     private Schema<?> generateCompleteSchema(Class<?> schemaClass, Class<?> entityClass,
                                              Set<Class<?>> visited, int depth,
                                              boolean excludeAudit, boolean excludeImmutable,
@@ -252,18 +243,11 @@ public class CrudXSwaggerDTOCustomizer implements OperationCustomizer {
         }
     }
 
-    /**
-     * Check if field name is an audit field name.
-     */
     private boolean isAuditFieldName(String fieldName) {
         return USER_PROVIDABLE_AUDIT_FIELDS.contains(fieldName) ||
                 SYSTEM_AUDIT_FIELDS.contains(fieldName);
     }
 
-    /**
-     * Determine if an audit field should be excluded from schema.
-     * ⚠️ This is only called when excludeAudit = true
-     */
     private boolean shouldExcludeAuditField(String fieldName, Class<?> entityClass) {
         // Never exclude user-providable fields
         if (USER_PROVIDABLE_AUDIT_FIELDS.contains(fieldName)) {
@@ -287,9 +271,6 @@ public class CrudXSwaggerDTOCustomizer implements OperationCustomizer {
         return false;
     }
 
-    /**
-     * Check if a field is marked as immutable.
-     */
     private boolean isFieldImmutable(Field dtoField, Class<?> entityClass, String fieldName) {
         // Always exclude 'id' field when excludeImmutable = true
         if ("id".equals(fieldName)) {
@@ -340,9 +321,6 @@ public class CrudXSwaggerDTOCustomizer implements OperationCustomizer {
         return isCrudXAuditType(type.getSuperclass());
     }
 
-    /**
-     * Generate field schema with filtering support.
-     */
     private Schema<?> generateFieldSchema(Field field, Set<Class<?>> visited, int depth,
                                           boolean excludeAudit, boolean excludeImmutable,
                                           boolean isRequest) {
@@ -365,9 +343,6 @@ public class CrudXSwaggerDTOCustomizer implements OperationCustomizer {
                 excludeImmutable, isRequest);
     }
 
-    /**
-     * Generate schema for a type with filtering.
-     */
     private Schema<?> generateSchemaForType(Class<?> type, Set<Class<?>> visited, int depth,
                                             boolean excludeAudit, boolean excludeImmutable,
                                             boolean isRequest) {

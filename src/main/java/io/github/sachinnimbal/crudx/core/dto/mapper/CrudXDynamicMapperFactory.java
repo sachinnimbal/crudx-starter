@@ -17,13 +17,6 @@ import java.util.List;
 import static io.github.sachinnimbal.crudx.core.enums.CrudXOperation.CREATE;
 import static io.github.sachinnimbal.crudx.core.enums.CrudXOperation.GET_ID;
 
-/**
- * Factory that dynamically creates mapper beans EARLY in Spring lifecycle.
- * Runs before CrudXMapperRegistry initialization.
- *
- * @author Sachin Nimbal
- * @since 1.0.2
- */
 @Slf4j
 @Component
 public class CrudXDynamicMapperFactory implements BeanFactoryPostProcessor,
@@ -59,9 +52,6 @@ public class CrudXDynamicMapperFactory implements BeanFactoryPostProcessor,
         // This ensures mapper beans exist when requested
     }
 
-    /**
-     * Create mapper bean for a specific entity (called by registry).
-     */
     @SuppressWarnings({"unchecked", "rawtypes"})
     public void createMapperBean(Class<?> entityClass, BeanDefinitionRegistry registry,
                                  CrudXMapperRegistry mapperRegistry) {
@@ -103,9 +93,6 @@ public class CrudXDynamicMapperFactory implements BeanFactoryPostProcessor,
         return Character.toLowerCase(name.charAt(0)) + name.substring(1) + "MapperCrudX";
     }
 
-    /**
-     * Runtime-generated mapper implementation.
-     */
     private static class RuntimeGeneratedMapper<E, R, S> implements CrudXMapper<E, R, S> {
 
         private final Class<E> entityClass;

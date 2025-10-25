@@ -17,14 +17,6 @@ import org.springframework.core.env.Environment;
 
 import java.util.List;
 
-/**
- * Swagger/OpenAPI configuration for CrudX Framework.
- * Automatically detects and displays DTO schemas when DTO feature is enabled.
- *
- * @author Sachin Nimbal
- * @updated 1.0.2 - Added DTO schema detection
- * @since 1.0.1
- */
 @Slf4j
 @Configuration
 @ConditionalOnClass(name = "org.springdoc.core.configuration.SpringDocConfiguration")
@@ -65,9 +57,6 @@ public class CrudXSwaggerConfiguration {
                 ));
     }
 
-    /**
-     * Register DTO schema customizer if DTO feature is enabled.
-     */
     @Bean
     @ConditionalOnClass(name = "io.github.sachinnimbal.crudx.core.dto.mapper.CrudXMapperRegistry")
     public OperationCustomizer crudxDtoSchemaCustomizer() {

@@ -17,21 +17,6 @@ import org.springframework.stereotype.Component;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * 🚀 Optimized DTO Registry with Smart Package Scanning
- * <p>
- * Features:
- * - Scans ONLY packages specified in crudx.dto.scan-packages
- * - Fast startup (no full classpath scan)
- * - Automatic mapper bean creation
- * - Thread-safe concurrent access
- * <p>
- * Configuration:
- * crudx.dto.scan-packages=com.crudx.examples,com.myapp.dto
- *
- * @author Sachin Nimbal
- * @since 1.0.2
- */
 @Slf4j
 @Component
 public class CrudXMapperRegistry {
@@ -88,9 +73,6 @@ public class CrudXMapperRegistry {
         initialized = true;
     }
 
-    /**
-     * Smart package scanning - ONLY scans specified packages
-     */
     private void scanAndRegisterDTOs(String basePackages) {
         ClassPathScanningCandidateComponentProvider scanner =
                 new ClassPathScanningCandidateComponentProvider(false);
@@ -159,9 +141,6 @@ public class CrudXMapperRegistry {
         return count;
     }
 
-    /**
-     * Create mapper beans for all registered entities
-     */
     private void createMapperBeans() {
         if (mapperFactory == null) {
             log.warn("⚠️  CrudXDynamicMapperFactory not available - mappers will not be created");
@@ -186,17 +165,11 @@ public class CrudXMapperRegistry {
         log.info("🔧 Created {} mapper beans", createdCount);
     }
 
-    /**
-     * Get request DTO class for entity and operation
-     */
     public Optional<Class<?>> getRequestDTO(Class<?> entityClass, CrudXOperation operation) {
         return Optional.ofNullable(requestMappings.get(entityClass))
                 .map(map -> map.get(operation));
     }
 
-    /**
-     * Get response DTO class for entity and operation
-     */
     public Optional<Class<?>> getResponseDTO(Class<?> entityClass, CrudXOperation operation) {
         return Optional.ofNullable(responseMappings.get(entityClass))
                 .map(map -> map.get(operation));
@@ -259,9 +232,6 @@ public class CrudXMapperRegistry {
                 dtoClass.getSimpleName(), entityClass.getSimpleName(), Arrays.toString(operations));
     }
 
-    /**
-     * Get mapper for entity class (lazy load from context if needed)
-     */
     @SuppressWarnings("unchecked")
     public <E, R, S> Optional<CrudXMapper<E, R, S>> getMapper(Class<E> entityClass) {
         CrudXMapper<?, ?, ?> mapper = mappers.get(entityClass);
@@ -283,17 +253,11 @@ public class CrudXMapperRegistry {
         return Optional.ofNullable((CrudXMapper<E, R, S>) mapper);
     }
 
-    /**
-     * Check if entity has DTO mappings
-     */
     public boolean hasDTOMapping(Class<?> entityClass) {
         return requestMappings.containsKey(entityClass) ||
                 responseMappings.containsKey(entityClass);
     }
 
-    /**
-     * Get all registered entity classes
-     */
     public Set<Class<?>> getRegisteredEntities() {
         Set<Class<?>> entities = new HashSet<>();
         entities.addAll(requestMappings.keySet());
@@ -306,9 +270,6 @@ public class CrudXMapperRegistry {
         return Character.toLowerCase(name.charAt(0)) + name.substring(1) + "MapperCrudX";
     }
 
-    /**
-     * Get statistics for monitoring
-     */
     public Map<String, Object> getStatistics() {
         Map<String, Object> stats = new HashMap<>();
         stats.put("initialized", initialized);

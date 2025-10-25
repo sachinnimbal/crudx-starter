@@ -11,59 +11,26 @@ import java.util.List;
 @ConfigurationProperties(prefix = "crudx.cache")
 public class CrudXCacheProperties {
 
-    /**
-     * Enable/disable caching
-     */
     private boolean enabled = false;
 
-    /**
-     * Cache provider: caffeine, redis, hazelcast, ehcache, memcached, custom
-     */
     private CacheProvider provider = CacheProvider.CAFFEINE;
 
-    /**
-     * Default TTL in seconds (0 = no expiration)
-     */
     private long ttlSeconds = 300;
 
-    /**
-     * Maximum cache size (entries)
-     */
     private long maxSize = 10000;
 
-    /**
-     * Enable cache statistics
-     */
     private boolean enableStatistics = true;
 
-    /**
-     * Cache key prefix
-     */
     private String keyPrefix = "crudx";
 
-    /**
-     * Custom cache manager bean name (for custom implementations)
-     */
     private String customManagerBean;
 
-    /**
-     * Redis specific configuration
-     */
     private RedisConfig redis = new RedisConfig();
 
-    /**
-     * Hazelcast specific configuration
-     */
     private HazelcastConfig hazelcast = new HazelcastConfig();
 
-    /**
-     * EhCache specific configuration
-     */
     private EhCacheConfig ehcache = new EhCacheConfig();
 
-    /**
-     * Memcached specific configuration
-     */
     private MemcachedConfig memcached = new MemcachedConfig();
 
     @Data
