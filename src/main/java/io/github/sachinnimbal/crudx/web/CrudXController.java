@@ -2,6 +2,7 @@ package io.github.sachinnimbal.crudx.web;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.sachinnimbal.crudx.core.config.CrudXProperties;
+import io.github.sachinnimbal.crudx.core.dto.annotations.CrudXField;
 import io.github.sachinnimbal.crudx.core.dto.annotations.CrudXResponse;
 import io.github.sachinnimbal.crudx.core.dto.mapper.CrudXMapper;
 import io.github.sachinnimbal.crudx.core.dto.mapper.CrudXMapperGenerator;
@@ -153,6 +154,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             // 🔥 FIX: Use runtime mapper for DTO → Entity conversion
             if (dtoPseudoEnabled && mapperGenerator != null) {
                 entity = convertMapToEntity(requestBody, CREATE);
+                validateRequiredFields(entity);
             } else {
                 // Legacy Mode: Direct entity conversion
                 entity = convertMapToEntityDirectly(requestBody);
@@ -204,7 +206,11 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
             if (dtoPseudoEnabled && mapperGenerator != null) {
                 entities = requestBodies.stream()
-                        .map(map -> convertMapToEntity(map, BATCH_CREATE))
+                        .map(map -> {
+                            T entity = convertMapToEntity(map, BATCH_CREATE);
+                            validateRequiredFields(entity);
+                            return entity;
+                        })
                         .collect(Collectors.toList());
             } else {
                 entities = requestBodies.stream()
@@ -397,6 +403,14 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             T existingEntity = crudService.findById(id);
             beforeUpdate(id, updates, existingEntity);
             T oldEntity = cloneEntity(existingEntity);
+
+            // ✅ NEW: If using DTO mapper, validate after conversion
+            if (dtoPseudoEnabled && mapperGenerator != null) {
+                Object requestDto = convertMapToDTO(updates, UPDATE);
+                if (requestDto != null) {
+                    validateRequiredFields(requestDto);
+                }
+            }
 
             T updated = crudService.update(id, updates);
             afterUpdate(updated, oldEntity);
@@ -832,6 +846,24 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                 .build();
     }
 
+    @SuppressWarnings("unchecked")
+    private Object convertMapToDTO(Map<String, Object> map, CrudXOperation operation) {
+        if (dtoRegistry == null || !dtoRegistry.hasDTOMapping(entityClass)) {
+            return null;
+        }
+
+        Optional<Class<?>> requestDtoClassOpt = dtoRegistry.getRequestDTO(entityClass, operation);
+        if (requestDtoClassOpt.isEmpty()) {
+            return null;
+        }
+
+        try {
+            return objectMapper.convertValue(map, requestDtoClassOpt.get());
+        } catch (Exception e) {
+            log.debug("Could not convert to DTO for validation: {}", e.getMessage());
+            return null;
+        }
+    }
     // ==================== HELPER METHODS ====================
 
     private void validatePagination(int page, int size) {
@@ -1015,6 +1047,29 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
         log.info("Progress: {}/{} records ({}%) | Elapsed: {} ms | Estimated total: {} ms",
                 currentEnd, totalSize, String.format("%.1f", progress), elapsed, estimated);
+    }
+
+    private void validateRequiredFields(Object dto) {
+        if (dto == null) return;
+
+        try {
+            for (Field field : dto.getClass().getDeclaredFields()) {
+                CrudXField annotation = field.getAnnotation(CrudXField.class);
+
+                if (annotation != null && annotation.required()) {
+                    field.setAccessible(true);
+                    Object value = field.get(dto);
+
+                    if (value == null) {
+                        throw new IllegalArgumentException(
+                                "Required field '" + field.getName() + "' cannot be null"
+                        );
+                    }
+                }
+            }
+        } catch (IllegalAccessException e) {
+            log.warn("Could not validate required fields: {}", e.getMessage());
+        }
     }
 
     protected Class<T> getEntityClass() {

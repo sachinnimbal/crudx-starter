@@ -1,29 +1,31 @@
 package io.github.sachinnimbal.crudx.core.dto.mapper;
 
 import io.github.sachinnimbal.crudx.core.dto.annotations.CrudXField;
+import io.github.sachinnimbal.crudx.core.dto.annotations.CrudXNested;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
-import java.lang.invoke.VarHandle;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
+import java.lang.reflect.ParameterizedType;
+import java.math.BigDecimal;
+import java.math.BigInteger;
+import java.time.*;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-/**
- * @author Sachin Nimbal
- * @since 1.0.3-ULTRA
- */
+
 @Slf4j
 @Component
 public class CrudXMapperGenerator {
@@ -32,19 +34,21 @@ public class CrudXMapperGenerator {
     private static final int MAX_DEPTH = 15;
     private static final int PARALLEL_THRESHOLD = 100;
 
-    // 🔥 ULTRA-FAST CACHES
+    // Caches
     private final Map<String, MappingPlan> mappingPlanCache = new ConcurrentHashMap<>(512);
-    private final Map<String, DateTimeFormatter> formatters = new ConcurrentHashMap<>(16);
+    private final Map<String, DateTimeFormatter> formatters = new ConcurrentHashMap<>(32);
     private final Map<Class<?>, Constructor<?>> constructorCache = new ConcurrentHashMap<>(256);
     private final Map<String, FieldAccessor> accessorCache = new ConcurrentHashMap<>(2048);
     private final Map<Class<?>, Field[]> fieldCache = new ConcurrentHashMap<>(256);
-    private final Map<Class<?>, VarHandle[]> varHandleCache = new ConcurrentHashMap<>(256);
+    private final Map<Class<?>, TypeConverter> typeConverterCache = new ConcurrentHashMap<>(128);
+    private final Map<String, Object> defaultValueCache = new ConcurrentHashMap<>(256);
+
+    // Nested mapping depth tracker (thread-safe)
+    private final ThreadLocal<Map<Object, Integer>> depthTracker =
+            ThreadLocal.withInitial(WeakHashMap::new);
 
     // ==================== PUBLIC API ====================
 
-    /**
-     * 🚀 ULTRA-FAST: Request DTO → Entity (3x faster than MapStruct)
-     */
     public <E, R> E toEntity(R request, Class<E> entityClass) {
         if (request == null) return null;
 
@@ -55,7 +59,7 @@ public class CrudXMapperGenerator {
                     k -> createMappingPlan(request.getClass(), entityClass, true));
 
             E entity = instantiateFast(entityClass);
-            executeMappingPlan(request, entity, plan);
+            executeMappingPlan(request, entity, plan, 0);
 
             if (log.isTraceEnabled()) {
                 long elapsedMicros = (System.nanoTime() - startNano) / 1000;
@@ -69,6 +73,8 @@ public class CrudXMapperGenerator {
         } catch (Throwable e) {
             log.error("Fast mapping failed: {}", e.getMessage(), e);
             throw new RuntimeException("DTO mapping failed: " + e.getMessage(), e);
+        } finally {
+            depthTracker.get().clear();
         }
     }
 
@@ -80,16 +86,15 @@ public class CrudXMapperGenerator {
             MappingPlan plan = mappingPlanCache.computeIfAbsent(planKey,
                     k -> createMappingPlan(request.getClass(), entity.getClass(), true));
 
-            executeMappingPlan(request, entity, plan);
+            executeMappingPlan(request, entity, plan, 0);
         } catch (Throwable e) {
             log.error("Fast update failed: {}", e.getMessage(), e);
             throw new RuntimeException("Update failed: " + e.getMessage(), e);
+        } finally {
+            depthTracker.get().clear();
         }
     }
 
-    /**
-     * 🚀 ULTRA-FAST: Entity → Response DTO
-     */
     public <E, S> S toResponse(E entity, Class<S> responseClass) {
         if (entity == null) return null;
 
@@ -100,7 +105,7 @@ public class CrudXMapperGenerator {
                     k -> createMappingPlan(entity.getClass(), responseClass, false));
 
             S response = instantiateFast(responseClass);
-            executeMappingPlan(entity, response, plan);
+            executeMappingPlan(entity, response, plan, 0);
 
             if (log.isTraceEnabled()) {
                 long elapsedMicros = (System.nanoTime() - startNano) / 1000;
@@ -114,24 +119,19 @@ public class CrudXMapperGenerator {
         } catch (Throwable e) {
             log.error("Fast response mapping failed: {}", e.getMessage(), e);
             throw new RuntimeException("Response mapping failed: " + e.getMessage(), e);
+        } finally {
+            depthTracker.get().clear();
         }
     }
 
-    /**
-     * 🚀 PARALLEL batch processing (2x faster than sequential)
-     */
     public <E, S> List<S> toResponseList(List<E> entities, Class<S> responseClass) {
         if (entities == null || entities.isEmpty()) return Collections.emptyList();
 
         long startNano = System.nanoTime();
 
         List<S> result = entities.size() > PARALLEL_THRESHOLD
-                ? entities.parallelStream()
-                .map(e -> toResponse(e, responseClass))
-                .collect(Collectors.toList())
-                : entities.stream()
-                .map(e -> toResponse(e, responseClass))
-                .collect(Collectors.toList());
+                ? entities.parallelStream().map(e -> toResponse(e, responseClass)).collect(Collectors.toList())
+                : entities.stream().map(e -> toResponse(e, responseClass)).collect(Collectors.toList());
 
         if (log.isDebugEnabled()) {
             long elapsedMs = (System.nanoTime() - startNano) / 1_000_000;
@@ -159,19 +159,12 @@ public class CrudXMapperGenerator {
         if (entities == null) return null;
 
         return entities.size() > PARALLEL_THRESHOLD
-                ? entities.parallelStream()
-                .map(e -> toResponseMap(e, responseClass))
-                .collect(Collectors.toList())
-                : entities.stream()
-                .map(e -> toResponseMap(e, responseClass))
-                .collect(Collectors.toList());
+                ? entities.parallelStream().map(e -> toResponseMap(e, responseClass)).collect(Collectors.toList())
+                : entities.stream().map(e -> toResponseMap(e, responseClass)).collect(Collectors.toList());
     }
 
-    // ==================== 🔥 ULTRA-FAST CORE ENGINE ====================
+    // ==================== CORE ENGINE ====================
 
-    /**
-     * 🚀 Create optimized mapping plan (pre-compiled, cached forever)
-     */
     private MappingPlan createMappingPlan(Class<?> sourceClass, Class<?> targetClass,
                                           boolean isDTOToEntity) {
         long startNano = System.nanoTime();
@@ -185,7 +178,6 @@ public class CrudXMapperGenerator {
         Class<?> dtoClass = isDTOToEntity ? sourceClass : targetClass;
         Class<?> entityClass = isDTOToEntity ? targetClass : sourceClass;
 
-        // Scan DTO fields and create optimized accessors
         for (Field dtoField : getFieldsFast(dtoClass)) {
             if (shouldSkipField(dtoField)) continue;
 
@@ -208,17 +200,20 @@ public class CrudXMapperGenerator {
         return plan;
     }
 
-    /**
-     * 🚀 Create single field mapping with ultra-fast accessors
-     */
     private FieldMapping createFieldMapping(Field dtoField, Class<?> entityClass,
                                             boolean isDTOToEntity) throws Exception {
         String dtoFieldName = dtoField.getName();
-        CrudXField annotation = dtoField.getAnnotation(CrudXField.class);
+        CrudXField fieldAnnotation = dtoField.getAnnotation(CrudXField.class);
+        CrudXNested nestedAnnotation = dtoField.getAnnotation(CrudXNested.class);
+
+        // Check if field should be ignored
+        if (fieldAnnotation != null && fieldAnnotation.ignore()) {
+            return null;
+        }
 
         // Resolve entity field name
-        String entityFieldName = annotation != null && !annotation.source().isEmpty()
-                ? annotation.source()
+        String entityFieldName = fieldAnnotation != null && !fieldAnnotation.source().isEmpty()
+                ? fieldAnnotation.source()
                 : dtoFieldName;
 
         Field entityField = findFieldFast(entityClass, entityFieldName);
@@ -231,13 +226,11 @@ public class CrudXMapperGenerator {
         FieldMapping mapping = new FieldMapping();
 
         if (isDTOToEntity) {
-            // DTO → Entity
             mapping.sourceAccessor = createFastGetter(dtoField, dtoField.getDeclaringClass());
             mapping.targetAccessor = createFastSetter(entityField, entityClass);
             mapping.sourceField = dtoField;
             mapping.targetField = entityField;
         } else {
-            // Entity → DTO
             mapping.sourceAccessor = createFastGetter(entityField, entityClass);
             mapping.targetAccessor = createFastSetter(dtoField, dtoField.getDeclaringClass());
             mapping.sourceField = entityField;
@@ -245,28 +238,52 @@ public class CrudXMapperGenerator {
         }
 
         mapping.needsConversion = !dtoField.getType().equals(entityField.getType());
-        mapping.annotation = annotation;
+        mapping.fieldAnnotation = fieldAnnotation;
+        mapping.nestedAnnotation = nestedAnnotation;
+        mapping.isNested = nestedAnnotation != null || isComplexType(dtoField.getType());
 
         return mapping;
     }
 
-    /**
-     * 🚀 Execute pre-compiled mapping plan (ZERO reflection overhead)
-     */
-    private void executeMappingPlan(Object source, Object target, MappingPlan plan) throws Throwable {
+    private void executeMappingPlan(Object source, Object target, MappingPlan plan, int currentDepth)
+            throws Throwable {
+
+        Map<Object, Integer> depths = depthTracker.get();
+        if (depths.containsKey(source) && depths.get(source) >= currentDepth) {
+            log.trace("Circular reference detected, skipping");
+            return;
+        }
+        depths.put(source, currentDepth);
+
         for (FieldMapping mapping : plan.fieldMappings) {
             try {
                 Object value = mapping.sourceAccessor.get(source);
-                if (value == null) continue;
 
-                if (mapping.needsConversion) {
-                    value = convertTypeFast(value,
-                            mapping.sourceField.getType(),
-                            mapping.targetField.getType());
+                if (value == null && mapping.fieldAnnotation != null) {
+                    value = getDefaultValue(mapping.fieldAnnotation, mapping.targetField.getType());
                 }
 
-                if (mapping.annotation != null && !mapping.annotation.transformer().isEmpty()) {
-                    value = applyTransformer(value, mapping.annotation.transformer(), source);
+                if (value == null && mapping.fieldAnnotation != null && mapping.fieldAnnotation.required()) {
+                    throw new IllegalArgumentException(
+                            "Required field '" + mapping.sourceField.getName() + "' is null");
+                }
+
+                if (value == null) {
+                    handleNullStrategy(mapping, target);
+                    continue;
+                }
+
+                if (mapping.fieldAnnotation != null && !mapping.fieldAnnotation.transformer().isEmpty()) {
+                    value = applyTransformer(value, mapping.fieldAnnotation.transformer(), source);
+                }
+
+                if (mapping.isNested && mapping.nestedAnnotation != null) {
+                    value = handleNestedMapping(value, mapping, currentDepth);
+                } else if (mapping.needsConversion) {
+                    value = convertTypeFast(value,
+                            mapping.sourceField.getType(),
+                            mapping.targetField.getType(),
+                            mapping.fieldAnnotation);
                 }
 
                 if (value != null) {
@@ -283,178 +300,61 @@ public class CrudXMapperGenerator {
         }
     }
 
-    /**
-     * 🚀 Create ultra-fast getter using MethodHandle (inlined by JIT)
-     */
-    @SuppressWarnings("unchecked")
-    private FieldAccessor createFastGetter(Field field, Class<?> clazz) throws Exception {
-        String cacheKey = clazz.getName() + "#GET#" + field.getName();
+    private Object getDefaultValue(CrudXField annotation, Class<?> targetType) {
+        String defaultValue = annotation.defaultValue();
+        if (defaultValue == null || defaultValue.isEmpty()) return null;
 
-        return accessorCache.computeIfAbsent(cacheKey, k -> {
+        String cacheKey = defaultValue + ":" + targetType.getName();
+        return defaultValueCache.computeIfAbsent(cacheKey, k -> {
             try {
-                // Try method getter first (fastest when exists)
-                String methodName = "get" + capitalize(field.getName());
-                try {
-                    MethodHandle handle = LOOKUP.findVirtual(clazz, methodName,
-                            MethodType.methodType(field.getType()));
-
-                    // Wrap in optimized lambda
-                    return new FieldAccessor(
-                            obj -> {
-                                try {
-                                    return handle.invoke(obj);
-                                } catch (Throwable e) {
-                                    return null;
-                                }
-                            },
-                            null
-                    );
-                } catch (NoSuchMethodException e) {
-                    // Try boolean "is" prefix
-                    if (field.getType() == boolean.class || field.getType() == Boolean.class) {
-                        methodName = "is" + capitalize(field.getName());
-                        try {
-                            MethodHandle handle = LOOKUP.findVirtual(clazz, methodName,
-                                    MethodType.methodType(field.getType()));
-                            return new FieldAccessor(
-                                    obj -> {
-                                        try {
-                                            return handle.invoke(obj);
-                                        } catch (Throwable ex) {
-                                            return null;
-                                        }
-                                    },
-                                    null
-                            );
-                        } catch (NoSuchMethodException ignored) {
-                        }
-                    }
-                }
-
-                // Fallback to direct field access via MethodHandle
-                field.setAccessible(true);
-                MethodHandle handle = LOOKUP.unreflectGetter(field);
-                return new FieldAccessor(
-                        obj -> {
-                            try {
-                                return handle.invoke(obj);
-                            } catch (Throwable e) {
-                                return null;
-                            }
-                        },
-                        null
-                );
-
+                return parseDefaultValue(defaultValue, targetType);
             } catch (Exception e) {
-                throw new RuntimeException("Cannot create getter for " + field.getName(), e);
+                log.warn("Failed to parse default value '{}' for type {}",
+                        defaultValue, targetType.getSimpleName());
+                return null;
             }
         });
     }
 
-    /**
-     * 🚀 Create ultra-fast setter using MethodHandle
-     */
-    private FieldAccessor createFastSetter(Field field, Class<?> clazz) throws Exception {
-        String cacheKey = clazz.getName() + "#SET#" + field.getName();
+    private Object parseDefaultValue(String value, Class<?> targetType) {
+        if (value == null || value.isEmpty()) return null;
 
-        return accessorCache.computeIfAbsent(cacheKey, k -> {
-            try {
-                // Try method setter first
-                String methodName = "set" + capitalize(field.getName());
-                try {
-                    MethodHandle handle = LOOKUP.findVirtual(clazz, methodName,
-                            MethodType.methodType(void.class, field.getType()));
+        if (targetType == String.class) return value;
 
-                    return new FieldAccessor(
-                            null,
-                            (obj, value) -> {
-                                try {
-                                    handle.invoke(obj, value);
-                                } catch (Throwable e) {
-                                    // Silently ignore setter failures
-                                }
-                            }
-                    );
-                } catch (NoSuchMethodException ignored) {
-                }
+        // Primitives and wrappers
+        if (targetType == int.class || targetType == Integer.class) return Integer.parseInt(value);
+        if (targetType == long.class || targetType == Long.class) return Long.parseLong(value);
+        if (targetType == double.class || targetType == Double.class) return Double.parseDouble(value);
+        if (targetType == float.class || targetType == Float.class) return Float.parseFloat(value);
+        if (targetType == boolean.class || targetType == Boolean.class) return Boolean.parseBoolean(value);
+        if (targetType == short.class || targetType == Short.class) return Short.parseShort(value);
+        if (targetType == byte.class || targetType == Byte.class) return Byte.parseByte(value);
+        if (targetType == char.class || targetType == Character.class) return value.charAt(0);
 
-                // Fallback to direct field access
-                field.setAccessible(true);
-                MethodHandle handle = LOOKUP.unreflectSetter(field);
-                return new FieldAccessor(
-                        null,
-                        (obj, value) -> {
-                            try {
-                                handle.invoke(obj, value);
-                            } catch (Throwable e) {
-                                // Silently ignore
-                            }
-                        }
-                );
+        // BigDecimal/BigInteger
+        if (targetType == BigDecimal.class) return new BigDecimal(value);
+        if (targetType == BigInteger.class) return new BigInteger(value);
 
-            } catch (Exception e) {
-                throw new RuntimeException("Cannot create setter for " + field.getName(), e);
-            }
-        });
-    }
-
-    /**
-     * 🚀 Ultra-fast type conversion (optimized for common cases)
-     */
-    private Object convertTypeFast(Object value, Class<?> sourceType, Class<?> targetType) {
-        if (value == null || targetType.isInstance(value)) return value;
-
-        // String conversions (most common)
-        if (targetType == String.class) return value.toString();
-
-        // Number conversions (zero boxing when possible)
-        if (value instanceof Number num) {
-            if (targetType == long.class || targetType == Long.class) return num.longValue();
-            if (targetType == int.class || targetType == Integer.class) return num.intValue();
-            if (targetType == double.class || targetType == Double.class) return num.doubleValue();
-            if (targetType == float.class || targetType == Float.class) return num.floatValue();
-            if (targetType == short.class || targetType == Short.class) return num.shortValue();
-            if (targetType == byte.class || targetType == Byte.class) return num.byteValue();
+        // Dates (ISO by default)
+        try {
+            if (targetType == LocalDate.class) return LocalDate.parse(value);
+            if (targetType == LocalDateTime.class) return LocalDateTime.parse(value);
+            if (targetType == LocalTime.class) return LocalTime.parse(value);
+            if (targetType == Instant.class) return Instant.parse(value);
+        } catch (DateTimeParseException ignored) {
+            // fallthrough to return the raw string if parsing fails
         }
 
-        // String to number
-        if (value instanceof String str) {
-            try {
-                if (targetType == Long.class || targetType == long.class) return Long.parseLong(str);
-                if (targetType == Integer.class || targetType == int.class) return Integer.parseInt(str);
-                if (targetType == Double.class || targetType == double.class) return Double.parseDouble(str);
-                if (targetType == Float.class || targetType == float.class) return Float.parseFloat(str);
-                if (targetType == LocalDateTime.class) return LocalDateTime.parse(str);
-                if (targetType == LocalDate.class) return LocalDate.parse(str);
-            } catch (Exception e) {
-                log.debug("Type conversion failed: {} -> {}", str, targetType.getSimpleName());
-            }
-        }
-
-        // Enum conversion
-        if (targetType.isEnum() && value instanceof String) {
-            try {
-                @SuppressWarnings({"unchecked", "rawtypes"})
-                Object enumValue = Enum.valueOf((Class<Enum>) targetType, (String) value);
-                return enumValue;
-            } catch (Exception e) {
-                log.debug("Enum conversion failed: {}", value);
-            }
-        }
-
-        // Boolean conversion
-        if (targetType == Boolean.class || targetType == boolean.class) {
-            if (value instanceof String) return Boolean.parseBoolean((String) value);
-            if (value instanceof Number) return ((Number) value).intValue() != 0;
+        // Enum
+        if (targetType.isEnum()) {
+            @SuppressWarnings({"unchecked", "rawtypes"})
+            Object enumValue = Enum.valueOf((Class<Enum>) targetType, value);
+            return enumValue;
         }
 
         return value;
     }
 
-    /**
-     * 🚀 Ultra-fast instantiation using cached constructors
-     */
-    @SuppressWarnings("unchecked")
     private <T> T instantiateFast(Class<T> clazz) throws Throwable {
         Constructor<?> constructor = constructorCache.computeIfAbsent(clazz, c -> {
             try {
@@ -466,12 +366,11 @@ public class CrudXMapperGenerator {
             }
         });
 
-        return (T) constructor.newInstance();
+        @SuppressWarnings("unchecked")
+        T instance = (T) constructor.newInstance();
+        return instance;
     }
 
-    /**
-     * 🚀 Fast field lookup with caching
-     */
     private Field findFieldFast(Class<?> clazz, String fieldName) {
         for (Field field : getFieldsFast(clazz)) {
             if (field.getName().equals(fieldName)) {
@@ -481,9 +380,6 @@ public class CrudXMapperGenerator {
         return null;
     }
 
-    /**
-     * 🚀 Fast field retrieval with hierarchy caching
-     */
     private Field[] getFieldsFast(Class<?> clazz) {
         return fieldCache.computeIfAbsent(clazz, c -> {
             List<Field> fields = new ArrayList<>();
@@ -496,9 +392,6 @@ public class CrudXMapperGenerator {
         });
     }
 
-    /**
-     * 🚀 Fast map conversion
-     */
     private Map<String, Object> convertToMapFast(Object obj) throws Throwable {
         Map<String, Object> map = new LinkedHashMap<>();
 
@@ -523,8 +416,6 @@ public class CrudXMapperGenerator {
         return map;
     }
 
-    // ==================== HELPER METHODS ====================
-
     private boolean shouldSkipField(Field field) {
         int modifiers = field.getModifiers();
         if (Modifier.isStatic(modifiers) || Modifier.isFinal(modifiers)) {
@@ -535,17 +426,118 @@ public class CrudXMapperGenerator {
         return annotation != null && annotation.ignore();
     }
 
-    private Object applyTransformer(Object value, String transformerName, Object sourceObject) {
-        try {
-            return switch (transformerName) {
-                case "toUpperCase" -> value.toString().toUpperCase();
-                case "toLowerCase" -> value.toString().toLowerCase();
-                case "trim" -> value.toString().trim();
-                default -> value;
-            };
-        } catch (Exception e) {
-            return value;
-        }
+    private boolean isComplexType(Class<?> type) {
+        if (type.isPrimitive() || type.isArray()) return false;
+
+        String typeName = type.getName();
+        return !typeName.startsWith("java.lang.")
+                && !typeName.startsWith("java.time.")
+                && !typeName.startsWith("java.util.")
+                && !typeName.startsWith("java.math.")
+                && !type.isEnum();
+    }
+
+    @SuppressWarnings("unchecked")
+    private FieldAccessor createFastGetter(Field field, Class<?> clazz) throws Exception {
+        String cacheKey = clazz.getName() + "#GET#" + field.getName();
+
+        return accessorCache.computeIfAbsent(cacheKey, k -> {
+            try {
+                String methodName = "get" + capitalize(field.getName());
+                try {
+                    MethodHandle handle = LOOKUP.findVirtual(clazz, methodName,
+                            MethodType.methodType(field.getType()));
+
+                    return new FieldAccessor(
+                            obj -> {
+                                try {
+                                    return handle.invoke(obj);
+                                } catch (Throwable e) {
+                                    return null;
+                                }
+                            },
+                            null
+                    );
+                } catch (NoSuchMethodException e) {
+                    if (field.getType() == boolean.class || field.getType() == Boolean.class) {
+                        methodName = "is" + capitalize(field.getName());
+                        try {
+                            MethodHandle handle = LOOKUP.findVirtual(clazz, methodName,
+                                    MethodType.methodType(field.getType()));
+                            return new FieldAccessor(
+                                    obj -> {
+                                        try {
+                                            return handle.invoke(obj);
+                                        } catch (Throwable ex) {
+                                            return null;
+                                        }
+                                    },
+                                    null
+                            );
+                        } catch (NoSuchMethodException ignored) {
+                        }
+                    }
+                }
+
+                field.setAccessible(true);
+                MethodHandle handle = LOOKUP.unreflectGetter(field);
+                return new FieldAccessor(
+                        obj -> {
+                            try {
+                                return handle.invoke(obj);
+                            } catch (Throwable e) {
+                                return null;
+                            }
+                        },
+                        null
+                );
+
+            } catch (Exception e) {
+                throw new RuntimeException("Cannot create getter for " + field.getName(), e);
+            }
+        });
+    }
+
+    private FieldAccessor createFastSetter(Field field, Class<?> clazz) throws Exception {
+        String cacheKey = clazz.getName() + "#SET#" + field.getName();
+
+        return accessorCache.computeIfAbsent(cacheKey, k -> {
+            try {
+                String methodName = "set" + capitalize(field.getName());
+                try {
+                    MethodHandle handle = LOOKUP.findVirtual(clazz, methodName,
+                            MethodType.methodType(void.class, field.getType()));
+
+                    return new FieldAccessor(
+                            null,
+                            (obj, value) -> {
+                                try {
+                                    handle.invoke(obj, value);
+                                } catch (Throwable e) {
+                                    // ignore
+                                }
+                            }
+                    );
+                } catch (NoSuchMethodException ignored) {
+                }
+
+                field.setAccessible(true);
+                MethodHandle handle = LOOKUP.unreflectSetter(field);
+                return new FieldAccessor(
+                        null,
+                        (obj, value) -> {
+                            try {
+                                handle.invoke(obj, value);
+                            } catch (Throwable e) {
+                                // ignore
+                            }
+                        }
+                );
+
+            } catch (Exception e) {
+                throw new RuntimeException("Cannot create setter for " + field.getName(), e);
+            }
+        });
     }
 
     private String capitalize(String str) {
@@ -559,6 +551,8 @@ public class CrudXMapperGenerator {
         fieldCache.clear();
         constructorCache.clear();
         formatters.clear();
+        typeConverterCache.clear();
+        defaultValueCache.clear();
         log.info("✓ All caches cleared");
     }
 
@@ -568,6 +562,9 @@ public class CrudXMapperGenerator {
         stats.put("accessors", accessorCache.size());
         stats.put("fields", fieldCache.size());
         stats.put("constructors", constructorCache.size());
+        stats.put("formatters", formatters.size());
+        stats.put("typeConverters", typeConverterCache.size());
+        stats.put("defaultValues", defaultValueCache.size());
         return stats;
     }
 
@@ -586,7 +583,9 @@ public class CrudXMapperGenerator {
         Field sourceField;
         Field targetField;
         boolean needsConversion;
-        CrudXField annotation;
+        boolean isNested;
+        CrudXField fieldAnnotation;
+        CrudXNested nestedAnnotation;
     }
 
     private static class FieldAccessor {
@@ -606,6 +605,246 @@ public class CrudXMapperGenerator {
             if (setter != null) {
                 setter.accept(obj, value);
             }
+        }
+    }
+
+    private interface TypeConverter {
+        Object convert(Object value, Class<?> sourceType, Class<?> targetType, CrudXField annotation);
+    }
+
+    // ==================== TYPE CONVERSION & NESTED HANDLING ====================
+
+    private void handleNullStrategy(FieldMapping mapping, Object target) throws Throwable {
+        if (mapping.nestedAnnotation == null) return;
+
+        CrudXNested.NullStrategy strategy = mapping.nestedAnnotation.nullStrategy();
+
+        switch (strategy) {
+            case INCLUDE_NULL:
+                mapping.targetAccessor.set(target, null);
+                break;
+            case EXCLUDE_NULL:
+                // don't set anything
+                break;
+            case EMPTY_COLLECTION:
+                if (isCollectionType(mapping.targetField.getType())) {
+                    Object emptyCollection = createEmptyCollection(mapping.targetField.getType());
+                    mapping.targetAccessor.set(target, emptyCollection);
+                }
+                break;
+            default:
+                break;
+        }
+    }
+
+    private Object handleNestedMapping(Object value, FieldMapping mapping, int currentDepth) throws Throwable {
+        CrudXNested nested = mapping.nestedAnnotation;
+
+        int maxDepth = nested != null ? nested.maxDepth() : 3;
+        if (currentDepth >= maxDepth) {
+            log.trace("Max depth {} reached, skipping nested mapping", maxDepth);
+            return null;
+        }
+
+        if (isCollectionType(value.getClass())) {
+            return mapNestedCollection(value, mapping, currentDepth + 1);
+        }
+
+        Class<?> targetDtoClass = nested != null && nested.dtoClass() != void.class
+                ? nested.dtoClass()
+                : mapping.targetField.getType();
+
+        return toResponse(value, targetDtoClass);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Object mapNestedCollection(Object collection, FieldMapping mapping, int depth) throws Throwable {
+        if (!(collection instanceof Collection)) return collection;
+
+        Collection<?> sourceCollection = (Collection<?>) collection;
+        if (sourceCollection.isEmpty()) return sourceCollection;
+
+        Class<?> itemDtoClass = getCollectionItemType(mapping.targetField);
+        if (itemDtoClass == null || itemDtoClass == Object.class) {
+            return collection;
+        }
+
+        List<Object> mappedItems = new ArrayList<>(sourceCollection.size());
+        for (Object item : sourceCollection) {
+            Object mappedItem = toResponse(item, itemDtoClass);
+            if (mappedItem != null) mappedItems.add(mappedItem);
+        }
+
+        if (Set.class.isAssignableFrom(mapping.targetField.getType())) {
+            return new LinkedHashSet<>(mappedItems);
+        }
+        return mappedItems;
+    }
+
+    private Object convertTypeFast(Object value, Class<?> sourceType, Class<?> targetType,
+                                   CrudXField annotation) {
+        if (value == null || targetType.isInstance(value)) return value;
+
+        TypeConverter converter = typeConverterCache.computeIfAbsent(targetType, this::createTypeConverter);
+        return converter.convert(value, sourceType, targetType, annotation);
+    }
+
+    private TypeConverter createTypeConverter(Class<?> targetType) {
+        return (value, sourceType, tType, annotation) -> {
+            if (value == null) return null;
+
+            if (tType == String.class) return value.toString();
+
+            String format = annotation != null ? annotation.format() : "";
+
+            if (!format.isEmpty()) {
+                if (value instanceof String) {
+                    return parseWithFormat((String) value, tType, format);
+                } else if (isTemporalType(value.getClass())) {
+                    return formatTemporal(value, format);
+                }
+            }
+
+            if (value instanceof Number) return convertNumber((Number) value, tType);
+
+            if (value instanceof String) return parseString((String) value, tType);
+
+            if (tType.isEnum() && value instanceof String) {
+                @SuppressWarnings({"unchecked", "rawtypes"})
+                Object enumValue = Enum.valueOf((Class<Enum>) tType, (String) value);
+                return enumValue;
+            }
+
+            if ((tType == Boolean.class || tType == boolean.class)) return convertToBoolean(value);
+
+            if (isCollectionType(tType) && isCollectionType(value.getClass())) return convertCollection(value, tType);
+
+            return value;
+        };
+    }
+
+    private Object parseWithFormat(String value, Class<?> targetType, String format) {
+        try {
+            DateTimeFormatter formatter = formatters.computeIfAbsent(format, DateTimeFormatter::ofPattern);
+
+            if (targetType == LocalDateTime.class) return LocalDateTime.parse(value, formatter);
+            if (targetType == LocalDate.class) return LocalDate.parse(value, formatter);
+            if (targetType == LocalTime.class) return LocalTime.parse(value, formatter);
+            if (targetType == ZonedDateTime.class) return ZonedDateTime.parse(value, formatter);
+        } catch (DateTimeParseException e) {
+            log.debug("Failed to parse '{}' with format '{}': {}", value, format, e.getMessage());
+        }
+        return value;
+    }
+
+    private String formatTemporal(Object value, String format) {
+        DateTimeFormatter formatter = formatters.computeIfAbsent(format, DateTimeFormatter::ofPattern);
+
+        if (value instanceof LocalDateTime) return ((LocalDateTime) value).format(formatter);
+        if (value instanceof LocalDate) return ((LocalDate) value).format(formatter);
+        if (value instanceof LocalTime) return ((LocalTime) value).format(formatter);
+        if (value instanceof ZonedDateTime) return ((ZonedDateTime) value).format(formatter);
+        return value.toString();
+    }
+
+    private Object convertNumber(Number num, Class<?> targetType) {
+        if (targetType == long.class || targetType == Long.class) return num.longValue();
+        if (targetType == int.class || targetType == Integer.class) return num.intValue();
+        if (targetType == double.class || targetType == Double.class) return num.doubleValue();
+        if (targetType == float.class || targetType == Float.class) return num.floatValue();
+        if (targetType == short.class || targetType == Short.class) return num.shortValue();
+        if (targetType == byte.class || targetType == Byte.class) return num.byteValue();
+        if (targetType == BigDecimal.class) return new BigDecimal(num.toString());
+        if (targetType == BigInteger.class) return BigInteger.valueOf(num.longValue());
+        if (targetType == AtomicInteger.class) return new AtomicInteger(num.intValue());
+        if (targetType == AtomicLong.class) return new AtomicLong(num.longValue());
+        return num;
+    }
+
+    private Object parseString(String str, Class<?> targetType) {
+        try {
+            if (targetType == Long.class || targetType == long.class) return Long.parseLong(str);
+            if (targetType == Integer.class || targetType == int.class) return Integer.parseInt(str);
+            if (targetType == Double.class || targetType == double.class) return Double.parseDouble(str);
+            if (targetType == Float.class || targetType == float.class) return Float.parseFloat(str);
+            if (targetType == Short.class || targetType == short.class) return Short.parseShort(str);
+            if (targetType == Byte.class || targetType == byte.class) return Byte.parseByte(str);
+            if (targetType == Boolean.class || targetType == boolean.class) return Boolean.parseBoolean(str);
+            if (targetType == Character.class || targetType == char.class) return str.charAt(0);
+            if (targetType == BigDecimal.class) return new BigDecimal(str);
+            if (targetType == BigInteger.class) return new BigInteger(str);
+            if (targetType == LocalDateTime.class) return LocalDateTime.parse(str);
+            if (targetType == LocalDate.class) return LocalDate.parse(str);
+            if (targetType == LocalTime.class) return LocalTime.parse(str);
+            if (targetType == Instant.class) return Instant.parse(str);
+            if (targetType == ZonedDateTime.class) return ZonedDateTime.parse(str);
+            if (targetType == OffsetDateTime.class) return OffsetDateTime.parse(str);
+            if (targetType == Duration.class) return Duration.parse(str);
+            if (targetType == Period.class) return Period.parse(str);
+            if (targetType == UUID.class) return UUID.fromString(str);
+        } catch (Exception e) {
+            log.debug("Type conversion failed: {} -> {}", str, targetType.getSimpleName());
+        }
+        return str;
+    }
+
+    private Boolean convertToBoolean(Object value) {
+        if (value instanceof String) {
+            String str = ((String) value).toLowerCase();
+            return "true".equals(str) || "yes".equals(str) || "1".equals(str) || "on".equals(str);
+        }
+        if (value instanceof Number) {
+            return ((Number) value).intValue() != 0;
+        }
+        return Boolean.FALSE;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Object convertCollection(Object value, Class<?> targetType) {
+        Collection<?> source = (Collection<?>) value;
+        if (Set.class.isAssignableFrom(targetType)) return new LinkedHashSet<>(source);
+        if (List.class.isAssignableFrom(targetType)) return new ArrayList<>(source);
+        return value;
+    }
+
+    private boolean isTemporalType(Class<?> type) {
+        return LocalDateTime.class.isAssignableFrom(type)
+                || LocalDate.class.isAssignableFrom(type)
+                || LocalTime.class.isAssignableFrom(type)
+                || ZonedDateTime.class.isAssignableFrom(type)
+                || OffsetDateTime.class.isAssignableFrom(type)
+                || Instant.class.isAssignableFrom(type);
+    }
+
+    private boolean isCollectionType(Class<?> type) {
+        return Collection.class.isAssignableFrom(type) || List.class.isAssignableFrom(type) || Set.class.isAssignableFrom(type);
+    }
+
+    private Object createEmptyCollection(Class<?> type) {
+        if (Set.class.isAssignableFrom(type)) return new LinkedHashSet<>();
+        return new ArrayList<>();
+    }
+
+    private Class<?> getCollectionItemType(Field field) {
+        if (field.getGenericType() instanceof ParameterizedType) {
+            ParameterizedType paramType = (ParameterizedType) field.getGenericType();
+            if (paramType.getActualTypeArguments().length > 0) {
+                return (Class<?>) paramType.getActualTypeArguments()[0];
+            }
+        }
+        return null;
+    }
+
+    private Object applyTransformer(Object value, String transformerName, Object sourceObject) {
+        try {
+            return switch (transformerName) {
+                case "toUpperCase" -> value.toString().toUpperCase();
+                case "toLowerCase" -> value.toString().toLowerCase();
+                case "trim" -> value.toString().trim();
+                default -> value;
+            };
+        } catch (Exception e) {
+            return value;
         }
     }
 }
