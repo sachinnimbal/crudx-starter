@@ -104,16 +104,6 @@ public abstract class CrudXMongoService<T extends CrudXMongoEntity<ID>, ID exten
         return saved;
     }
 
-    /**
-     * 🔥 ULTRA-OPTIMIZED: Zero-memory batch creation for MongoDB
-     * Memory: ~30-50MB for 100K records (vs 1.5GB before)
-     *
-     * Key Optimizations:
-     * 1. NO entity collection in result
-     * 2. Streaming validation and insertion
-     * 3. Aggressive memory cleanup
-     * 4. Counter-based tracking only
-     */
     @Override
     @Transactional(timeout = 1800)
     public BatchResult<T> createBatch(List<T> entities, boolean skipDuplicates) {
@@ -123,10 +113,10 @@ public abstract class CrudXMongoService<T extends CrudXMongoEntity<ID>, ID exten
         log.info("🚀 ULTRA-OPTIMIZED MongoDB batch: {} entities (skipDuplicates: {})",
                 totalSize, skipDuplicates);
 
-        // 🔥 CRITICAL: Use smaller batch size for MongoDB (no JDBC batching)
+        // 🔥 CRITICAL: Use SMALLER batch size for MongoDB (no JDBC batching)
         int batchSize = Math.min(50, crudxProperties.getBatchSize());
 
-        // 🔥 OPTIMIZATION: Counters only, NO result collection
+        // 🔥 OPTIMIZATION: Counter-based tracking (NO result collection)
         int successCount = 0;
         int skipCount = 0;
         List<String> skipReasons = new ArrayList<>(Math.min(1000, totalSize / 10));
@@ -214,7 +204,7 @@ public abstract class CrudXMongoService<T extends CrudXMongoEntity<ID>, ID exten
             if (batchNumber % 20 == 0 || batchNumber == totalBatches) {
                 long currentMemory = (Runtime.getRuntime().totalMemory() -
                         Runtime.getRuntime().freeMemory()) / 1024 / 1024;
-                log.info("📊 Progress: {}/{} batches | Success: {} | Skipped: {} | Memory: {} MB",
+                log.info("📊 MongoDB Progress: {}/{} batches | Success: {} | Skipped: {} | Memory: {} MB",
                         batchNumber, totalBatches, successCount, skipCount, currentMemory);
             }
         }

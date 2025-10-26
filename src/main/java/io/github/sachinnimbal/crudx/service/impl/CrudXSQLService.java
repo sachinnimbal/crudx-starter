@@ -103,26 +103,22 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
         return entity;
     }
 
-    /**
-     * 🔥 ULTRA-OPTIMIZED: Memory-efficient batch creation
-     * Memory usage: ~30-50MB for 100K records (vs 1.5GB before)
-     */
     @Override
-    @Transactional(timeout = 1800) // 30 minutes for very large batches
+    @Transactional(timeout = 1800)
     public BatchResult<T> createBatch(List<T> entities, boolean skipDuplicates) {
         long startTime = System.currentTimeMillis();
         int totalSize = entities.size();
 
-        log.info("🚀 Starting ULTRA-OPTIMIZED batch creation: {} entities", totalSize);
-        log.info("💾 Memory optimization: Streaming mode enabled");
+        log.info("🚀 ULTRA-OPTIMIZED SQL batch: {} entities (skipDuplicates: {})",
+                totalSize, skipDuplicates);
 
-        // 🔥 KEY OPTIMIZATION: Use smaller batch size for memory
+        // 🔥 KEY OPTIMIZATION: Smaller batch size for memory
         int batchSize = Math.min(AGGRESSIVE_BATCH_SIZE, crudxProperties.getBatchSize());
 
-        // 🔥 CRITICAL: Don't collect results - use counters only
+        // 🔥 CRITICAL: Counter-based result (NO entity storage)
         int successCount = 0;
         int skipCount = 0;
-        List<String> skipReasons = new ArrayList<>(Math.min(1000, totalSize / 10)); // Limited error storage
+        List<String> skipReasons = new ArrayList<>(Math.min(1000, totalSize / 10));
 
         int batchNumber = 0;
         int totalBatches = (totalSize + batchSize - 1) / batchSize;
@@ -131,7 +127,7 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
             batchNumber++;
             int end = Math.min(i + batchSize, totalSize);
 
-            // 🔥 CRITICAL: Process sublist WITHOUT creating new list
+            // 🔥 Process batch WITHOUT creating new list
             int batchSuccessCount = 0;
 
             for (int j = i; j < end; j++) {
@@ -146,7 +142,6 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
                 } catch (DuplicateEntityException e) {
                     if (skipDuplicates) {
                         skipCount++;
-                        // 🔥 OPTIMIZATION: Only store first 1000 error messages
                         if (skipReasons.size() < 1000) {
                             skipReasons.add(String.format("Index %d: %s", j, e.getMessage()));
                         }
@@ -165,7 +160,7 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
                     }
                 }
 
-                // 🔥 NULL OUT PROCESSED ENTITY to free memory immediately
+                // 🔥 NULL OUT PROCESSED ENTITY immediately
                 entities.set(j, null);
             }
 
@@ -175,36 +170,38 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
                 entityManager.clear();
             }
 
-            // 🔥 MEMORY OPTIMIZATION: Aggressive GC hints
+            // 🔥 Memory cleanup hint
             if (batchNumber % MEMORY_CLEANUP_INTERVAL == 0) {
-                System.gc(); // Hint to GC
+                System.gc();
             }
 
-            // 🔥 Progress logging with memory stats
+            // Progress logging
             if (batchNumber % 20 == 0 || batchNumber == totalBatches) {
-                long currentMemory = (Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / 1024 / 1024;
-                log.info("📊 Progress: {}/{} batches | Success: {} | Skipped: {} | Memory: {} MB",
+                long currentMemory = (Runtime.getRuntime().totalMemory() -
+                        Runtime.getRuntime().freeMemory()) / 1024 / 1024;
+                log.info("📊 SQL Progress: {}/{} batches | Success: {} | Skipped: {} | Memory: {} MB",
                         batchNumber, totalBatches, successCount, skipCount, currentMemory);
             }
         }
 
-        // 🔥 CRITICAL: Clear the input list to free memory
+        // 🔥 CRITICAL: Clear the input list
         entities.clear();
 
         long totalDuration = System.currentTimeMillis() - startTime;
         double recordsPerSecond = (successCount * 1000.0) / totalDuration;
 
-        long finalMemory = (Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / 1024 / 1024;
+        long finalMemory = (Runtime.getRuntime().totalMemory() -
+                Runtime.getRuntime().freeMemory()) / 1024 / 1024;
 
-        log.info("✅ ULTRA-OPTIMIZED batch completed:");
+        log.info("✅ SQL batch completed:");
         log.info("   📈 Created: {} | Skipped: {}", successCount, skipCount);
         log.info("   ⚡ Speed: {} records/sec", String.format("%.0f", recordsPerSecond));
         log.info("   ⏱️  Time: {} ms", totalDuration);
         log.info("   💾 Final Memory: {} MB", finalMemory);
 
-        // 🔥 CRITICAL: Return lightweight result without entity list
+        // 🔥 CRITICAL: Return lightweight result (NO entity list)
         BatchResult<T> result = new BatchResult<>();
-        result.setCreatedEntities(Collections.emptyList()); // Don't return entities!
+        result.setCreatedEntities(Collections.emptyList()); // ✅ ZERO entities stored
         result.setSkippedCount(skipCount);
         result.setSkippedReasons(skipReasons);
 

@@ -139,10 +139,6 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         cacheFieldMetadata();
     }
 
-    /**
-     * 🔥 CRITICAL: Initialize DTO mapping with compiled mapper priority
-     * This is the KEY OPTIMIZATION that makes CrudX the fastest!
-     */
     private void initializeDTOMapping() {
         if (dtoRegistry == null || !dtoRegistry.hasDTOMapping(entityClass)) {
             mapperMode = MapperMode.NONE;
@@ -187,9 +183,6 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         }
     }
 
-    /**
-     * 🔥 OPTIMIZATION: Pre-cache DTO classes to avoid repeated Optional lookups
-     */
     private void preCacheDTOClasses() {
         if (dtoRegistry == null) return;
 
@@ -205,9 +198,6 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                 requestDtoCache.size(), responseDtoCache.size());
     }
 
-    /**
-     * 🔥 OPTIMIZATION: Pre-cache field metadata for fast validation
-     */
     private void cacheFieldMetadata() {
         try {
             for (Field field : getFieldsFast(entityClass)) {
@@ -271,10 +261,10 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             @RequestParam(required = false, defaultValue = "true") boolean skipDuplicates) {
 
         long startTime = System.currentTimeMillis();
+        int totalSize = requestBodies.size();
 
         try {
-            int totalSize = requestBodies.size();
-            log.info("🚀 Starting batch creation: {} entities (Mapper: {})", totalSize, mapperMode);
+            log.info("🚀 ULTRA-OPTIMIZED batch: {} entities (Mapper: {})", totalSize, mapperMode);
 
             if (requestBodies.isEmpty()) {
                 throw new IllegalArgumentException("Entity list cannot be null or empty");
@@ -288,111 +278,123 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                 );
             }
 
-            // ✅ FIX: Convert ALL entities at once (streaming)
-            List<T> allEntities = new ArrayList<>(totalSize);
+            // 🔥 CRITICAL: Use SMALLER batches for memory optimization
+            int processingBatchSize = Math.min(500, crudxProperties.getBatchSize());
+            int totalBatches = (totalSize + processingBatchSize - 1) / processingBatchSize;
+
+            // 🔥 OPTIMIZATION: Counter-based tracking (NO entity storage)
+            int totalSuccessCount = 0;
+            int totalSkipCount = 0;
             int conversionFailures = 0;
-            List<String> conversionErrors = new ArrayList<>(Math.min(100, totalSize / 10));
+            List<String> errorSamples = new ArrayList<>(Math.min(100, totalSize / 10));
 
-            log.info("📦 Converting {} DTOs to entities...", totalSize);
+            log.info("📦 Processing {} batches of {} entities each", totalBatches, processingBatchSize);
 
-            for (int i = 0; i < totalSize; i++) {
-                Map<String, Object> requestBody = requestBodies.get(i);
+            // 🔥 STREAMING BATCH PROCESSING
+            for (int batchNum = 1; batchNum <= totalBatches; batchNum++) {
+                int batchStart = (batchNum - 1) * processingBatchSize;
+                int batchEnd = Math.min(batchStart + processingBatchSize, totalSize);
 
-                try {
-                    T entity = convertMapToEntity(requestBody, BATCH_CREATE);
+                // 🔥 Convert ONLY current batch (not all at once!)
+                List<T> batchEntities = new ArrayList<>(batchEnd - batchStart);
 
-                    if (entity != null) {
-                        validateRequiredFields(entity);
-                        allEntities.add(entity);
-                    } else {
+                for (int i = batchStart; i < batchEnd; i++) {
+                    Map<String, Object> requestBody = requestBodies.get(i);
+
+                    try {
+                        T entity = convertMapToEntity(requestBody, BATCH_CREATE);
+
+                        if (entity != null) {
+                            validateRequiredFields(entity);
+                            batchEntities.add(entity);
+                        } else {
+                            conversionFailures++;
+                            if (errorSamples.size() < 100) {
+                                errorSamples.add(String.format("Index %d: Conversion returned null", i));
+                            }
+                        }
+
+                    } catch (Exception e) {
                         conversionFailures++;
-                        if (conversionErrors.size() < 100) {
-                            conversionErrors.add(String.format("Index %d: Conversion returned null", i));
+                        if (errorSamples.size() < 100) {
+                            errorSamples.add(String.format("Index %d: %s", i, e.getMessage()));
                         }
                     }
 
-                } catch (Exception e) {
-                    conversionFailures++;
-                    if (conversionErrors.size() < 100) {
-                        conversionErrors.add(String.format("Index %d: %s", i, e.getMessage()));
-                    }
-                    log.debug("Conversion failed at index {}: {}", i, e.getMessage());
+                    // 🔥 CRITICAL: Nullify processed DTO immediately
+                    requestBodies.set(i, null);
                 }
 
-                // 🔥 Free memory immediately
-                requestBodies.set(i, null);
+                // 🔥 Persist current batch
+                if (!batchEntities.isEmpty()) {
+                    try {
+                        beforeCreateBatch(batchEntities);
+
+                        // Call service with THIS batch only
+                        BatchResult<T> batchResult = crudService.createBatch(batchEntities, skipDuplicates);
+
+                        totalSuccessCount += batchResult.getCreatedEntities().size();
+                        totalSkipCount += batchResult.getSkippedCount();
+
+                        afterCreateBatch(batchResult.getCreatedEntities());
+
+                    } catch (Exception e) {
+                        log.error("Batch {} failed: {}", batchNum, e.getMessage());
+                        if (!skipDuplicates) {
+                            throw e;
+                        }
+                        totalSkipCount += batchEntities.size();
+                    }
+                }
+
+                // 🔥 CRITICAL: Clear batch immediately
+                batchEntities.clear();
+
+                // 🔥 Memory cleanup hint every 100 batches
+                if (batchNum % 100 == 0) {
+                    System.gc();
+                }
+
+                // Progress logging
+                if (batchNum % 20 == 0 || batchNum == totalBatches) {
+                    long currentMemory = (Runtime.getRuntime().totalMemory() -
+                            Runtime.getRuntime().freeMemory()) / 1024 / 1024;
+                    log.info("📊 Progress: {}/{} batches | Success: {} | Skipped: {} | Memory: {} MB",
+                            batchNum, totalBatches, totalSuccessCount, totalSkipCount, currentMemory);
+                }
             }
 
-            // Clear input list
+            // 🔥 CRITICAL: Clear input list
             requestBodies.clear();
-
-            log.info("✅ Conversion complete: {} valid entities, {} failures",
-                    allEntities.size(), conversionFailures);
-
-            if (allEntities.isEmpty()) {
-                log.error("❌ All conversions failed! Check your DTO → Entity mapping");
-
-                Map<String, Object> errorData = new LinkedHashMap<>();
-                errorData.put("totalProcessed", totalSize);
-                errorData.put("successCount", 0);
-                errorData.put("conversionFailures", conversionFailures);
-                errorData.put("firstErrors", conversionErrors.subList(0, Math.min(10, conversionErrors.size())));
-
-                return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                        .body(ApiResponse.error(
-                                "All entity conversions failed. Check request format.",
-                                HttpStatus.BAD_REQUEST,
-                                System.currentTimeMillis() - startTime));
-            }
-
-            // ✅ FIX: Call service ONCE with all entities
-            beforeCreateBatch(allEntities);
-
-            log.info("🚀 Sending {} entities to service layer...", allEntities.size());
-            BatchResult<T> result = crudService.createBatch(allEntities, skipDuplicates);
-
-            afterCreateBatch(result.getCreatedEntities());
-
-            // ✅ FIX: Get actual counts from service result
-            int successCount = result.getCreatedEntities().size();
-            int skipCount = result.getSkippedCount() + conversionFailures;
 
             long executionTime = System.currentTimeMillis() - startTime;
             double recordsPerSecond = executionTime > 0
-                    ? (successCount * 1000.0) / executionTime
+                    ? (totalSuccessCount * 1000.0) / executionTime
                     : 0.0;
 
             long finalMemory = (Runtime.getRuntime().totalMemory() -
                     Runtime.getRuntime().freeMemory()) / 1024 / 1024;
 
-            // Build response
+            // 🔥 LIGHTWEIGHT Response (NO entity list!)
             Map<String, Object> responseData = new LinkedHashMap<>();
             responseData.put("totalProcessed", totalSize);
-            responseData.put("successCount", successCount);
-            responseData.put("skipCount", skipCount);
+            responseData.put("successCount", totalSuccessCount);
+            responseData.put("skipCount", totalSkipCount + conversionFailures);
             responseData.put("conversionFailures", conversionFailures);
             responseData.put("recordsPerSecond", String.format("%.0f", recordsPerSecond));
             responseData.put("executionTimeMs", executionTime);
+            responseData.put("executionTime", String.format("%.2fs", executionTime / 1000.0));
             responseData.put("finalMemoryMB", finalMemory);
             responseData.put("mapperMode", mapperMode.toString());
 
-            if (conversionFailures > 0 && !conversionErrors.isEmpty()) {
-                responseData.put("conversionErrors",
-                        conversionErrors.subList(0, Math.min(10, conversionErrors.size())));
-                if (conversionErrors.size() > 10) {
-                    responseData.put("conversionErrorsNote",
-                            String.format("Showing first 10 of %d conversion errors", conversionErrors.size()));
-                }
-            }
-
-            if (result.getSkippedReasons() != null && !result.getSkippedReasons().isEmpty()) {
-                responseData.put("dbSkippedReasons",
-                        result.getSkippedReasons().subList(0, Math.min(10, result.getSkippedReasons().size())));
+            if (conversionFailures > 0 && !errorSamples.isEmpty()) {
+                responseData.put("errorSamples", errorSamples.subList(0, Math.min(10, errorSamples.size())));
             }
 
             String message = String.format(
-                    "✅ Batch completed: %d created, %d skipped (%d conversion failures) | %.0f rec/sec | %d ms | Mapper: %s",
-                    successCount, skipCount, conversionFailures, recordsPerSecond, executionTime, mapperMode
+                    "✅ Batch completed: %d created, %d skipped | %.0f rec/sec | %d ms | Memory: %d MB",
+                    totalSuccessCount, totalSkipCount + conversionFailures,
+                    recordsPerSecond, executionTime, finalMemory
             );
 
             log.info(message);
