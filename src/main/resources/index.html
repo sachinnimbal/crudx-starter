@@ -1439,9 +1439,16 @@ public class EmployeeController extends CrudXController&lt;Employee, Long&gt; { 
         const ctx = document.getElementById('responseTimeChart').getContext('2d');
         if (charts.responseTime) charts.responseTime.destroy();
 
-        const fast = metrics.filter(m => m.executionTimeMs < 50).length;
-        const medium = metrics.filter(m => m.executionTimeMs >= 50 && m.executionTimeMs < 200).length;
-        const slow = metrics.filter(m => m.executionTimeMs >= 200).length;
+        // Extract milliseconds from formatted time strings like "173ms" or "173ms (0.17s)"
+        const parseTime = (timeStr) => {
+            if (!timeStr) return 0;
+            const match = timeStr.match(/^(\d+)ms/);
+            return match ? parseInt(match[1]) : 0;
+        };
+
+        const fast = metrics.filter(m => parseTime(m.executionTime) < 50).length;
+        const medium = metrics.filter(m => parseTime(m.executionTime) >= 50 && parseTime(m.executionTime) < 200).length;
+        const slow = metrics.filter(m => parseTime(m.executionTime) >= 200).length;
 
         charts.responseTime = new Chart(ctx, {
             type: 'pie',
@@ -1680,30 +1687,30 @@ public class EmployeeController extends CrudXController&lt;Employee, Long&gt; { 
                                         </div>
                                     </div>
                                 </div>
-                            </div>
 
-                            <div class="rounded-lg p-4" style="background: var(--bg-secondary); border: 1px solid var(--border-color);">
-                                <p class="text-xs mb-3 font-semibold uppercase" style="color: var(--text-muted);">DTO Conversion</p>
-                                <div class="space-y-2 text-sm">
-                                    <div class="flex justify-between">
-                                        <span style="color: var(--text-secondary);">Total Conversions:</span>
-                                        <span class="font-semibold" style="color: var(--text-primary);">${stats.dtoConversionCount || 0}</span>
-                                    </div>
-                                    <div class="flex justify-between">
-                                        <span style="color: var(--text-secondary);">Average:</span>
-                                        <span class="font-semibold" style="color: var(--text-primary);">${stats.avgDtoConversionTime || 'N/A'}</span>
-                                    </div>
-                                    <div class="flex justify-between">
-                                        <span style="color: var(--text-secondary);">Min:</span>
-                                        <span class="text-green-400 font-semibold">${stats.minDtoConversionTime || 'N/A'}</span>
-                                    </div>
-                                    <div class="flex justify-between">
-                                        <span style="color: var(--text-secondary);">Max:</span>
-                                        <span class="text-red-400 font-semibold">${stats.maxDtoConversionTime || 'N/A'}</span>
-                                    </div>
-                                    <div class="flex justify-between">
-                                        <span style="color: var(--text-secondary);">Total Time:</span>
-                                        <span class="font-semibold" style="color: var(--text-primary);">${stats.totalDtoConversionTime || 'N/A'}</span>
+                                <div class="rounded-lg p-4" style="background: var(--bg-secondary); border: 1px solid var(--border-color);">
+                                    <p class="text-xs mb-3 font-semibold uppercase" style="color: var(--text-muted);">DTO Conversion</p>
+                                    <div class="space-y-2 text-sm">
+                                        <div class="flex justify-between">
+                                            <span style="color: var(--text-secondary);">Total Conversions:</span>
+                                            <span class="font-semibold" style="color: var(--text-primary);">${stats.dtoConversionCount}</span>
+                                        </div>
+                                        <div class="flex justify-between">
+                                            <span style="color: var(--text-secondary);">Average:</span>
+                                            <span class="font-semibold" style="color: var(--text-primary);">${stats.avgDtoConversionTime}</span>
+                                        </div>
+                                        <div class="flex justify-between">
+                                            <span style="color: var(--text-secondary);">Min:</span>
+                                            <span class="text-green-400 font-semibold">${stats.minDtoConversionTime}</span>
+                                        </div>
+                                        <div class="flex justify-between">
+                                            <span style="color: var(--text-secondary);">Max:</span>
+                                            <span class="text-red-400 font-semibold">${stats.maxDtoConversionTime}</span>
+                                        </div>
+                                        <div class="flex justify-between">
+                                            <span style="color: var(--text-secondary);">Total Time:</span>
+                                            <span class="font-semibold" style="color: var(--text-primary);">${stats.totalDtoConversionTime}</span>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -1773,21 +1780,32 @@ public class EmployeeController extends CrudXController&lt;Employee, Long&gt; { 
             return;
         }
 
-        container.innerHTML = pageItems.map(m => `
-            <div class="flex items-center justify-between p-3 rounded border text-sm" style="background: var(--bg-tertiary); border-color: var(--border-color);">
-                <div class="flex items-center gap-3 flex-1">
-                    <span class="status-indicator ${m.success ? 'bg-green-400' : 'bg-red-400'}"></span>
-                    <span style="color: var(--text-secondary);">${new Date(m.timestamp).toLocaleString()}</span>
-                    <span class="badge ${
-                        m.executionTimeMs < 50 ? 'bg-green-500/20 text-green-400 border border-green-500/30' :
-                        m.executionTimeMs < 200 ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' :
-                        'bg-red-500/20 text-red-400 border border-red-500/30'
-                    }">${m.executionTimeMs}ms</span>
-                    ${m.memoryUsedKb ? `<span style="color: var(--text-muted);">${formatMemory(m.memoryUsedKb)}</span>` : ''}
+        // Helper to parse time and determine badge color
+        const getTimeBadge = (timeStr) => {
+            if (!timeStr) return { time: 'N/A', class: 'bg-gray-500/20 text-gray-400' };
+            const match = timeStr.match(/^(\d+)ms/);
+            const ms = match ? parseInt(match[1]) : 0;
+
+            if (ms < 50) return { time: timeStr, class: 'bg-green-500/20 text-green-400 border border-green-500/30' };
+            if (ms < 200) return { time: timeStr, class: 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' };
+            return { time: timeStr, class: 'bg-red-500/20 text-red-400 border border-red-500/30' };
+        };
+
+        container.innerHTML = pageItems.map(m => {
+            const timeBadge = getTimeBadge(m.executionTime);
+            return `
+                <div class="flex items-center justify-between p-3 rounded border text-sm" style="background: var(--bg-tertiary); border-color: var(--border-color);">
+                    <div class="flex items-center gap-3 flex-1">
+                        <span class="status-indicator ${m.success ? 'bg-green-400' : 'bg-red-400'}"></span>
+                        <span style="color: var(--text-secondary);">${new Date(m.timestamp).toLocaleString()}</span>
+                        <span class="badge ${timeBadge.class}">${timeBadge.time}</span>
+                        ${m.memoryUsed ? `<span style="color: var(--text-muted);">${m.memoryUsed}</span>` : ''}
+                        ${m.dtoConversionTime ? `<span class="badge bg-pink-500/20 text-pink-400 border-pink-500/30 text-xs">DTO: ${m.dtoConversionTime}</span>` : ''}
+                    </div>
+                    ${m.errorType ? `<span class="text-red-400 text-xs ml-2">${m.errorType}</span>` : ''}
                 </div>
-                ${m.errorType ? `<span class="text-red-400 text-xs ml-2">${m.errorType}</span>` : ''}
-            </div>
-        `).join('');
+            `;
+        }).join('');
 
         renderNestedPagination(key, totalPages, totalItems);
     }
@@ -2031,8 +2049,8 @@ public class EmployeeController extends CrudXController&lt;Employee, Long&gt; { 
 
     function parseAvgTime(timeString) {
         if (!timeString) return 0;
-        // Extract number from strings like "150ms" or "150ms (0.15s)"
-        const match = timeString.match(/^(\d+)ms/);
+        // Extract milliseconds from strings like "173 ms" or "173ms"
+        const match = timeString.match(/(\d+)\s*ms/);
         return match ? parseInt(match[1]) : 0;
     }
 
