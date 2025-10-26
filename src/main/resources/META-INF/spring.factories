@@ -8,5 +8,4 @@ org.springframework.boot.autoconfigure.EnableAutoConfiguration=\
     io.github.sachinnimbal.crudx.core.config.CrudXConfiguration,\
     io.github.sachinnimbal.crudx.core.config.CrudXServiceAutoConfiguration,\
     io.github.sachinnimbal.crudx.core.config.CrudXBannerConfiguration,\
-    io.github.sachinnimbal.crudx.core.config.CrudXCacheConfiguration,\
     io.github.sachinnimbal.crudx.core.exception.CrudXGlobalExceptionHandler

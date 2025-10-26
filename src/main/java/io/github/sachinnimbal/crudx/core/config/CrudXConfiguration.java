@@ -26,7 +26,6 @@ import org.springframework.data.mongodb.repository.config.EnableMongoRepositorie
         CrudXBannerConfiguration.class,
         CrudXServiceAutoConfiguration.class,
         CrudXGlobalExceptionHandler.class,
-        CrudXPerformanceConfiguration.class,
         CrudXDTOConfiguration.class
 })
 public class CrudXConfiguration {

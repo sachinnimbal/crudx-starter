@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CrudX Performance Analytics</title>
+    <title>CrudX API Documentation</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0"></script>
+    <link rel="stylesheet" type="text/css" href="/swagger-ui/swagger-ui.css">
     <style>
         :root {
             --bg-primary: #0a0118;
@@ -39,168 +39,696 @@
             transition: all 0.3s ease;
         }
 
-        @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
-        .pulse-dot { animation: pulse-dot 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
-
-        .details-row {
+        /* Hide header only when embedded in iframe */
+        .in-iframe .custom-header {
             display: none;
         }
 
-        .details-row.open {
-            display: table-row;
+        /* Hide Swagger default topbar */
+        .swagger-ui .topbar {
+            display: none !important;
         }
 
-        .details-content {
-            max-height: 0;
-            overflow: hidden;
-            opacity: 0;
-            transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease;
+        .swagger-ui {
+            background: var(--bg-primary) !important;
+            padding-top: 0;
         }
 
-        .details-row.open .details-content {
-            max-height: 2000px;
-            opacity: 1;
+        /* ===== INFO SECTION ===== */
+        .swagger-ui .info .title,
+        .swagger-ui .info .title small,
+        .swagger-ui .info .title small.version-stamp {
+            color: var(--text-primary) !important;
+            font-weight: 700 !important;
         }
 
-        .table-row {
+        .swagger-ui .info hgroup.main,
+        .swagger-ui .info p,
+        .swagger-ui .info li,
+        .swagger-ui .info table,
+        .swagger-ui .info .base-url {
+            color: var(--text-secondary) !important;
+        }
+
+        /* ===== OPERATION TAGS ===== */
+        .swagger-ui .opblock-tag {
+            color: var(--text-primary) !important;
+            border-bottom: 1px solid var(--border-color);
+            font-weight: 700 !important;
+            font-size: 20px !important;
+        }
+
+        .swagger-ui .opblock-tag small {
+            color: var(--text-secondary) !important;
+            font-weight: 500 !important;
+        }
+
+        /* ===== OPERATION BLOCKS ===== */
+        .swagger-ui .opblock {
+            background: var(--bg-secondary) !important;
+            border: 1px solid var(--border-color) !important;
+            border-radius: 12px;
+            margin-bottom: 16px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
             transition: all 0.2s ease;
         }
 
-        .table-row:hover {
-            background: var(--bg-tertiary);
-            transform: translateX(4px);
+        .swagger-ui .opblock:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 16px rgba(139, 92, 246, 0.2);
         }
 
-        .chevron-icon {
-            transition: transform 0.3s ease;
+        .swagger-ui .opblock .opblock-summary {
+            border-bottom: 1px solid var(--border-color);
         }
 
-        .chevron-icon.rotated {
-            transform: rotate(180deg);
+        /* ===== PARAMETERS SECTION ===== */
+        .swagger-ui .opblock-section-header {
+            background: rgba(139, 92, 246, 0.15) !important;
+            border-bottom: 1px solid var(--border-color);
         }
 
-        .card {
+        .swagger-ui .opblock .opblock-section-header {
+            background: rgba(139, 92, 246, 0.15) !important;
+        }
+
+        .swagger-ui .parameters-col_description {
+            color: var(--text-secondary) !important;
+            font-weight: 500 !important;
+        }
+
+        .swagger-ui .parameter__extension,
+        .swagger-ui .parameter__empty_value_toggle {
+            color: var(--text-secondary) !important;
+        }
+
+        /* ===== REQUEST/RESPONSE BODY ===== */
+        .swagger-ui .opblock-body {
+            background: var(--bg-primary) !important;
+        }
+
+        .swagger-ui .opblock-body .opblock-description-wrapper {
+            background: var(--bg-tertiary) !important;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            border: 1px solid var(--border-color);
+        }
+
+        /* HTTP Method Colors */
+        .swagger-ui .opblock.opblock-get .opblock-summary-method {
+            background: #10b981 !important;
+        }
+
+        .swagger-ui .opblock.opblock-post .opblock-summary-method {
+            background: #3b82f6 !important;
+        }
+
+        .swagger-ui .opblock.opblock-put .opblock-summary-method {
+            background: #f59e0b !important;
+        }
+
+        .swagger-ui .opblock.opblock-patch .opblock-summary-method {
+            background: #a855f7 !important;
+        }
+
+        .swagger-ui .opblock.opblock-delete .opblock-summary-method {
+            background: #ef4444 !important;
+        }
+
+        .swagger-ui .opblock.opblock-head .opblock-summary-method {
+            background: #8b5cf6 !important;
+        }
+
+        .swagger-ui .opblock.opblock-options .opblock-summary-method {
+            background: #6366f1 !important;
+        }
+
+        .swagger-ui .opblock-summary-path,
+        .swagger-ui .opblock-summary-path__deprecated {
+            color: var(--text-primary) !important;
+            font-weight: 600 !important;
+        }
+
+        .swagger-ui .opblock-summary-description {
+            color: var(--text-secondary) !important;
+            font-weight: 500 !important;
+        }
+
+        /* ===== PARAMETERS ===== */
+        .swagger-ui .parameter__name,
+        .swagger-ui .parameter__name.required,
+        .swagger-ui .parameter__type {
+            color: var(--text-primary) !important;
+            font-weight: 700 !important;
+        }
+
+        .swagger-ui .parameter__name.required:after {
+            color: var(--accent-primary) !important;
+        }
+
+        .swagger-ui .parameter__in {
+            color: var(--text-muted) !important;
+            font-weight: 600 !important;
+        }
+
+        /* ===== TABLES ===== */
+        .swagger-ui table thead tr th,
+        .swagger-ui table thead tr td {
+            color: var(--text-primary) !important;
+            border-bottom: 1px solid var(--border-color);
+            background: var(--bg-tertiary) !important;
+            font-weight: 700 !important;
+        }
+
+        .swagger-ui table tbody tr td {
+            color: var(--text-secondary) !important;
+            border-bottom: 1px solid var(--border-color);
+            font-weight: 500 !important;
+        }
+
+        /* ===== RESPONSE/REQUEST BODY ===== */
+        .swagger-ui .responses-inner h4,
+        .swagger-ui .responses-inner h5,
+        .swagger-ui .opblock-section-header h4,
+        .swagger-ui .opblock-section-header label {
+            color: var(--text-primary) !important;
+            font-weight: 700 !important;
+        }
+
+        .swagger-ui .response-col_status {
+            color: var(--text-primary) !important;
+            font-weight: 700 !important;
+        }
+
+        .swagger-ui .response-col_description {
+            color: var(--text-secondary) !important;
+            font-weight: 500 !important;
+        }
+
+        .swagger-ui .response .response-col_description__inner span,
+        .swagger-ui .response .response-col_description__inner div {
+            color: var(--text-secondary) !important;
+        }
+
+        /* ===== MODELS SECTION ===== */
+        .swagger-ui .model-box,
+        .swagger-ui section.models {
+            background: var(--bg-secondary) !important;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+        }
+
+        .swagger-ui section.models .model-container {
+            background: var(--bg-tertiary) !important;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+        }
+
+        .swagger-ui .model,
+        .swagger-ui .model-title {
+            color: var(--text-primary) !important;
+            font-weight: 700 !important;
+        }
+
+        .swagger-ui .property-row .prop-name,
+        .swagger-ui .prop-type,
+        .swagger-ui .prop-format {
+            color: var(--text-secondary) !important;
+            font-weight: 500 !important;
+        }
+
+        /* ===== SCHEME CONTAINER ===== */
+        .swagger-ui .scheme-container {
+            background: var(--bg-secondary) !important;
+            border-radius: 8px;
+            padding: 16px;
+            box-shadow: none;
+            border: 1px solid var(--border-color);
+        }
+
+        .swagger-ui .scheme-container .schemes-title,
+        .swagger-ui .scheme-container label {
+            color: var(--text-primary) !important;
+            font-weight: 700 !important;
+        }
+
+        /* ===== INPUTS AND TEXTAREAS ===== */
+        .swagger-ui select,
+        .swagger-ui input[type=text],
+        .swagger-ui input[type=password],
+        .swagger-ui input[type=search],
+        .swagger-ui input[type=email],
+        .swagger-ui input[type=file],
+        .swagger-ui textarea {
+            background: var(--bg-tertiary) !important;
+            border: 1px solid var(--border-color) !important;
+            color: var(--text-primary) !important;
+            font-weight: 500 !important;
+        }
+
+        .swagger-ui input::placeholder,
+        .swagger-ui textarea::placeholder {
+            color: var(--text-muted) !important;
+        }
+
+        /* ===== CODE BLOCKS ===== */
+        .swagger-ui .opblock-body pre,
+        .swagger-ui .opblock-body pre.microlight {
+            background: var(--bg-tertiary) !important;
+            border: 1px solid var(--border-color);
+            color: var(--text-primary) !important;
+            padding: 1rem !important;
+            border-radius: 8px;
+        }
+
+        .swagger-ui .highlight-code {
+            background: var(--bg-tertiary) !important;
+            border-radius: 8px;
+        }
+
+        .swagger-ui .highlight-code > .microlight {
+            color: var(--text-primary) !important;
+        }
+
+        /* ===== RESPONSE SECTION ===== */
+        .swagger-ui .responses-wrapper {
+            background: var(--bg-primary) !important;
+        }
+
+        .swagger-ui .responses-inner {
+            background: var(--bg-primary) !important;
+        }
+
+        .swagger-ui .response-col_links {
+            color: var(--text-secondary) !important;
+        }
+
+        /* ===== JSON SYNTAX HIGHLIGHTING - DARK MODE ===== */
+        .swagger-ui .microlight .string {
+            color: #a5d6a7 !important;
+            font-weight: 500 !important;
+        }
+
+        .swagger-ui .microlight .number {
+            color: #90caf9 !important;
+            font-weight: 600 !important;
+        }
+
+        .swagger-ui .microlight .boolean {
+            color: #f59e0b !important;
+            font-weight: 600 !important;
+        }
+
+        .swagger-ui .microlight .null {
+            color: #ce93d8 !important;
+            font-weight: 600 !important;
+        }
+
+        .swagger-ui .microlight .key {
+            color: var(--accent-primary) !important;
+            font-weight: 700 !important;
+        }
+
+        /* ===== LIGHT MODE OVERRIDES ===== */
+        .light-mode .swagger-ui .info .title,
+        .light-mode .swagger-ui .info .title small,
+        .light-mode .swagger-ui .info .title small.version-stamp {
+            color: #000000 !important;
+        }
+
+        .light-mode .swagger-ui .info hgroup.main,
+        .light-mode .swagger-ui .info p,
+        .light-mode .swagger-ui .info li,
+        .light-mode .swagger-ui .info table,
+        .light-mode .swagger-ui .info .base-url {
+            color: #1e293b !important;
+        }
+
+        .light-mode .swagger-ui .opblock-tag {
+            color: #000000 !important;
+        }
+
+        .light-mode .swagger-ui .opblock-tag small {
+            color: #1e293b !important;
+        }
+
+        .light-mode .swagger-ui .opblock-summary-path,
+        .light-mode .swagger-ui .opblock-summary-path__deprecated {
+            color: #000000 !important;
+        }
+
+        .light-mode .swagger-ui .opblock-summary-description {
+            color: #1e293b !important;
+        }
+
+        .light-mode .swagger-ui .parameter__name,
+        .light-mode .swagger-ui .parameter__name.required,
+        .light-mode .swagger-ui .parameter__type {
+            color: #000000 !important;
+            font-weight: 700 !important;
+        }
+
+        .light-mode .swagger-ui .parameter__in {
+            color: #334155 !important;
+            font-weight: 600 !important;
+        }
+
+        .light-mode .swagger-ui .parameters-col_description {
+            color: #0f172a !important;
+        }
+
+        .light-mode .swagger-ui table thead tr th,
+        .light-mode .swagger-ui table thead tr td {
+            color: #000000 !important;
+            font-weight: 700 !important;
+        }
+
+        .light-mode .swagger-ui table tbody tr td {
+            color: #0f172a !important;
+        }
+
+        .light-mode .swagger-ui .responses-inner h4,
+        .light-mode .swagger-ui .responses-inner h5,
+        .light-mode .swagger-ui .opblock-section-header h4,
+        .light-mode .swagger-ui .opblock-section-header label {
+            color: #000000 !important;
+            font-weight: 700 !important;
+        }
+
+        .light-mode .swagger-ui .response-col_status {
+            color: #000000 !important;
+            font-weight: 700 !important;
+        }
+
+        .light-mode .swagger-ui .response-col_description {
+            color: #0f172a !important;
+        }
+
+        .light-mode .swagger-ui .response .response-col_description__inner span,
+        .light-mode .swagger-ui .response .response-col_description__inner div {
+            color: #0f172a !important;
+        }
+
+        .light-mode .swagger-ui .model,
+        .light-mode .swagger-ui .model-title {
+            color: #000000 !important;
+            font-weight: 700 !important;
+        }
+
+        .light-mode .swagger-ui .property-row .prop-name,
+        .light-mode .swagger-ui .prop-type,
+        .light-mode .swagger-ui .prop-format {
+            color: #0f172a !important;
+        }
+
+        .light-mode .swagger-ui .scheme-container .schemes-title,
+        .light-mode .swagger-ui .scheme-container label {
+            color: #000000 !important;
+            font-weight: 700 !important;
+        }
+
+        .light-mode .swagger-ui .opblock-description-wrapper p,
+        .light-mode .swagger-ui .opblock-external-docs-wrapper p,
+        .light-mode .swagger-ui .opblock-title_normal p {
+            color: #0f172a !important;
+        }
+
+        .light-mode .swagger-ui .opblock-body pre,
+        .light-mode .swagger-ui .opblock-body pre.microlight {
+            color: #0f172a !important;
+            background: #ffffff !important;
+            border: 1px solid #cbd5e1 !important;
+        }
+
+        /* Force dark text on all code elements in light mode */
+        .light-mode .swagger-ui .opblock-body pre *,
+        .light-mode .swagger-ui .opblock-body pre.microlight * {
+            color: inherit !important;
+        }
+
+        .light-mode .swagger-ui .highlight-code > .microlight {
+            color: #0f172a !important;
+        }
+
+        .light-mode .swagger-ui .btn {
+            color: #000000 !important;
+        }
+
+        .light-mode .swagger-ui .opblock-section-header {
+            background: rgba(139, 92, 246, 0.08) !important;
+        }
+
+        .light-mode .swagger-ui .opblock .opblock-section-header {
+            background: rgba(139, 92, 246, 0.08) !important;
+        }
+
+        .light-mode .swagger-ui .opblock-body {
+            background: #ffffff !important;
+        }
+
+        .light-mode .swagger-ui .response-col_links {
+            color: #334155 !important;
+        }
+
+        /* ===== JSON SYNTAX HIGHLIGHTING - LIGHT MODE (AGGRESSIVE OVERRIDES) ===== */
+        .light-mode .swagger-ui .microlight .string,
+        .light-mode .swagger-ui .highlight-code .microlight .string,
+        .light-mode .swagger-ui pre .string,
+        .light-mode .swagger-ui code .string {
+            color: #047857 !important;  /* Dark emerald green */
+            font-weight: 600 !important;
+        }
+
+        .light-mode .swagger-ui .microlight .number,
+        .light-mode .swagger-ui .highlight-code .microlight .number,
+        .light-mode .swagger-ui pre .number,
+        .light-mode .swagger-ui code .number {
+            color: #b91c1c !important;  /* Deep red */
+            font-weight: 700 !important;
+        }
+
+        .light-mode .swagger-ui .microlight .boolean,
+        .light-mode .swagger-ui .highlight-code .microlight .boolean,
+        .light-mode .swagger-ui pre .boolean,
+        .light-mode .swagger-ui code .boolean {
+            color: #c2410c !important;  /* Dark orange */
+            font-weight: 700 !important;
+        }
+
+        .light-mode .swagger-ui .microlight .null,
+        .light-mode .swagger-ui .highlight-code .microlight .null,
+        .light-mode .swagger-ui pre .null,
+        .light-mode .swagger-ui code .null {
+            color: #7c3aed !important;  /* Dark purple */
+            font-weight: 700 !important;
+        }
+
+        .light-mode .swagger-ui .microlight .key,
+        .light-mode .swagger-ui .highlight-code .microlight .key,
+        .light-mode .swagger-ui pre .key,
+        .light-mode .swagger-ui code .key {
+            color: #0369a1 !important;  /* Dark cyan blue */
+            font-weight: 700 !important;
+        }
+
+        /* Override ALL highlight.js classes for light mode */
+        .light-mode .swagger-ui .highlight-code .hljs-string,
+        .light-mode .swagger-ui .highlight-code .hljs-attr,
+        .light-mode .swagger-ui pre.microlight .hljs-string,
+        .light-mode .swagger-ui pre.microlight .hljs-attr {
+            color: #047857 !important;
+        }
+
+        .light-mode .swagger-ui .highlight-code .hljs-number,
+        .light-mode .swagger-ui pre.microlight .hljs-number {
+            color: #b91c1c !important;
+        }
+
+        .light-mode .swagger-ui .highlight-code .hljs-literal,
+        .light-mode .swagger-ui .highlight-code .hljs-built_in,
+        .light-mode .swagger-ui pre.microlight .hljs-literal,
+        .light-mode .swagger-ui pre.microlight .hljs-built_in {
+            color: #c2410c !important;
+        }
+
+        .light-mode .swagger-ui .highlight-code .hljs-keyword,
+        .light-mode .swagger-ui pre.microlight .hljs-keyword {
+            color: #7c3aed !important;
+        }
+
+        .light-mode .swagger-ui .highlight-code .hljs-name,
+        .light-mode .swagger-ui .highlight-code .hljs-property,
+        .light-mode .swagger-ui pre.microlight .hljs-name,
+        .light-mode .swagger-ui pre.microlight .hljs-property {
+            color: #0369a1 !important;
+        }
+
+        /* Force all text in response body code blocks to be visible */
+        .light-mode .swagger-ui .responses-inner .response-col_description .markdown code,
+        .light-mode .swagger-ui .response .response-col_description code {
+            color: #0f172a !important;
+            background-color: #f1f5f9 !important;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+
+        /* ===== DESCRIPTION TEXT ===== */
+        .swagger-ui .opblock-description-wrapper p,
+        .swagger-ui .opblock-external-docs-wrapper p,
+        .swagger-ui .opblock-title_normal p {
+            color: var(--text-secondary) !important;
+        }
+
+        /* ===== AUTHENTICATION SECTION ===== */
+        .swagger-ui .auth-container,
+        .swagger-ui .auth-wrapper {
+            background: var(--bg-secondary) !important;
+            border: 1px solid var(--border-color) !important;
+            border-radius: 8px;
+        }
+
+        .swagger-ui .auth-container h4,
+        .swagger-ui .auth-wrapper h4 {
+            color: var(--text-primary) !important;
+        }
+
+        .swagger-ui .auth-container .wrapper,
+        .swagger-ui .auth-wrapper .wrapper {
+            color: var(--text-secondary) !important;
+        }
+
+        /* ===== MODAL/DIALOG ===== */
+        .swagger-ui .dialog-ux .modal-ux {
             background: var(--bg-secondary);
             border: 1px solid var(--border-color);
-            transition: all 0.3s ease;
+            border-radius: 12px;
         }
 
-        .card:hover {
-            transform: translateY(-4px);
-            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3);
+        .swagger-ui .dialog-ux .modal-ux-header {
+            border-bottom: 1px solid var(--border-color);
         }
 
-        .badge {
-            padding: 0.25rem 0.75rem;
-            border-radius: 9999px;
-            font-size: 0.75rem;
-            font-weight: 600;
-        }
-
-        .nested-pagination {
-            background: var(--bg-tertiary);
-            padding: 0.75rem 1rem;
-            border-radius: 0.5rem;
-            margin-top: 0.75rem;
-            border: 1px solid var(--border-color);
-        }
-
-        .pagination-container {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 1rem;
-            padding: 1rem 0 0.5rem 0;
-        }
-
-        .pagination-buttons {
-            display: flex;
-            gap: 0.5rem;
-            align-items: center;
-        }
-
-        .pagination-btn {
-            min-width: 40px;
-            height: 40px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            border: 1px solid var(--border-color);
-            transition: all 0.2s ease;
-            font-weight: 500;
-            background: var(--bg-tertiary);
+        .swagger-ui .dialog-ux .modal-ux-header h3 {
             color: var(--text-primary);
-            border-radius: 0.5rem;
         }
 
-        .pagination-btn:hover:not(:disabled) {
+        .swagger-ui .dialog-ux .modal-ux-content p,
+        .swagger-ui .dialog-ux .modal-ux-content h4 {
+            color: var(--text-secondary);
+        }
+
+        /* ===== BUTTONS ===== */
+        .swagger-ui .btn {
+            color: var(--text-primary) !important;
+            font-weight: 600 !important;
+            border-radius: 8px !important;
+            transition: all 0.2s ease !important;
+        }
+
+        .swagger-ui .btn.try-out__btn {
+            background: transparent !important;
+            border: 2px solid var(--accent-primary) !important;
+            color: var(--accent-primary) !important;
+        }
+
+        .swagger-ui .btn.try-out__btn:hover {
+            background: rgba(139, 92, 246, 0.1) !important;
+        }
+
+        .swagger-ui .btn.execute {
+            background: linear-gradient(135deg, #3b82f6, #2563eb) !important;
+            border: none !important;
+            color: #ffffff !important;
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3) !important;
+        }
+
+        .swagger-ui .btn.execute:hover {
             transform: translateY(-2px);
-            border-color: var(--accent-primary);
-            box-shadow: 0 4px 12px rgba(139, 92, 246, 0.25);
+            box-shadow: 0 6px 16px rgba(59, 130, 246, 0.4) !important;
         }
 
-        .pagination-btn:disabled {
-            opacity: 0.3;
-            cursor: not-allowed;
+        .swagger-ui .btn.cancel {
+            background: transparent !important;
+            border: 2px solid #ef4444 !important;
+            color: #ef4444 !important;
         }
 
-        .pagination-btn.active {
-            background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
-            border-color: transparent;
-            color: white;
-            font-weight: 600;
+        .swagger-ui .btn.cancel:hover {
+            background: rgba(239, 68, 68, 0.1) !important;
         }
 
-        .btn-refresh, .btn-auto-refresh, .btn-clear {
-            color: white;
-            font-weight: 600;
+        .light-mode .swagger-ui .btn.try-out__btn {
+            border-color: #8b5cf6 !important;
+            color: #8b5cf6 !important;
+        }
+
+        /* ===== SCROLLBAR ===== */
+        ::-webkit-scrollbar {
+            width: 12px;
+            height: 12px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg-secondary);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border-color);
+            border-radius: 6px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--accent-primary);
+        }
+
+        .light-mode ::-webkit-scrollbar-track {
+            background: var(--bg-tertiary);
+        }
+
+        .light-mode ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+        }
+
+        .light-mode ::-webkit-scrollbar-thumb:hover {
+            background: var(--accent-primary);
+        }
+
+        /* ===== ERRORS AND WARNINGS ===== */
+        .swagger-ui .errors-wrapper {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            border-radius: 8px;
+        }
+
+        .swagger-ui .errors-wrapper .error-wrapper {
+            color: #ef4444 !important;
+        }
+
+        /* ===== LOADING ===== */
+        .swagger-ui .loading-container .loading:after {
+            border-color: var(--accent-primary) transparent transparent !important;
+        }
+
+        /* ===== CARD HOVER EFFECTS ===== */
+        .light-mode .swagger-ui .opblock {
+            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.08);
+        }
+
+        .light-mode .swagger-ui .opblock:hover {
+            box-shadow: 0 4px 12px rgba(139, 92, 246, 0.15);
+        }
+
+        .btn-dashboard {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
             transition: all 0.3s ease;
         }
 
-        .btn-auto-refresh {
-            background: var(--bg-tertiary);
-            color: var(--text-primary);
-        }
-
-        .light-mode .btn-auto-refresh {
+        .light-mode .btn-dashboard {
             background: #f1f5f9;
             color: #0f172a;
             border: 1px solid #e2e8f0;
-        }
-
-        .last-update-text {
-            color: var(--text-muted);
-        }
-
-        .last-update-time {
-            color: var(--text-secondary);
-            font-weight: 600;
-        }
-
-        .live-indicator {
-            background: rgba(34, 197, 94, 0.1);
-            border: 1px solid rgba(34, 197, 94, 0.2);
-        }
-
-        .live-dot {
-            background: #4ade80;
-        }
-
-        .live-text {
-            color: #4ade80;
-        }
-
-        .light-mode .live-indicator {
-            background: rgba(34, 197, 94, 0.15);
-            border: 1px solid rgba(34, 197, 94, 0.3);
-        }
-
-        .light-mode .live-dot {
-            background: #16a34a;
-        }
-
-        .light-mode .live-text {
-            color: #16a34a;
         }
 
         .theme-toggle {
@@ -227,111 +755,6 @@
         .light-mode .theme-toggle-slider {
             transform: translateX(30px);
         }
-
-        .metric-card {
-            background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%);
-        }
-
-        .light-mode .card {
-            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.08);
-            background: #ffffff;
-        }
-
-        .light-mode .card:hover {
-            box-shadow: 0 10px 20px -5px rgba(0, 0, 0, 0.1);
-        }
-
-        .light-mode .metric-card {
-            background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
-        }
-
-        .light-mode .table-row:hover {
-            background: #f8fafc;
-        }
-
-        .light-mode .nested-pagination {
-            background: #f8fafc;
-            border: 1px solid #e2e8f0;
-        }
-
-        .light-mode .pagination-btn {
-            background: #ffffff;
-            color: #334155;
-            border-color: #e2e8f0;
-        }
-
-        .light-mode .pagination-btn:hover:not(:disabled) {
-            background: #faf5ff;
-            box-shadow: 0 2px 8px rgba(139, 92, 246, 0.2);
-        }
-
-        .light-mode .pagination-btn.active {
-            background: linear-gradient(135deg, #8b5cf6, #6366f1);
-            color: white;
-        }
-
-        .light-mode .badge {
-            border-width: 1px;
-        }
-
-        .search-input:focus {
-            outline: none;
-            border-color: var(--accent-primary);
-            box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1);
-        }
-
-        .modal-backdrop {
-            backdrop-filter: blur(8px);
-        }
-
-        @keyframes slideIn {
-            from {
-                opacity: 0;
-                transform: translateY(-20px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-
-        .slide-in {
-            animation: slideIn 0.3s ease-out;
-        }
-
-        .status-indicator {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            display: inline-block;
-        }
-
-        .pagination-info {
-            color: var(--text-muted);
-            font-size: 0.875rem;
-        }
-
-        .pagination-info span {
-            color: var(--text-secondary);
-            font-weight: 600;
-        }
-
-        .btn-about {
-            background: var(--bg-tertiary);
-            color: var(--text-primary);
-            transition: all 0.3s ease;
-        }
-
-        .light-mode .btn-about {
-            background: #f1f5f9;
-            color: #0f172a;
-            border: 1px solid #e2e8f0;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
     </style>
 </head>
 <body>
@@ -348,902 +771,28 @@
                         </svg>
                     </div>
                     <div>
-                        <h1 class="text-2xl font-bold">CrudX Performance</h1>
+                        <h1 class="text-2xl font-bold">CrudX API Documentation</h1>
                         <p class="text-xs" style="color: var(--text-muted);">
-                            <span id="dynamicVersion">v1.0.0</span> • by
-                            <a href="https://www.linkedin.com/in/sachin-nimbal/" target="_blank"
-                               class="text-indigo-400 hover:text-indigo-300 transition-colors">
-                                Sachin Nimbal
-                            </a>
+                            Auto-generated REST APIs • Zero Boilerplate
                         </p>
                     </div>
                 </div>
             </div>
 
             <div class="flex items-center gap-4">
-                <div class="live-indicator flex items-center gap-2 px-3 py-1.5 rounded-full">
-                    <div class="live-dot w-2 h-2 rounded-full pulse-dot"></div>
-                    <span class="live-text text-xs font-semibold">LIVE</span>
-                </div>
-
                 <div class="theme-toggle" onclick="toggleTheme()">
                     <div class="theme-toggle-slider"></div>
                 </div>
-
-                <button onclick="toggleInfo()" class="btn-about px-4 py-2 rounded-lg text-sm font-medium">
-                    About Framework
-                </button>
             </div>
         </div>
     </div>
 </header>
 
-<div
-        id="infoModal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="modalTitle"
-        class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop"
-        style="background: rgba(0, 0, 0, 0.7);"
->
-    <div
-            class="card rounded-2xl max-w-6xl w-full max-h-[90vh] overflow-y-auto slide-in"
-    >
-        <div class="p-8">
-            <!-- Header -->
-            <div class="flex items-start justify-between mb-6">
-                <div>
-                    <div class="flex items-center gap-3 mb-1">
-                        <h2 id="modalTitle" class="text-3xl font-bold">
-                            CrudX Framework
-                        </h2>
-                        <span
-                                id="modalVersion"
-                                class="text-sm font-semibold px-2 py-0.5 rounded-full"
-                                style="background-color: rgba(139, 92, 246, 0.15); color: var(--accent-primary);"
-                        >
-        v1.0.0
-      </span>
-                    </div>
-                    <p style="color: var(--text-secondary);">
-                        Zero-Boilerplate CRUD Operations for Spring Boot
-                    </p>
-                </div>
+<div id="swagger-ui"></div>
 
-                <button
-                        onclick="toggleInfo()"
-                        aria-label="Close modal"
-                        class="hover:text-white transition-colors"
-                        style="color: var(--text-muted);"
-                >
-                    <svg
-                            class="w-6 h-6"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                    >
-                        <path
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                                stroke-width="2"
-                                d="M6 18L18 6M6 6l12 12"
-                        />
-                    </svg>
-                </button>
-            </div>
-
-            <div class="space-y-6">
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-
-                    <!-- Profile Card -->
-                    <div class="max-w-sm mx-auto md:mx-0 bg-white/5 rounded-2xl p-6 shadow-lg border border-gray-700/40 hover:shadow-xl transition-all hover:-translate-y-1 backdrop-blur-md">
-
-                        <!-- LinkedIn Badge Container (hidden initially) -->
-                        <div id="linkedinBadgeContainer" class="linkedin-badge-container"
-                             style="display: none; justify-content: center; align-items: center;">
-                            <div id="linkedinBadge" class="badge-base LI-profile-badge" data-locale="en_US"
-                                 data-size="large" data-theme="dark" data-type="VERTICAL" data-vanity="sachin-nimbal"
-                                 data-version="v1">
-                                <a class="badge-base__link LI-simple-link hidden"
-                                   href="https://in.linkedin.com/in/sachin-nimbal?trk=profile-badge">Sachin Nimbal</a>
-                            </div>
-                        </div>
-
-                        <!-- Default Profile (shown by default) -->
-                        <div id="fallback-profile">
-                            <!-- Profile Header -->
-                            <div class="flex flex-col items-center text-center space-y-4">
-                                <!-- Avatar -->
-                                <div class="w-28 h-28 rounded-full flex items-center justify-center text-white text-2xl font-bold shadow-inner"
-                                     style="background: linear-gradient(135deg, var(--accent-primary, #6366F1), var(--accent-secondary, #8B5CF6));">
-                                    SN
-                                </div>
-
-                                <!-- Info -->
-                                <div>
-                                    <h2 class="text-lg font-semibold" style="color: var(--text-primary, #fff);">
-                                        Sachin Nimbal
-                                    </h2>
-                                    <p class="text-sm text-gray-400">Full Stack Developer</p>
-                                </div>
-                            </div>
-
-                            <!-- Divider -->
-                            <div class="my-5 border-t border-gray-700/40"></div>
-
-                            <!-- Contact Buttons -->
-                            <div class="flex justify-center gap-3">
-                                <!-- Gmail -->
-                                <a href="mailto:sachinnimbal9@gmail.com"
-                                   class="flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium text-white hover:opacity-90 transition-all"
-                                   style="background-color: #D93025;">
-                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                              d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
-                                    </svg>
-                                    <span>Contact</span>
-                                </a>
-
-                                <!-- LinkedIn -->
-                                <a href="https://www.linkedin.com/in/sachin-nimbal/" target="_blank"
-                                   rel="noopener noreferrer"
-                                   class="flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium text-white hover:opacity-90 transition-all"
-                                   style="background-color: #0A66C2;">
-                                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                                        <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452z"/>
-                                    </svg>
-                                    <span>Connect</span>
-                                </a>
-                            </div>
-                        </div>
-                    </div>
-                    <!-- LinkedIn Badge Script -->
-                    <script src="https://platform.linkedin.com/badges/js/profile.js" async defer
-                            type="text/javascript"></script>
-
-                    <!-- Right: CrudX Introduction -->
-                    <div class="md:col-span-2 card rounded-xl p-6 shadow-lg border border-gray-800/40 transition-all hover:shadow-xl hover:-translate-y-1">
-                        <div class="flex items-start gap-3 mb-3">
-                            <div class="p-2 rounded-lg bg-indigo-500/20">
-                                <svg class="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor"
-                                     viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                          d="M13 16h-1v-4h-1m1-4h.01M12 20a8 8 0 100-16 8 8 0 000 16z"/>
-                                </svg>
-                            </div>
-                            <div>
-                                <h4 class="font-semibold mb-1" style="color: var(--text-primary);">
-                                    Discover CrudX Starter 🚀
-                                </h4>
-                                <p class="text-sm leading-relaxed" style="color: var(--text-muted);">
-                                    <strong>CrudX Starter</strong> is a lightweight, high-performance Spring Boot
-                                    framework built to simplify CRUD operations
-                                    across multiple databases. It eliminates repetitive configurations and enables rapid
-                                    development using a clean, modular architecture.
-                                </p>
-                            </div>
-                        </div>
-
-                        <div class="mt-4 text-sm leading-relaxed" style="color: var(--text-secondary);">
-                            CrudX provides <strong>auto-configuration</strong> for both SQL and NoSQL databases,
-                            <strong>audit tracking</strong>, and a ready-to-use
-                            repository layer — all while keeping your codebase minimal and maintainable.
-                            Start building scalable CRUD systems faster and smarter.
-                        </div>
-
-                        <div class="mt-4">
-                            <a href="https://github.com/sachinnimbal/crudx-starter"
-                               target="_blank"
-                               class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-full text-white transition-all duration-200 hover:opacity-90"
-                               style="background-color: var(--accent-primary); border: 1px solid var(--accent-primary);">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                          d="M13 7l5 5m0 0l-5 5m5-5H6"/>
-                                </svg>
-                                <span>Get Started</span>
-                            </a>
-                            <a href="https://github.com/sachinnimbal/crudx-starter/issues"
-                               target="_blank"
-                               class="ml-3 text-sm text-indigo-400 hover:text-indigo-300 underline">
-                                Report an Issue
-                            </a>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="space-y-6 mt-6">
-                <h3 class="text-xl font-bold mb-3">✨ Key Features & Advantages</h3>
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    <div class="card rounded-xl p-4  transition-transform">
-                        <div class="flex items-start gap-3">
-                            <div class="p-2 rounded-lg" style="background: rgba(139, 92, 246, 0.2);">
-                                <svg class="w-5 h-5" style="color: var(--accent-primary);" fill="none"
-                                     stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                          d="M13 10V3L4 14h7v7l9-11h-7z"/>
-                                </svg>
-                            </div>
-                            <div>
-                                <h4 class="font-semibold mb-1" style="color: var(--text-primary);">Zero Boilerplate</h4>
-                                <p class="text-xs" style="color: var(--text-muted);">Eliminates 90% of repetitive CRUD
-                                    code. Write entities and controllers - that's it!</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="card rounded-xl p-4  transition-transform">
-                        <div class="flex items-start gap-3">
-                            <div class="p-2 rounded-lg" style="background: rgba(34, 197, 94, 0.2);">
-                                <svg class="w-5 h-5 text-green-400" fill="none" stroke="currentColor"
-                                     viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                          d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/>
-                                </svg>
-                            </div>
-                            <div>
-                                <h4 class="font-semibold mb-1" style="color: var(--text-primary);">Multi-Database</h4>
-                                <p class="text-xs" style="color: var(--text-muted);">MySQL, PostgreSQL, and MongoDB
-                                    support out of the box with auto-configuration.</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="card rounded-xl p-4  transition-transform">
-                        <div class="flex items-start gap-3">
-                            <div class="p-2 rounded-lg" style="background: rgba(249, 115, 22, 0.2);">
-                                <svg class="w-5 h-5 text-orange-400" fill="none" stroke="currentColor"
-                                     viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                          d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
-                                </svg>
-                            </div>
-                            <div>
-                                <h4 class="font-semibold mb-1" style="color: var(--text-primary);">Performance
-                                    Analytics</h4>
-                                <p class="text-xs" style="color: var(--text-muted);">Built-in real-time monitoring with
-                                    response times, memory tracking & endpoint stats.</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="card rounded-xl p-4  transition-transform">
-                        <div class="flex items-start gap-3">
-                            <div class="p-2 rounded-lg" style="background: rgba(59, 130, 246, 0.2);">
-                                <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor"
-                                     viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                          d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
-                                </svg>
-                            </div>
-                            <div>
-                                <h4 class="font-semibold mb-1" style="color: var(--text-primary);">Batch Operations</h4>
-                                <p class="text-xs" style="color: var(--text-muted);">Bulk create/delete with
-                                    skip-on-duplicate support and comprehensive tracking.</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="card rounded-xl p-4  transition-transform">
-                        <div class="flex items-start gap-3">
-                            <div class="p-2 rounded-lg" style="background: rgba(236, 72, 153, 0.2);">
-                                <svg class="w-5 h-5 text-pink-400" fill="none" stroke="currentColor"
-                                     viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                          d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
-                                </svg>
-                            </div>
-                            <div>
-                                <h4 class="font-semibold mb-1" style="color: var(--text-primary);">Smart
-                                    Constraints</h4>
-                                <p class="text-xs" style="color: var(--text-muted);">Single or multi-field uniqueness
-                                    with @CrudXUniqueConstraint(s).</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="card rounded-xl p-4  transition-transform">
-                        <div class="flex items-start gap-3">
-                            <div class="p-2 rounded-lg" style="background: rgba(168, 85, 247, 0.2);">
-                                <svg class="w-5 h-5 text-purple-400" fill="none" stroke="currentColor"
-                                     viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                          d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"/>
-                                </svg>
-                            </div>
-                            <div>
-                                <h4 class="font-semibold mb-1" style="color: var(--text-primary);">Auto-Pagination</h4>
-                                <p class="text-xs" style="color: var(--text-muted);">Automatically switches to
-                                    pagination for datasets over 1000 records.</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="card rounded-xl p-4  transition-transform">
-                        <div class="flex items-start gap-3">
-                            <div class="p-2 rounded-lg" style="background: rgba(234, 179, 8, 0.2);">
-                                <svg class="w-5 h-5 text-yellow-400" fill="none" stroke="currentColor"
-                                     viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                          d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                                </svg>
-                            </div>
-                            <div>
-                                <h4 class="font-semibold mb-1" style="color: var(--text-primary);">Lifecycle Hooks</h4>
-                                <p class="text-xs" style="color: var(--text-muted);">beforeCreate, afterUpdate, and
-                                    other hooks for custom business logic.</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="card rounded-xl p-4  transition-transform">
-                        <div class="flex items-start gap-3">
-                            <div class="p-2 rounded-lg" style="background: rgba(14, 165, 233, 0.2);">
-                                <svg class="w-5 h-5 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                          d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01"/>
-                                </svg>
-                            </div>
-                            <div>
-                                <h4 class="font-semibold mb-1" style="color: var(--text-primary);">Memory Optimized</h4>
-                                <p class="text-xs" style="color: var(--text-muted);">Cursor-based streaming for large
-                                    datasets prevents OutOfMemory errors.</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="card rounded-xl p-4  transition-transform">
-                        <div class="flex items-start gap-3">
-                            <div class="p-2 rounded-lg" style="background: rgba(239, 68, 68, 0.2);">
-                                <svg class="w-5 h-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                          d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
-                                </svg>
-                            </div>
-                            <div>
-                                <h4 class="font-semibold mb-1" style="color: var(--text-primary);">Exception
-                                    Handling</h4>
-                                <p class="text-xs" style="color: var(--text-muted);">Built-in error handling with
-                                    meaningful messages and proper HTTP status codes.</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="card rounded-xl p-4  transition-transform">
-                        <div class="flex items-start gap-3">
-                            <div class="p-2 rounded-lg" style="background: rgba(99, 102, 241, 0.2);">
-                                <svg class="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor"
-                                     viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                          d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/>
-                                </svg>
-                            </div>
-                            <div>
-                                <h4 class="font-semibold mb-1" style="color: var(--text-primary);">Transaction
-                                    Support</h4>
-                                <p class="text-xs" style="color: var(--text-muted);">Automatic transaction management
-                                    with rollback on errors.</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="card rounded-xl p-4  transition-transform">
-                        <div class="flex items-start gap-3">
-                            <div class="p-2 rounded-lg" style="background: rgba(16, 185, 129, 0.2);">
-                                <svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor"
-                                     viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                          d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/>
-                                </svg>
-                            </div>
-                            <div>
-                                <h4 class="font-semibold mb-1" style="color: var(--text-primary);">RESTful APIs</h4>
-                                <p class="text-xs" style="color: var(--text-muted);">10+ auto-generated REST endpoints
-                                    following industry best practices.</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="card rounded-xl p-4 transition-transform">
-                        <div class="flex items-start gap-3">
-                            <div class="p-2 rounded-lg" style="background: rgba(59, 130, 246, 0.2);">
-                                <svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor"
-                                     viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                          d="M3 7a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-6l-4 4v-4H5a2 2 0 01-2-2V7z"/>
-                                </svg>
-                            </div>
-                            <div>
-                                <h4 class="font-semibold mb-1" style="color: var(--text-primary);">In-Built Swagger
-                                    UI</h4>
-                                <p class="text-xs" style="color: var(--text-muted);">
-                                    Integrated <strong>Swagger UI</strong> for instant API testing — no setup needed.
-                                </p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Quick Start -->
-            <div class="space-y-6 mt-6">
-                <h3 class="text-xl font-bold mb-3">⚡ Quick Start (5 Steps)</h3>
-
-                <div class="space-y-4 text-sm leading-relaxed">
-                    <div class="card rounded-xl p-4" style="border-color: var(--accent-primary);">
-                        <h4 class="font-semibold mb-1" style="color: var(--accent-primary);">
-                            Step 1: Add Dependencies
-                        </h4>
-                        <p style="color: var(--text-secondary);">
-                            Add the core dependency and your database driver:
-                        </p>
-                        <pre class="rounded-lg p-3 mt-2 text-xs overflow-x-auto"
-                             style="background: var(--bg-primary); color: var(--text-secondary);">
-<code id="dependencyCode">implementation 'io.github.sachinnimbal:crudx-starter:loading...'</code></pre>
-                    </div>
-
-                    <div class="card rounded-xl p-4" style="border-color: var(--accent-primary);">
-                        <h4 class="font-semibold mb-1" style="color: var(--accent-primary);">
-                            Step 2: Enable CrudX
-                        </h4>
-                        <p style="color: var(--text-secondary);">Annotate your main Spring Boot class:</p>
-                        <pre class="rounded-lg p-3 mt-2 text-xs overflow-x-auto"
-                             style="background: var(--bg-primary); color: var(--text-secondary);">
-<code>@SpringBootApplication
-@CrudX
-public class MyApp { ... }</code></pre>
-                    </div>
-
-                    <div class="card rounded-xl p-4" style="border-color: var(--accent-primary);">
-                        <h4 class="font-semibold mb-1" style="color: var(--accent-primary);">
-                            Step 3: Configure Database
-                        </h4>
-                        <p style="color: var(--text-secondary);">
-                            Add <code>application.yml</code> for MySQL, PostgreSQL, or MongoDB:
-                        </p>
-                        <pre class="rounded-lg p-3 mt-2 text-xs overflow-x-auto"
-                             style="background: var(--bg-primary); color: var(--text-secondary);">
-<code>spring:
-  datasource:
-    url: jdbc:mysql://localhost:3306/company_db
-    username: root
-    password: root123</code></pre>
-                    </div>
-
-                    <div class="card rounded-xl p-4" style="border-color: var(--accent-primary);">
-                        <h4 class="font-semibold mb-1" style="color: var(--accent-primary);">
-                            Step 4: Create Entity
-                        </h4>
-                        <p style="color: var(--text-secondary);">
-                            Extend the CrudX base model for your database type:
-                        </p>
-                        <pre class="rounded-lg p-3 mt-2 text-xs overflow-x-auto"
-                             style="background: var(--bg-primary); color: var(--text-secondary);">
-<code>public class Employee extends CrudXMySQLEntity&lt;Long&gt; {
-  private String name;
-  private String email;
-}</code></pre>
-                    </div>
-
-                    <div class="card rounded-xl p-4" style="border-color: var(--accent-primary);">
-                        <h4 class="font-semibold mb-1" style="color: var(--accent-primary);">
-                            Step 5: Create Controller
-                        </h4>
-                        <p style="color: var(--text-secondary);">
-                            Extend <code>CrudXController</code> to automatically enable CRUD endpoints:
-                        </p>
-                        <pre class="rounded-lg p-3 mt-2 text-xs overflow-x-auto"
-                             style="background: var(--bg-primary); color: var(--text-secondary);">
-<code>@RestController
-@RequestMapping("/api/employees")
-public class EmployeeController extends CrudXController&lt;Employee, Long&gt; { }</code></pre>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Notes Section -->
-            <div class="flex flex-col gap-3 mt-6">
-                <div
-                        class="rounded-xl p-4"
-                        style="background: rgba(139, 92, 246, 0.1); border: 1px solid rgba(139, 92, 246, 0.3);"
-                >
-                    <div class="flex items-start gap-3">
-                        <svg
-                                class="w-5 h-5 mt-0.5 flex-shrink-0"
-                                style="color: var(--accent-primary);"
-                                fill="none"
-                                stroke="currentColor"
-                                viewBox="0 0 24 24"
-                        >
-                            <path
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                    stroke-width="2"
-                                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                            />
-                        </svg>
-                        <div class="text-sm" style="color: var(--text-secondary);">
-                            <strong>About Memory Metrics:</strong> Memory values show
-                            thread-allocated memory during request processing. First requests
-                            may show higher values due to JVM warm-up.
-                        </div>
-                    </div>
-                </div>
-
-                <div
-                        class="rounded-xl p-4"
-                        style="background: rgba(139, 92, 246, 0.1); border: 1px solid rgba(139, 92, 246, 0.3);"
-                >
-                    <div class="flex items-start gap-3">
-                        <svg
-                                class="w-5 h-5 mt-0.5 flex-shrink-0"
-                                style="color: var(--accent-primary);"
-                                fill="none"
-                                stroke="currentColor"
-                                viewBox="0 0 24 24"
-                        >
-                            <path
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                    stroke-width="2"
-                                    d="M13 16h-1v-4h-1m1-4h.01M21 12A9 9 0 113 12a9 9 0 0118 0z"
-                            />
-                        </svg>
-                        <p class="text-sm" style="color: var(--text-secondary);">
-                            CrudX automatically generates CRUD APIs, repositories, and
-                            services for all annotated entities — no manual boilerplate
-                            required!
-                        </p>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Footer -->
-            <div class="mt-8 pt-6 border-t" style="border-color: var(--border-color);">
-                <button
-                        onclick="toggleInfo()"
-                        class="w-full px-6 py-3 rounded-lg font-semibold shadow-lg transition-all text-white hover:opacity-90"
-                        style="background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));"
-                >
-                    Close
-                </button>
-            </div>
-        </div>
-    </div>
-</div>
-
-<main class="max-w-7xl mx-auto px-6 py-8">
-    <div class="flex flex-wrap items-center gap-4 mb-8">
-        <button onclick="loadData()"
-                class="btn-refresh px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 rounded-lg font-semibold shadow-lg transform hover:scale-105 transition-all">
-            <span class="flex items-center gap-2">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                          d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-                </svg>
-                Refresh
-            </span>
-        </button>
-        <button onclick="toggleAutoRefresh()"
-                class="btn-auto-refresh px-6 py-3 rounded-lg font-semibold shadow-lg transition-all">
-            <span id="autoRefreshText">⏸ Pause Auto-Refresh</span>
-        </button>
-        <button onclick="clearMetrics()"
-                class="btn-clear px-6 py-3 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 rounded-lg font-semibold shadow-lg transition-all">
-            <span class="flex items-center gap-2">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
-                </svg>
-                Clear Metrics
-            </span>
-        </button>
-        <div class="ml-auto text-sm last-update-text">
-            Last updated: <span id="lastUpdate" class="last-update-time">-</span>
-        </div>
-    </div>
-
-    <div id="error" class="hidden mb-8 bg-red-500/10 border border-red-500/50 rounded-xl p-4 flex items-center gap-3">
-        <svg class="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
-        </svg>
-        <span id="errorText" class="text-red-300"></span>
-    </div>
-
-    <div id="loading" class="text-center py-20">
-        <div class="inline-block w-16 h-16 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
-        <p class="mt-4 text-xl" style="color: var(--text-muted);">Loading analytics...</p>
-    </div>
-
-    <div id="content" class="hidden space-y-8">
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
-            <div class="metric-card card rounded-2xl p-6 shadow-xl">
-                <div class="flex items-center justify-between mb-4">
-                    <div class="p-3 bg-blue-500/20 rounded-xl">
-                        <svg class="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                  d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/>
-                        </svg>
-                    </div>
-                </div>
-                <p class="text-sm uppercase tracking-wider font-semibold mb-2" style="color: var(--text-muted);">Total
-                    Requests</p>
-                <p class="text-4xl font-bold" style="color: var(--text-primary);" id="totalRequests">0</p>
-            </div>
-
-            <div class="metric-card card rounded-2xl p-6 shadow-xl">
-                <div class="flex items-center justify-between mb-4">
-                    <div class="p-3 bg-green-500/20 rounded-xl">
-                        <svg class="w-6 h-6 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                  d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                        </svg>
-                    </div>
-                </div>
-                <p class="text-sm uppercase tracking-wider font-semibold mb-2" style="color: var(--text-muted);">Success
-                    Rate</p>
-                <p class="text-4xl font-bold" style="color: var(--text-primary);"><span id="successRate">0</span>%</p>
-                <div class="mt-3 rounded-full h-2 overflow-hidden" style="background: var(--bg-tertiary);">
-                    <div id="successBar"
-                         class="bg-gradient-to-r from-green-500 to-emerald-500 h-full transition-all duration-500"
-                         style="width: 0%"></div>
-                </div>
-            </div>
-
-            <div class="metric-card card rounded-2xl p-6 shadow-xl">
-                <div class="flex items-center justify-between mb-4">
-                    <div class="p-3 bg-purple-500/20 rounded-xl">
-                        <svg class="w-6 h-6 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                  d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                        </svg>
-                    </div>
-                </div>
-                <p class="text-sm uppercase tracking-wider font-semibold mb-2" style="color: var(--text-muted);">Avg
-                    Response</p>
-                <p class="text-2xl font-bold" style="color: var(--text-primary);" id="avgTime">0ms</p>
-            </div>
-
-            <div class="metric-card card rounded-2xl p-6 shadow-xl">
-                <div class="flex items-center justify-between mb-4">
-                    <div class="p-3 bg-orange-500/20 rounded-xl">
-                        <svg class="w-6 h-6 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                  d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"/>
-                        </svg>
-                    </div>
-                </div>
-                <p class="text-sm uppercase tracking-wider font-semibold mb-2" style="color: var(--text-muted);">Avg
-                    Memory</p>
-                <p class="text-2xl font-bold" style="color: var(--text-primary);" id="avgMemory">N/A</p>
-            </div>
-
-            <div class="metric-card card rounded-2xl p-6 shadow-xl">
-                <div class="flex items-center justify-between mb-4">
-                    <div class="p-3 bg-pink-500/20 rounded-xl">
-                        <svg class="w-6 h-6 text-pink-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                  d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/>
-                        </svg>
-                    </div>
-                </div>
-                <p class="text-sm uppercase tracking-wider font-semibold mb-2" style="color: var(--text-muted);">Avg DTO
-                    Conv</p>
-                <p class="text-2xl font-bold" style="color: var(--text-primary);" id="avgDtoTime">N/A</p>
-            </div>
-        </div>
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div class="card rounded-2xl p-6 shadow-xl">
-                <h3 class="text-xl font-bold mb-2" style="color: var(--text-primary);">Response Time Distribution</h3>
-                <p class="text-sm mb-6" style="color: var(--text-muted);">Performance categories</p>
-                <div class="relative h-64">
-                    <canvas id="responseTimeChart"></canvas>
-                </div>
-            </div>
-
-            <div class="card rounded-2xl p-6 shadow-xl">
-                <h3 class="text-xl font-bold mb-2" style="color: var(--text-primary);">Request Status</h3>
-                <p class="text-sm mb-6" style="color: var(--text-muted);">Success vs Failed</p>
-                <div class="relative h-64">
-                    <canvas id="statusChart"></canvas>
-                </div>
-            </div>
-        </div>
-        <div id="dtoMetadataContainer" class="mb-8"></div>
-        <div class="card rounded-2xl p-6 shadow-xl">
-            <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-                <div>
-                    <h3 class="text-xl font-bold mb-2" style="color: var(--text-primary);">Endpoint Performance</h3>
-                    <p class="text-sm" style="color: var(--text-muted);">Click any row to view detailed metrics</p>
-                </div>
-                <div class="flex flex-col sm:flex-row gap-3">
-                    <input type="text" id="endpointSearch" placeholder="Search endpoints..." onkeyup="filterEndpoints()"
-                           class="search-input px-4 py-2 border rounded-lg text-sm transition-all"
-                           style="background: var(--bg-tertiary); border-color: var(--border-color); color: var(--text-primary);">
-                    <select id="sortSelect" onchange="sortEndpoints()"
-                            class="px-4 py-2 border rounded-lg text-sm transition-all"
-                            style="background: var(--bg-tertiary); border-color: var(--border-color); color: var(--text-primary);">
-                        <option value="calls">Sort by Calls</option>
-                        <option value="avgTime">Sort by Avg Time</option>
-                        <option value="successRate">Sort by Success Rate</option>
-                        <option value="memory">Sort by Memory</option>
-                    </select>
-                    <select id="itemsPerPageSelect" onchange="changeItemsPerPage()"
-                            class="px-4 py-2 border rounded-lg text-sm transition-all"
-                            style="background: var(--bg-tertiary); border-color: var(--border-color); color: var(--text-primary);">
-                        <option value="5" selected>5 per page</option>
-                        <option value="10">10 per page</option>
-                        <option value="20">20 per page</option>
-                        <option value="50">50 per page</option>
-                        <option value="100">100 per page</option>
-                    </select>
-                    <button onclick="openTableNewTab()"
-                            class="flex items-center gap-2 px-4 py-2 rounded-lg font-semibold transition-all text-white"
-                            style="background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));"
-                            title="Open in new tab">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                  d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
-                        </svg>
-                        <span>Open</span>
-                    </button>
-                </div>
-            </div>
-
-            <div class="text-sm mb-4" style="color: var(--text-muted);">
-                Showing <span id="showingCount" class="font-semibold" style="color: var(--text-secondary);">0</span> of
-                <span id="totalCount" class="font-semibold" style="color: var(--text-secondary);">0</span> endpoints
-            </div>
-
-            <div class="overflow-x-auto">
-                <table class="w-full" id="endpointTable">
-                    <thead>
-                    <tr class="border-b" style="border-color: var(--border-color);">
-                        <th class="text-left py-3 px-4 text-sm font-semibold" style="color: var(--text-secondary);">
-                            Method
-                        </th>
-                        <th class="text-left py-3 px-4 text-sm font-semibold" style="color: var(--text-secondary);">
-                            Endpoint
-                        </th>
-                        <th class="text-center py-3 px-4 text-sm font-semibold" style="color: var(--text-secondary);">
-                            Calls
-                        </th>
-                        <th class="text-center py-3 px-4 text-sm font-semibold" style="color: var(--text-secondary);">
-                            Avg Time
-                        </th>
-                        <th class="text-center py-3 px-4 text-sm font-semibold" style="color: var(--text-secondary);">
-                            Success Rate
-                        </th>
-                        <th class="text-center py-3 px-4 text-sm font-semibold"
-                            style="color: var(--text-secondary);"></th>
-                    </tr>
-                    </thead>
-                    <tbody id="endpointList"></tbody>
-                </table>
-            </div>
-
-            <div id="pagination" class="pagination-container"></div>
-        </div>
-
-        <!-- API Documentation Explorer -->
-        <div class="card rounded-2xl shadow-xl overflow-hidden">
-            <div class="p-6 border-b" style="border-color: var(--border-color);">
-                <div class="flex items-center justify-between">
-                    <div class="flex items-center gap-4">
-                        <div class="p-3 bg-indigo-500/20 rounded-xl">
-                            <svg class="w-8 h-8 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                      d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-                            </svg>
-                        </div>
-                        <div>
-                            <h3 class="text-xl font-bold" style="color: var(--text-primary);">
-                                📖 API Documentation Explorer
-                            </h3>
-                            <p class="text-sm" style="color: var(--text-muted);">
-                                Interactive Swagger UI - Test your auto-generated APIs live
-                            </p>
-                        </div>
-                    </div>
-                    <button onclick="openSwaggerNewTab()"
-                            class="flex items-center gap-2 px-4 py-2 rounded-lg font-semibold transition-all text-white"
-                            style="background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));"
-                            title="Open in new tab">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                  d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
-                        </svg>
-                        <span>Open in New Tab</span>
-                    </button>
-                </div>
-            </div>
-
-            <!-- Embedded Swagger UI -->
-            <div class="swagger-container" style="background: var(--bg-primary);">
-                <iframe
-                        id="swaggerFrame"
-                        src="${API_BASE}/api-docs"
-                        style="width: 100%; height: 800px; border: none; display: block;"
-                        title="Swagger UI">
-                </iframe>
-            </div>
-
-            <!-- Loading State -->
-            <div id="swaggerLoading" class="flex items-center justify-center p-12" style="display: none;">
-                <div class="text-center">
-                    <div class="inline-block w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-                    <p style="color: var(--text-muted);">Loading API Documentation...</p>
-                </div>
-            </div>
-        </div>
-    </div>
-</main>
-
-<footer class="max-w-7xl mx-auto px-6 py-8 mt-12 border-t" style="border-color: var(--border-color);">
-    <div class="flex flex-col md:flex-row items-center justify-between gap-4 text-sm" style="color: var(--text-muted);">
-        <div class="text-center md:text-left">
-            <p>&copy; 2025 CrudX Framework. Built with ❤️ by <a id="footerAuthorLink" href="" target="_blank"
-                                                                class="text-indigo-400 hover:text-indigo-300 transition-colors">Loading...</a>
-            </p>
-        </div>
-        <div class="flex items-center gap-6">
-            <a id="footerEmail" href="" class="hover:text-white transition-colors">Contact</a>
-            <span>•</span>
-            <button onclick="toggleInfo()" class="hover:text-white transition-colors">About</button>
-            <span>•</span>
-            <span id="footerVersion">Loading...</span>
-        </div>
-    </div>
-</footer>
-
+<script src="/swagger-ui/swagger-ui-bundle.js"></script>
+<script src="/swagger-ui/swagger-ui-standalone-preset.js"></script>
 <script>
-    const API_BASE = '/crudx/performance';
-    let autoRefresh = true;
-    let refreshInterval;
-    let charts = {};
-    let metricsData = [];
-    let allEndpointStats = [];
-    let filteredEndpointStats = [];
-    let currentPage = 1;
-    let itemsPerPage = 20;
-    let expandedRows = {};
-    let nestedPagination = {};
-    let metadataInfo = null;
-
-    function safeMemoryValue(value) {
-        if (value === null || value === undefined || !isFinite(value) || value < 0) {
-            return null;
-        }
-        return value;
-    }
-
-    async function loadMetadata() {
-        try {
-            const response = await fetch(`${API_BASE}/metadata`);
-            const result = await response.json();
-            if (result.success) {
-                metadataInfo = result.data;
-                updateMetadataDisplay();
-            }
-        } catch (error) {
-            console.error('Failed to load metadata:', error);
-        }
-    }
-
-    const chartDefaults = {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-            legend: {
-                labels: {
-                    color: getComputedStyle(document.documentElement).getPropertyValue('--text-secondary'),
-                    font: { size: 12 }
-                }
-            }
-        }
-    };
-
     function toggleTheme() {
         document.body.classList.toggle('light-mode');
         const theme = document.body.classList.contains('light-mode') ? 'light' : 'dark';
@@ -1267,976 +816,83 @@ public class EmployeeController extends CrudXController&lt;Employee, Long&gt; { 
         }
     }
 
-    function updateChartsTheme() {
-        const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary');
-        Object.values(charts).forEach(chart => {
-            if (chart && chart.options && chart.options.plugins && chart.options.plugins.legend) {
-                chart.options.plugins.legend.labels.color = textColor;
-                chart.update();
-            }
-        });
-    }
-
-    function toggleInfo() {
-        const modal = document.getElementById('infoModal');
-        modal.classList.toggle('hidden');
-    }
-
-    function updateMetadataDisplay() {
-        if (!metadataInfo) return;
-
-        const versionText = document.querySelector('header p.text-xs');
-        if (versionText && metadataInfo.projectVersion && metadataInfo.authorName && metadataInfo.authorLinkedin) {
-          versionText.innerHTML = `
-            v${metadataInfo.projectVersion} • by
-            <a href="${metadataInfo.authorLinkedin}" target="_blank"
-               class="text-indigo-400 hover:text-indigo-300 transition-colors">
-              ${metadataInfo.authorName}
-            </a>`;
+    // Theme synchronization with parent window
+    function syncTheme() {
+        // Check if running in iframe
+        const isInIframe = window.parent !== window;
+        if (isInIframe) {
+            document.body.classList.add('in-iframe');
         }
 
-        const modalVersion = document.getElementById('modalVersion');
-        if (modalVersion) modalVersion.textContent = metadataInfo.projectVersion || 'N/A';
-
-        const modalSince = document.getElementById('modalSince');
-        if (modalSince) modalSince.textContent = metadataInfo.since || 'N/A';
-
-        const modalAuthorName = document.getElementById('modalAuthorName');
-        if (modalAuthorName) modalAuthorName.textContent = metadataInfo.authorName || 'N/A';
-
-        const modalAuthorEmail = document.getElementById('modalAuthorEmail');
-        if (modalAuthorEmail && metadataInfo.authorEmail) {
-            modalAuthorEmail.href = `mailto:${metadataInfo.authorEmail}`;
-            modalAuthorEmail.textContent = metadataInfo.authorEmail;
-        }
-
-        const modalAuthorLinkedin = document.getElementById('modalAuthorLinkedin');
-        if (modalAuthorLinkedin && metadataInfo.authorLinkedin) {
-            modalAuthorLinkedin.href = metadataInfo.authorLinkedin;
-            modalAuthorLinkedin.textContent = metadataInfo.authorLinkedin;
-        }
-
-        const footerVersion = document.getElementById('footerVersion');
-        if (footerVersion) footerVersion.textContent = `v${metadataInfo.projectVersion || 'N/A'}`;
-
-        const footerAuthorLink = document.getElementById('footerAuthorLink');
-        if (footerAuthorLink && metadataInfo.authorLinkedin && metadataInfo.authorName) {
-            footerAuthorLink.href = metadataInfo.authorLinkedin;
-            footerAuthorLink.textContent = metadataInfo.authorName;
-        }
-
-        const footerEmail = document.getElementById('footerEmail');
-        if (footerEmail && metadataInfo.authorEmail) {
-            footerEmail.href = `mailto:${metadataInfo.authorEmail}`;
-        }
-
-        const dependencyCode = document.getElementById('dependencyCode');
-        if (dependencyCode && metadataInfo.group && metadataInfo.artifact && metadataInfo.projectVersion) {
-            dependencyCode.textContent = `implementation '${metadataInfo.group}:${metadataInfo.artifact}:${metadataInfo.projectVersion}'`;
-        }
-    }
-
-    function formatMemory(kb) {
-        if (!kb && kb !== 0) return 'N/A';
-        if (kb < 1024) return kb.toFixed(0) + ' KB';
-        return (kb / 1024).toFixed(2) + ' MB';
-    }
-
-    function getMethodBadge(method) {
-        const badges = {
-            'GET': 'bg-green-500/20 text-green-400 border-green-500/30',
-            'POST': 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-            'PUT': 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
-            'PATCH': 'bg-purple-500/20 text-purple-400 border-purple-500/30',
-            'DELETE': 'bg-red-500/20 text-red-400 border-red-500/30'
-        };
-        return badges[method] || 'bg-slate-600';
-    }
-
-    function toggleEndpointDetails(key) {
-        const detailsRow = document.getElementById(`details-${key}`);
-        const chevron = document.getElementById(`chevron-${key}`);
-
-        document.querySelectorAll('.details-row.open').forEach(row => {
-            if (row.id !== `details-${key}`) {
-                row.classList.remove('open');
-                const otherKey = row.id.replace('details-', '');
-                const otherChevron = document.getElementById(`chevron-${otherKey}`);
-                if (otherChevron) otherChevron.classList.remove('rotated');
-                delete expandedRows[otherKey];
-            }
-        });
-
-        if (detailsRow.classList.contains('open')) {
-            detailsRow.classList.remove('open');
-            chevron.classList.remove('rotated');
-            delete expandedRows[key];
+        // Check localStorage for theme
+        const savedTheme = localStorage.getItem('theme');
+        if (savedTheme === 'light') {
+            document.body.classList.add('light-mode');
         } else {
-            detailsRow.classList.add('open');
-            chevron.classList.add('rotated');
-            expandedRows[key] = true;
-            if (!nestedPagination[key]) {
-                nestedPagination[key] = { currentPage: 1, itemsPerPage: 5 };
-            }
-            updateNestedPagination(key);
+            document.body.classList.remove('light-mode');
         }
-    }
 
-    async function loadData(silent = false) {
-        try {
-            if (!silent) {
-                document.getElementById('loading').classList.remove('hidden');
-                document.getElementById('content').classList.add('hidden');
-            }
-
-            // Single API call instead of two
-            const response = await fetch(`${API_BASE}/dashboard-data`);
-            const result = await response.json();
-
-            if (result.success) {
-                const { summary, metrics } = result.data;
-
-                metricsData = metrics;
-                allEndpointStats = Object.entries(summary.endpointStats || {}).map(([key, stats]) => ({
-                    key,
-                    ...stats
-                }));
-                filteredEndpointStats = [...allEndpointStats];
-
-                updateKPIs(summary);
-                updateCharts(summary, metrics);
-                sortEndpoints();
-
-                if (!silent) {
-                    document.getElementById('loading').classList.add('hidden');
-                    document.getElementById('content').classList.remove('hidden');
+        // If in iframe, listen for theme changes from parent
+        if (isInIframe) {
+            window.addEventListener('message', function(event) {
+                if (event.data.type === 'themeChange') {
+                    if (event.data.theme === 'light') {
+                        document.body.classList.add('light-mode');
+                        localStorage.setItem('theme', 'light');
+                    } else {
+                        document.body.classList.remove('light-mode');
+                        localStorage.setItem('theme', 'dark');
+                    }
                 }
-                document.getElementById('error').classList.add('hidden');
-                document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
-            }
-        } catch (error) {
-            if (!silent) {
-                showError('Connection error: ' + error.message);
-            }
+            });
         }
-    }
 
-    function updateKPIs(data) {
-        document.getElementById('totalRequests').textContent = (data.totalRequests || 0).toLocaleString();
-        document.getElementById('successRate').textContent = (data.successRate || 0).toFixed(1);
-        document.getElementById('successBar').style.width = (data.successRate || 0) + '%';
-        document.getElementById('avgTime').textContent = data.avgExecutionTime || '0ms';
-        document.getElementById('avgMemory').textContent = data.avgMemory || 'N/A';
-        document.getElementById('avgDtoTime').textContent = data.avgDtoConversionTime || 'N/A';
-    }
-
-    function updateCharts(summary, metrics) {
-        createResponseTimeChart(metrics);
-        createStatusChart(summary);
-    }
-
-    function createResponseTimeChart(metrics) {
-        const ctx = document.getElementById('responseTimeChart').getContext('2d');
-        if (charts.responseTime) charts.responseTime.destroy();
-
-        // Extract milliseconds from formatted time strings like "173ms" or "173ms (0.17s)"
-        const parseTime = (timeStr) => {
-            if (!timeStr) return 0;
-            const match = timeStr.match(/^(\d+)ms/);
-            return match ? parseInt(match[1]) : 0;
-        };
-
-        const fast = metrics.filter(m => parseTime(m.executionTime) < 50).length;
-        const medium = metrics.filter(m => parseTime(m.executionTime) >= 50 && parseTime(m.executionTime) < 200).length;
-        const slow = metrics.filter(m => parseTime(m.executionTime) >= 200).length;
-
-        charts.responseTime = new Chart(ctx, {
-            type: 'pie',
-            data: {
-                labels: ['Fast (<50ms)', 'Medium (50-200ms)', 'Slow (>200ms)'],
-                datasets: [{
-                    data: [fast, medium, slow],
-                    backgroundColor: ['#10b981', '#f59e0b', '#ef4444'],
-                    borderWidth: 0
-                }]
-            },
-            options: {
-                ...chartDefaults,
-                animation: {
-                    animateRotate: true,
-                    animateScale: true,
-                    duration: 1500,
-                    easing: 'easeInOutQuart'
+        // Watch for storage changes (when theme changes in parent window)
+        window.addEventListener('storage', function(e) {
+            if (e.key === 'theme') {
+                if (e.newValue === 'light') {
+                    document.body.classList.add('light-mode');
+                } else {
+                    document.body.classList.remove('light-mode');
                 }
             }
         });
     }
 
-    function createStatusChart(summary) {
-        const ctx = document.getElementById('statusChart').getContext('2d');
-        if (charts.status) charts.status.destroy();
+    function goToDashboard() {
+        window.location.href = '/crudx/performance/dashboard';
+    }
 
-        charts.status = new Chart(ctx, {
-            type: 'doughnut',
-            data: {
-                labels: ['Successful', 'Failed'],
-                datasets: [{
-                    data: [summary.successfulRequests || 0, summary.failedRequests || 0],
-                    backgroundColor: ['#10b981', '#ef4444'],
-                    borderWidth: 0
-                }]
-            },
-            options: {
-                ...chartDefaults,
-                animation: {
-                    animateRotate: true,
-                    animateScale: true,
-                    duration: 1500,
-                    easing: 'easeInOutQuart'
-                }
+    // Initialize theme on load
+    window.addEventListener('DOMContentLoaded', syncTheme);
+
+    // Swagger UI initialization
+    window.onload = function() {
+        syncTheme(); // Apply theme before Swagger loads
+
+        const isLightMode = document.body.classList.contains('light-mode');
+
+        window.ui = SwaggerUIBundle({
+            url: "/v3/api-docs",
+            dom_id: '#swagger-ui',
+            deepLinking: true,
+            presets: [
+                SwaggerUIBundle.presets.apis,
+                SwaggerUIStandalonePreset
+            ],
+            layout: "BaseLayout",
+            defaultModelsExpandDepth: 1,
+            defaultModelExpandDepth: 1,
+            docExpansion: "list",
+            filter: true,
+            showExtensions: true,
+            showCommonExtensions: true,
+            syntaxHighlight: {
+                activate: true,  // Enable syntax highlighting for both modes
+                theme: isLightMode ? "agate" : "monokai"
             }
         });
-    }
-
-    function filterEndpoints() {
-        const search = document.getElementById('endpointSearch').value.toLowerCase();
-
-        if (search === '') {
-            filteredEndpointStats = [...allEndpointStats];
-        } else {
-            filteredEndpointStats = allEndpointStats.filter(stats =>
-                stats.endpoint.toLowerCase().includes(search) ||
-                stats.method.toLowerCase().includes(search) ||
-                (stats.entityName && stats.entityName.toLowerCase().includes(search))
-            );
-        }
-
-        currentPage = 1;
-        sortEndpoints();
-    }
-
-    function sortEndpoints() {
-        const sortBy = document.getElementById('sortSelect').value;
-
-        filteredEndpointStats.sort((a, b) => {
-            switch(sortBy) {
-                case 'calls':
-                    return b.totalCalls - a.totalCalls;
-                case 'avgTime':
-                    return parseAvgTime(b.avgExecutionTime) - parseAvgTime(a.avgExecutionTime);
-                case 'successRate':
-                    const rateA = a.totalCalls > 0 ? ((a.totalCalls - a.failedCalls) / a.totalCalls * 100) : 0;
-                    const rateB = b.totalCalls > 0 ? ((b.totalCalls - b.failedCalls) / b.totalCalls * 100) : 0;
-                    return rateB - rateA;
-                case 'memory':
-                    return parseMemory(b.avgMemory) - parseMemory(a.avgMemory);
-                default:
-                    return 0;
-            }
-        });
-
-        updateTable();
-    }
-
-    function parseMemory(memString) {
-        if (!memString || memString === 'N/A') return 0;
-        // Extract KB from strings like "150 KB" or "150 KB (0.15 MB)"
-        const match = memString.match(/^(\d+)\s*KB/);
-        return match ? parseInt(match[1]) : 0;
-    }
-
-    function changeItemsPerPage() {
-        itemsPerPage = parseInt(document.getElementById('itemsPerPageSelect').value);
-        currentPage = 1;
-        updateTable();
-    }
-
-    function updateTable() {
-        const tbody = document.getElementById('endpointList');
-        tbody.innerHTML = '';
-        document.getElementById('totalCount').textContent = filteredEndpointStats.length;
-
-        if (filteredEndpointStats.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="6" class="py-12 text-center" style="color: var(--text-muted);">No endpoints found</td></tr>`;
-            document.getElementById('showingCount').textContent = '0';
-            document.getElementById('pagination').innerHTML = '';
-            return;
-        }
-
-        const totalPages = Math.ceil(filteredEndpointStats.length / itemsPerPage);
-        const start = (currentPage - 1) * itemsPerPage;
-        const end = Math.min(start + itemsPerPage, filteredEndpointStats.length);
-        const pageStats = filteredEndpointStats.slice(start, end);
-
-        document.getElementById('showingCount').textContent = pageStats.length;
-
-        pageStats.forEach((stats) => {
-            const successRate = stats.totalCalls > 0 ?
-                ((stats.totalCalls - stats.failedCalls) / stats.totalCalls * 100).toFixed(1) : 0;
-
-            const safeKey = stats.key.replace(/[^a-zA-Z0-9]/g, '_');
-
-            // Check if this endpoint uses DTOs
-            const hasDtoConversion = stats.dtoConversionCount > 0;
-
-            const row = document.createElement('tr');
-            row.className = 'table-row border-b cursor-pointer';
-            row.style.borderColor = 'var(--border-color)';
-            row.onclick = () => toggleEndpointDetails(safeKey);
-            row.innerHTML = `
-                <td class="py-3 px-4">
-                    <span class="badge border ${getMethodBadge(stats.method)}">
-                        ${stats.method}
-                    </span>
-                </td>
-                <td class="py-3 px-4">
-                    <div class="flex items-center gap-2">
-                        <div class="flex-1">
-                            <div class="flex items-center gap-2">
-                                <span class="font-medium text-sm" style="color: var(--text-secondary);">${stats.endpoint}</span>
-                                ${hasDtoConversion ? '<span class="badge bg-pink-500/20 text-pink-400 border-pink-500/30 text-xs">DTO</span>' : ''}
-                            </div>
-                            ${stats.entityName ? `<div class="text-xs" style="color: var(--text-muted);">${stats.entityName}</div>` : ''}
-                        </div>
-                    </div>
-                </td>
-                <td class="py-3 px-4 text-center">
-                    <span class="font-medium text-sm" style="color: var(--text-secondary);">${stats.totalCalls}</span>
-                </td>
-                <td class="py-3 px-4 text-center">
-                    <span class="badge ${
-                        stats.avgExecutionTimeMs < 50 ? 'bg-green-500/20 text-green-400' :
-                        stats.avgExecutionTimeMs < 200 ? 'bg-yellow-500/20 text-yellow-400' :
-                        'bg-red-500/20 text-red-400'
-                    }">
-                        ${stats.avgExecutionTime}
-                    </span>
-                </td>
-                <td class="py-3 px-4 text-center">
-                    <span class="text-sm font-semibold ${successRate >= 95 ? 'text-green-400' : successRate >= 80 ? 'text-yellow-400' : 'text-red-400'}">
-                        ${successRate}%
-                    </span>
-                </td>
-                <td class="py-3 px-4 text-center">
-                    <svg id="chevron-${safeKey}" class="chevron-icon w-5 h-5 inline-block transition-transform" style="color: var(--text-muted);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-                    </svg>
-                </td>
-            `;
-            tbody.appendChild(row);
-
-            const detailsRow = document.createElement('tr');
-            detailsRow.id = `details-${safeKey}`;
-            detailsRow.className = `details-row border-b ${expandedRows[safeKey] ? 'open' : ''}`;
-            detailsRow.style.borderColor = 'var(--border-color)';
-            detailsRow.innerHTML = `
-                <td colspan="6" class="p-0">
-                    <div class="details-content">
-                        <div class="p-6 space-y-4" style="background: var(--bg-primary); border-top: 1px solid var(--border-color);">
-                            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                                <div class="rounded-lg p-4" style="background: var(--bg-secondary); border: 1px solid var(--border-color);">
-                                    <p class="text-xs mb-3 font-semibold uppercase" style="color: var(--text-muted);">Response Time</p>
-                                    <div class="space-y-2 text-sm">
-                                        <div class="flex justify-between">
-                                            <span style="color: var(--text-secondary);">Average:</span>
-                                            <span class="font-semibold" style="color: var(--text-primary);">${stats.avgExecutionTime}</span>
-                                        </div>
-                                        <div class="flex justify-between">
-                                            <span style="color: var(--text-secondary);">Min:</span>
-                                            <span class="text-green-400 font-semibold">${stats.minExecutionTime}</span>
-                                        </div>
-                                        <div class="flex justify-between">
-                                            <span style="color: var(--text-secondary);">Max:</span>
-                                            <span class="text-red-400 font-semibold">${stats.maxExecutionTime}</span>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div class="rounded-lg p-4" style="background: var(--bg-secondary); border: 1px solid var(--border-color);">
-                                    <p class="text-xs mb-3 font-semibold uppercase" style="color: var(--text-muted);">Memory Usage</p>
-                                    <div class="space-y-2 text-sm">
-                                        <div class="flex justify-between">
-                                            <span style="color: var(--text-secondary);">Average:</span>
-                                            <span class="font-semibold" style="color: var(--text-primary);">${stats.avgMemory}</span>
-                                        </div>
-                                        <div class="flex justify-between">
-                                            <span style="color: var(--text-secondary);">Min:</span>
-                                            <span class="text-green-400 font-semibold">${stats.minMemory}</span>
-                                        </div>
-                                        <div class="flex justify-between">
-                                            <span style="color: var(--text-secondary);">Max:</span>
-                                            <span class="text-red-400 font-semibold">${stats.maxMemory}</span>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div class="rounded-lg p-4" style="background: var(--bg-secondary); border: 1px solid var(--border-color);">
-                                    <p class="text-xs mb-3 font-semibold uppercase" style="color: var(--text-muted);">Success Metrics</p>
-                                    <div class="space-y-2 text-sm">
-                                        <div class="flex justify-between">
-                                            <span style="color: var(--text-secondary);">Total Calls:</span>
-                                            <span class="font-semibold" style="color: var(--text-primary);">${stats.totalCalls}</span>
-                                        </div>
-                                        <div class="flex justify-between">
-                                            <span style="color: var(--text-secondary);">Successful:</span>
-                                            <span class="text-green-400 font-semibold">${stats.totalCalls - stats.failedCalls}</span>
-                                        </div>
-                                        <div class="flex justify-between">
-                                            <span style="color: var(--text-secondary);">Failed:</span>
-                                            <span class="text-red-400 font-semibold">${stats.failedCalls}</span>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div class="rounded-lg p-4" style="background: var(--bg-secondary); border: 1px solid var(--border-color);">
-                                    <p class="text-xs mb-3 font-semibold uppercase" style="color: var(--text-muted);">DTO Conversion</p>
-                                    <div class="space-y-2 text-sm">
-                                        <div class="flex justify-between">
-                                            <span style="color: var(--text-secondary);">Total Conversions:</span>
-                                            <span class="font-semibold" style="color: var(--text-primary);">${stats.dtoConversionCount}</span>
-                                        </div>
-                                        <div class="flex justify-between">
-                                            <span style="color: var(--text-secondary);">Average:</span>
-                                            <span class="font-semibold" style="color: var(--text-primary);">${stats.avgDtoConversionTime}</span>
-                                        </div>
-                                        <div class="flex justify-between">
-                                            <span style="color: var(--text-secondary);">Min:</span>
-                                            <span class="text-green-400 font-semibold">${stats.minDtoConversionTime}</span>
-                                        </div>
-                                        <div class="flex justify-between">
-                                            <span style="color: var(--text-secondary);">Max:</span>
-                                            <span class="text-red-400 font-semibold">${stats.maxDtoConversionTime}</span>
-                                        </div>
-                                        <div class="flex justify-between">
-                                            <span style="color: var(--text-secondary);">Total Time:</span>
-                                            <span class="font-semibold" style="color: var(--text-primary);">${stats.totalDtoConversionTime}</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="rounded-lg p-4" style="background: var(--bg-secondary); border: 1px solid var(--border-color);">
-                                <div class="flex justify-between items-center mb-3">
-                                    <p class="text-xs font-semibold uppercase" style="color: var(--text-muted);">Recent Requests</p>
-                                    <select id="nestedItemsPerPage-${safeKey}" onchange="changeNestedItemsPerPage('${safeKey}')" class="px-2 py-1 rounded text-xs" style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);">
-                                        <option value="5">5 per page</option>
-                                        <option value="10">10 per page</option>
-                                        <option value="20">20 per page</option>
-                                    </select>
-                                </div>
-                                <div id="recentRequests-${safeKey}" class="space-y-2"></div>
-                                <div id="nestedPagination-${safeKey}"></div>
-                            </div>
-                        </div>
-                    </div>
-                </td>
-            `;
-            tbody.appendChild(detailsRow);
-
-            if (expandedRows[safeKey]) {
-                setTimeout(() => {
-                    const chevronEl = document.getElementById(`chevron-${safeKey}`);
-                    if (chevronEl) chevronEl.classList.add('rotated');
-                    updateNestedPagination(safeKey);
-                }, 10);
-            }
-        });
-
-        renderPagination(totalPages);
-    }
-
-    function changeNestedItemsPerPage(key) {
-        const select = document.getElementById(`nestedItemsPerPage-${key}`);
-        nestedPagination[key].itemsPerPage = parseInt(select.value);
-        nestedPagination[key].currentPage = 1;
-        updateNestedPagination(key);
-    }
-
-    function updateNestedPagination(key) {
-        const stats = filteredEndpointStats.find(s => s.key.replace(/[^a-zA-Z0-9]/g, '_') === key);
-        if (!stats) return;
-
-        const filtered = metricsData
-            .filter(m => m.endpoint === stats.endpoint && m.method === stats.method)
-            .reverse();
-
-        if (!nestedPagination[key]) {
-            nestedPagination[key] = { currentPage: 1, itemsPerPage: 5 };
-        }
-
-        const { currentPage: page, itemsPerPage: perPage } = nestedPagination[key];
-        const totalItems = filtered.length;
-        const totalPages = Math.ceil(totalItems / perPage);
-        const start = (page - 1) * perPage;
-        const end = Math.min(start + perPage, totalItems);
-        const pageItems = filtered.slice(start, end);
-
-        const container = document.getElementById(`recentRequests-${key}`);
-        if (!container) return;
-
-        if (pageItems.length === 0) {
-            container.innerHTML = '<p class="text-sm" style="color: var(--text-muted);">No recent requests</p>';
-            document.getElementById(`nestedPagination-${key}`).innerHTML = '';
-            return;
-        }
-
-        // Helper to parse time and determine badge color
-        const getTimeBadge = (timeStr) => {
-            if (!timeStr) return { time: 'N/A', class: 'bg-gray-500/20 text-gray-400' };
-            const match = timeStr.match(/^(\d+)ms/);
-            const ms = match ? parseInt(match[1]) : 0;
-
-            if (ms < 50) return { time: timeStr, class: 'bg-green-500/20 text-green-400 border border-green-500/30' };
-            if (ms < 200) return { time: timeStr, class: 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' };
-            return { time: timeStr, class: 'bg-red-500/20 text-red-400 border border-red-500/30' };
-        };
-
-        container.innerHTML = pageItems.map(m => {
-            const timeBadge = getTimeBadge(m.executionTime);
-            return `
-                <div class="flex items-center justify-between p-3 rounded border text-sm" style="background: var(--bg-tertiary); border-color: var(--border-color);">
-                    <div class="flex items-center gap-3 flex-1">
-                        <span class="status-indicator ${m.success ? 'bg-green-400' : 'bg-red-400'}"></span>
-                        <span style="color: var(--text-secondary);">${new Date(m.timestamp).toLocaleString()}</span>
-                        <span class="badge ${timeBadge.class}">${timeBadge.time}</span>
-                        ${m.memoryUsed ? `<span style="color: var(--text-muted);">${m.memoryUsed}</span>` : ''}
-                        ${m.dtoConversionTime ? `<span class="badge bg-pink-500/20 text-pink-400 border-pink-500/30 text-xs">DTO: ${m.dtoConversionTime}</span>` : ''}
-                    </div>
-                    ${m.errorType ? `<span class="text-red-400 text-xs ml-2">${m.errorType}</span>` : ''}
-                </div>
-            `;
-        }).join('');
-
-        renderNestedPagination(key, totalPages, totalItems);
-    }
-
-    function renderNestedPagination(key, totalPages, totalItems) {
-        const paginationDiv = document.getElementById(`nestedPagination-${key}`);
-        if (!paginationDiv) return;
-
-        if (totalPages <= 1) {
-            paginationDiv.innerHTML = '';
-            return;
-        }
-
-        const { currentPage } = nestedPagination[key];
-        const start = (currentPage - 1) * nestedPagination[key].itemsPerPage + 1;
-        const end = Math.min(currentPage * nestedPagination[key].itemsPerPage, totalItems);
-
-        let html = `
-            <div class="nested-pagination mt-3">
-                <div class="flex justify-between items-center">
-                    <div class="text-xs" style="color: var(--text-muted);">
-                        Showing <span class="font-semibold" style="color: var(--text-secondary);">${start}-${end}</span> of <span class="font-semibold" style="color: var(--text-secondary);">${totalItems}</span>
-                    </div>
-                    <div class="flex gap-1 items-center">
-                        <button onclick="changeNestedPage('${key}', 1)" ${currentPage === 1 ? 'disabled' : ''}
-                                class="pagination-btn rounded text-xs"
-                                style="min-width: 32px; height: 32px;"
-                                title="First page">
-                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
-                            </svg>
-                        </button>
-                        <button onclick="changeNestedPage('${key}', ${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''}
-                                class="pagination-btn rounded text-xs"
-                                style="min-width: 32px; height: 32px;">
-                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
-                            </svg>
-                        </button>
-        `;
-
-        const maxButtons = 3;
-        let startPage = Math.max(1, currentPage - Math.floor(maxButtons / 2));
-        let endPage = Math.min(totalPages, startPage + maxButtons - 1);
-
-        if (endPage - startPage < maxButtons - 1) {
-            startPage = Math.max(1, endPage - maxButtons + 1);
-        }
-
-        for (let i = startPage; i <= endPage; i++) {
-            html += `
-                <button onclick="changeNestedPage('${key}', ${i})"
-                        class="pagination-btn rounded text-xs ${currentPage === i ? 'active' : ''}"
-                        style="min-width: 32px; height: 32px;">
-                    ${i}
-                </button>
-            `;
-        }
-
-        html += `
-                        <button onclick="changeNestedPage('${key}', ${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''}
-                                class="pagination-btn rounded text-xs"
-                                style="min-width: 32px; height: 32px;">
-                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
-                            </svg>
-                        </button>
-                        <button onclick="changeNestedPage('${key}', ${totalPages})" ${currentPage === totalPages ? 'disabled' : ''}
-                                class="pagination-btn rounded text-xs"
-                                style="min-width: 32px; height: 32px;"
-                                title="Last page">
-                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
-                            </svg>
-                        </button>
-                    </div>
-                </div>
-            </div>
-        `;
-
-        paginationDiv.innerHTML = html;
-    }
-
-    function changeNestedPage(key, page) {
-        const stats = filteredEndpointStats.find(s => s.key.replace(/[^a-zA-Z0-9]/g, '_') === key);
-        if (!stats) return;
-
-        const filtered = metricsData.filter(m => m.endpoint === stats.endpoint && m.method === stats.method);
-        const totalPages = Math.ceil(filtered.length / nestedPagination[key].itemsPerPage);
-
-        if (page < 1 || page > totalPages) return;
-
-        nestedPagination[key].currentPage = page;
-        updateNestedPagination(key);
-    }
-
-    function renderPagination(totalPages) {
-        const paginationDiv = document.getElementById('pagination');
-
-        if (totalPages <= 1) {
-            paginationDiv.innerHTML = '';
-            return;
-        }
-
-        const start = (currentPage - 1) * itemsPerPage + 1;
-        const end = Math.min(currentPage * itemsPerPage, filteredEndpointStats.length);
-
-        let html = `
-            <div class="text-sm" style="color: var(--text-muted);">
-                Showing <span class="font-semibold" style="color: var(--text-secondary);">${start}-${end}</span>
-                of <span class="font-semibold" style="color: var(--text-secondary);">${filteredEndpointStats.length}</span>
-            </div>
-            <div class="pagination-buttons">
-                <button onclick="changePage(1)" ${currentPage === 1 ? 'disabled' : ''}
-                        class="pagination-btn rounded-lg"
-                        title="First page">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
-                    </svg>
-                </button>
-                <button onclick="changePage(${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''}
-                        class="pagination-btn rounded-lg px-4">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
-                    </svg>
-                </button>
-        `;
-
-        const maxButtons = 5;
-        let startPage = Math.max(1, currentPage - Math.floor(maxButtons / 2));
-        let endPage = Math.min(totalPages, startPage + maxButtons - 1);
-
-        if (endPage - startPage < maxButtons - 1) {
-            startPage = Math.max(1, endPage - maxButtons + 1);
-        }
-
-        if (startPage > 1) {
-            html += `<span class="px-2" style="color: var(--text-muted);">...</span>`;
-        }
-
-        for (let i = startPage; i <= endPage; i++) {
-            html += `
-                <button onclick="changePage(${i})"
-                        class="pagination-btn rounded-lg ${currentPage === i ? 'active' : ''}">
-                    ${i}
-                </button>
-            `;
-        }
-
-        if (endPage < totalPages) {
-            html += `<span class="px-2" style="color: var(--text-muted);">...</span>`;
-        }
-
-        html += `
-                <button onclick="changePage(${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''}
-                        class="pagination-btn rounded-lg px-4">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
-                    </svg>
-                </button>
-                <button onclick="changePage(${totalPages})" ${currentPage === totalPages ? 'disabled' : ''}
-                        class="pagination-btn rounded-lg"
-                        title="Last page">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
-                    </svg>
-                </button>
-            </div>
-        `;
-
-        paginationDiv.innerHTML = html;
-    }
-
-    function changePage(page) {
-        const totalPages = Math.ceil(filteredEndpointStats.length / itemsPerPage);
-        if (page < 1 || page > totalPages) return;
-        currentPage = page;
-        expandedRows = {};
-        updateTable();
-    }
-
-    async function clearMetrics() {
-        if (!confirm('Clear all performance metrics? This cannot be undone.')) return;
-        try {
-            const response = await fetch(`${API_BASE}/metrics`, { method: 'DELETE' });
-            const result = await response.json();
-            if (result.success) {
-                Object.values(charts).forEach(chart => chart && chart.destroy());
-                charts = {};
-                metricsData = [];
-                allEndpointStats = [];
-                filteredEndpointStats = [];
-                expandedRows = {};
-                nestedPagination = {};
-                loadData();
-            } else {
-                showError('Failed to clear metrics');
-            }
-        } catch (error) {
-            showError('Error: ' + error.message);
-        }
-    }
-
-    function toggleAutoRefresh() {
-        autoRefresh = !autoRefresh;
-        const btn = document.getElementById('autoRefreshText');
-        if (autoRefresh) {
-            btn.textContent = '⏸ Pause Auto-Refresh';
-            startAutoRefresh();
-        } else {
-            btn.textContent = '▶ Resume Auto-Refresh';
-            stopAutoRefresh();
-        }
-    }
-
-    function startAutoRefresh() {
-        if (refreshInterval) clearInterval(refreshInterval);
-        refreshInterval = setInterval(() => loadData(true), 5000);
-    }
-
-    function stopAutoRefresh() {
-        if (refreshInterval) {
-            clearInterval(refreshInterval);
-            refreshInterval = null;
-        }
-    }
-
-    function showError(message) {
-        document.getElementById('errorText').textContent = message;
-        document.getElementById('error').classList.remove('hidden');
-        document.getElementById('loading').classList.add('hidden');
-    }
-
-    function openSwaggerNewTab() {
-        window.open(API_BASE + '/api-docs', '_blank');
-    }
-
-    function openTableNewTab() {
-        window.open(API_BASE + '/endpoints', '_blank');
-    }
-
-    function parseAvgTime(timeString) {
-        if (!timeString) return 0;
-        // Extract milliseconds from strings like "173 ms" or "173ms"
-        const match = timeString.match(/(\d+)\s*ms/);
-        return match ? parseInt(match[1]) : 0;
-    }
-
-    // Initialize
-    loadTheme();
-    loadMetadata();
-    loadData();
-    startAutoRefresh();
-</script>
-<script>
-    // Add these variables at the top of your JavaScript
-    let dtoMetadata = null;
-
-    // Update loadData function to include DTO metadata
-    async function loadData(silent = false) {
-        try {
-            if (!silent) {
-                document.getElementById('loading').classList.remove('hidden');
-                document.getElementById('content').classList.add('hidden');
-            }
-
-            const response = await fetch(`${API_BASE}/dashboard-data`);
-            const result = await response.json();
-
-            if (result.success) {
-                const { summary, metrics, dtoMetadata: dtoMeta } = result.data;
-
-                metricsData = metrics;
-                dtoMetadata = dtoMeta; // Store DTO metadata
-
-                allEndpointStats = Object.entries(summary.endpointStats || {}).map(([key, stats]) => ({
-                    key,
-                    ...stats
-                }));
-                filteredEndpointStats = [...allEndpointStats];
-
-                updateKPIs(summary);
-                updateDTOMetadataDisplay(); // NEW: Update DTO info
-                updateCharts(summary, metrics);
-                sortEndpoints();
-
-                if (!silent) {
-                    document.getElementById('loading').classList.add('hidden');
-                    document.getElementById('content').classList.remove('hidden');
-                }
-                document.getElementById('error').classList.add('hidden');
-                document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
-            }
-        } catch (error) {
-            if (!silent) {
-                showError('Connection error: ' + error.message);
-            }
-        }
-    }
-
-    // NEW: Function to display DTO metadata
-    function updateDTOMetadataDisplay() {
-        const container = document.getElementById('dtoMetadataContainer');
-
-        if (!dtoMetadata || !dtoMetadata.available) {
-            container.innerHTML = `
-                <div class="card rounded-2xl p-6 shadow-xl">
-                    <div class="flex items-center gap-3 mb-4">
-                        <div class="p-3 bg-gray-500/20 rounded-xl">
-                            <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                      d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                            </svg>
-                        </div>
-                        <div>
-                            <h3 class="text-lg font-bold" style="color: var(--text-primary);">DTO Metadata</h3>
-                            <p class="text-sm" style="color: var(--text-muted);">Not available</p>
-                        </div>
-                    </div>
-                </div>
-            `;
-            return;
-        }
-
-        const { entities, totalRequestDTOs, totalResponseDTOs } = dtoMetadata;
-        const entityCount = Object.keys(entities || {}).length;
-
-        container.innerHTML = `
-            <div class="card rounded-2xl p-6 shadow-xl">
-                <div class="flex items-center justify-between mb-6">
-                    <div class="flex items-center gap-3">
-                        <div class="p-3 bg-indigo-500/20 rounded-xl">
-                            <svg class="w-6 h-6 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                      d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/>
-                            </svg>
-                        </div>
-                        <div>
-                            <h3 class="text-lg font-bold" style="color: var(--text-primary);">📦 DTO Configuration (Compile-Time)</h3>
-                            <p class="text-sm" style="color: var(--text-muted);">Generated at build time</p>
-                        </div>
-                    </div>
-                    <span class="badge bg-green-500/20 text-green-400 border-green-500/30">
-                        ✓ Available
-                    </span>
-                </div>
-
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                    <div class="rounded-lg p-4" style="background: var(--bg-tertiary); border: 1px solid var(--border-color);">
-                        <p class="text-xs mb-2 uppercase font-semibold" style="color: var(--text-muted);">Total Entities</p>
-                        <p class="text-3xl font-bold" style="color: var(--text-primary);">${entityCount}</p>
-                    </div>
-                    <div class="rounded-lg p-4" style="background: var(--bg-tertiary); border: 1px solid var(--border-color);">
-                        <p class="text-xs mb-2 uppercase font-semibold" style="color: var(--text-muted);">Request DTOs</p>
-                        <p class="text-3xl font-bold text-blue-400">${totalRequestDTOs || 0}</p>
-                    </div>
-                    <div class="rounded-lg p-4" style="background: var(--bg-tertiary); border: 1px solid var(--border-color);">
-                        <p class="text-xs mb-2 uppercase font-semibold" style="color: var(--text-muted);">Response DTOs</p>
-                        <p class="text-3xl font-bold text-green-400">${totalResponseDTOs || 0}</p>
-                    </div>
-                </div>
-
-                <div class="space-y-3">
-                    <h4 class="text-sm font-semibold uppercase" style="color: var(--text-muted);">Entity → DTO Mappings</h4>
-                    <div class="space-y-2 max-h-96 overflow-y-auto">
-                        ${Object.entries(entities || {}).map(([entityName, info]) => {
-                            const simpleEntityName = entityName.split('.').pop();
-                            return `
-                                <div class="rounded-lg p-4 border" style="background: var(--bg-secondary); border-color: var(--border-color);">
-                                    <div class="flex items-center justify-between mb-3">
-                                        <span class="font-semibold" style="color: var(--text-primary);">${simpleEntityName}</span>
-                                        <div class="flex gap-2">
-                                            ${info.requestDTOCount > 0 ? `<span class="badge bg-blue-500/20 text-blue-400">${info.requestDTOCount} Request</span>` : ''}
-                                            ${info.responseDTOCount > 0 ? `<span class="badge bg-green-500/20 text-green-400">${info.responseDTOCount} Response</span>` : ''}
-                                        </div>
-                                    </div>
-                                    ${info.requestDTONames && info.requestDTONames.length > 0 ? `
-                                        <div class="mb-2">
-                                            <p class="text-xs mb-1" style="color: var(--text-muted);">Request DTOs:</p>
-                                            <div class="flex flex-wrap gap-1">
-                                                ${info.requestDTONames.map(name => `
-                                                    <span class="text-xs px-2 py-1 rounded" style="background: rgba(59, 130, 246, 0.1); color: var(--text-secondary);">
-                                                        ${name}
-                                                    </span>
-                                                `).join('')}
-                                            </div>
-                                        </div>
-                                    ` : ''}
-                                    ${info.responseDTONames && info.responseDTONames.length > 0 ? `
-                                        <div>
-                                            <p class="text-xs mb-1" style="color: var(--text-muted);">Response DTOs:</p>
-                                            <div class="flex flex-wrap gap-1">
-                                                ${info.responseDTONames.map(name => `
-                                                    <span class="text-xs px-2 py-1 rounded" style="background: rgba(34, 197, 94, 0.1); color: var(--text-secondary);">
-                                                        ${name}
-                                                    </span>
-                                                `).join('')}
-                                            </div>
-                                        </div>
-                                    ` : ''}
-                                </div>
-                            `;
-                        }).join('')}
-                    </div>
-                </div>
-            </div>
-        `;
-    }
-</script>
-<script>
-    // Check LinkedIn badge loading with interval
-    let checkCount = 0;
-    const maxChecks = 20; // Check for 2 seconds (20 * 100ms)
-
-    const checkLinkedInBadge = setInterval(function() {
-        checkCount++;
-        const badge = document.querySelector('.LI-profile-badge');
-        const fallback = document.getElementById('fallback-profile');
-        const badgeContainer = document.getElementById('linkedinBadgeContainer');
-
-        // Check if badge has loaded (has iframe or multiple children)
-        if (badge && badge.children.length > 1) {
-            // Badge loaded successfully
-            clearInterval(checkLinkedInBadge);
-            fallback.style.display = 'none';
-            badgeContainer.style.display = 'flex';
-        } else if (checkCount >= maxChecks) {
-            // Stop checking after max attempts - keep default profile
-            clearInterval(checkLinkedInBadge);
-        }
-    }, 100); // Check every 100ms
+    };
 </script>
 </body>
 </html>

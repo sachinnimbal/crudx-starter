@@ -125,6 +125,7 @@ tasks.register('generateVersionProperties') {
 # Auto-generated - DO NOT EDIT
 version=${project.version}
 group=${project.group}
+path=${project.path}
 artifact=${project.name}
 description=${project.description}
 author.name=${project.findProperty('author.name')}

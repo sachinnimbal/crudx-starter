@@ -13,6 +13,7 @@ public class CrudxMetadataProperties {
 
     private Author author = new Author();
     private Project project = new Project();
+    private String path;
     @Data
     public static class Author {
         private String name;
