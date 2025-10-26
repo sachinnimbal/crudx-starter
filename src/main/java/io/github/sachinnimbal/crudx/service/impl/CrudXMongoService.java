@@ -106,68 +106,87 @@ public abstract class CrudXMongoService<T extends CrudXMongoEntity<ID>, ID exten
     }
 
     @Override
+    @Transactional(timeout = 1800)
     public BatchResult<T> createBatch(List<T> entities, boolean skipDuplicates) {
         long startTime = System.currentTimeMillis();
-        log.debug("Creating batch of {} MongoDB entities (skipDuplicates: {})", entities.size(), skipDuplicates);
+        int totalSize = entities.size();
+        log.debug("Creating batch of {} MongoDB entities (skipDuplicates: {})", totalSize, skipDuplicates);
 
-        BatchResult<T> result = new BatchResult<>();
-        int batchSize = crudxProperties.getBatchSize();
+        // 🔥 Use smaller batch size
+        int batchSize = Math.min(50, crudxProperties.getBatchSize());
 
-        for (int i = 0; i < entities.size(); i += batchSize) {
-            int end = Math.min(i + batchSize, entities.size());
-            List<T> batchToProcess = entities.subList(i, end);
-            List<T> validEntities = new ArrayList<>();
+        // 🔥 CRITICAL: Counters only, no result collection
+        int successCount = 0;
+        int skipCount = 0;
+        List<String> skipReasons = new ArrayList<>(Math.min(1000, totalSize / 10));
 
-            for (int j = 0; j < batchToProcess.size(); j++) {
-                T entity = batchToProcess.get(j);
-                int globalIndex = i + j;
+        int batchNumber = 0;
+        int totalBatches = (totalSize + batchSize - 1) / batchSize;
+
+        for (int i = 0; i < totalSize; i += batchSize) {
+            batchNumber++;
+            int end = Math.min(i + batchSize, totalSize);
+
+            List<T> validEntities = new ArrayList<>(batchSize);
+
+            for (int j = i; j < end; j++) {
+                T entity = entities.get(j);
 
                 try {
                     validateUniqueConstraints(entity);
                     entity.onCreate();
                     validEntities.add(entity);
+
                 } catch (DuplicateEntityException e) {
                     if (skipDuplicates) {
-                        result.addSkippedReason(String.format("Entity at index %d skipped - %s", globalIndex, e.getMessage()));
-                        result.setSkippedCount(result.getSkippedCount() + 1);
-                        log.debug("Skipped duplicate entity at index {}: {}", globalIndex, e.getMessage());
+                        skipCount++;
+                        if (skipReasons.size() < 1000) {
+                            skipReasons.add(String.format("Index %d: %s", j, e.getMessage()));
+                        }
                     } else {
-                        log.error("Duplicate entity found at index {} - failing batch creation", globalIndex);
-                        throw e;
-                    }
-                } catch (Exception e) {
-                    if (skipDuplicates) {
-                        result.addSkippedReason(String.format("Entity at index %d skipped - error: %s", globalIndex, e.getMessage()));
-                        result.setSkippedCount(result.getSkippedCount() + 1);
-                        log.error("Error processing entity at index {}, skipping: {}", globalIndex, e.getMessage());
-                    } else {
-                        log.error("Error processing entity at index {} - failing batch creation", globalIndex);
                         throw e;
                     }
                 }
+
+                // 🔥 NULL OUT to free memory
+                entities.set(j, null);
             }
 
             if (!validEntities.isEmpty()) {
-                long batchStartTime = System.currentTimeMillis();
-                result.getCreatedEntities().addAll(mongoTemplate.insertAll(validEntities));
-                long batchDuration = System.currentTimeMillis() - batchStartTime;
-                log.info("Processed batch {}/{} | Created: {} | Skipped: {} | Time taken: {} ms",
-                        end, entities.size(),
-                        result.getCreatedEntities().size(),
-                        result.getSkippedCount(),
-                        batchDuration);
+                mongoTemplate.insertAll(validEntities);
+                successCount += validEntities.size();
+            }
+
+            // 🔥 Clear batch
+            validEntities.clear();
+
+            // 🔥 Memory cleanup hint
+            if (batchNumber % 100 == 0) {
+                System.gc();
+            }
+
+            if (batchNumber % 20 == 0 || batchNumber == totalBatches) {
+                long currentMemory = (Runtime.getRuntime().totalMemory() -
+                        Runtime.getRuntime().freeMemory()) / 1024 / 1024;
+                log.info("📊 Progress: {}/{} batches | Success: {} | Skipped: {} | Memory: {} MB",
+                        batchNumber, totalBatches, successCount, skipCount, currentMemory);
             }
         }
 
-        long totalDuration = System.currentTimeMillis() - startTime;
-        double avgTimePerEntity = result.getTotalProcessed() > 0 ?
-                (double) totalDuration / result.getTotalProcessed() : 0;
+        // 🔥 Clear input list
+        entities.clear();
 
-        log.info("Batch creation completed: {} created, {} skipped | Total time: {} ms | Avg time per entity: {} ms",
-                result.getCreatedEntities().size(),
-                result.getSkippedCount(),
-                totalDuration,
-                String.format("%.3f", avgTimePerEntity));
+        long totalDuration = System.currentTimeMillis() - startTime;
+        double recordsPerSecond = (successCount * 1000.0) / totalDuration;
+
+        log.info("✅ MongoDB batch completed: {} created, {} skipped | {} rec/sec | {} ms",
+                successCount, skipCount, String.format("%.0f", recordsPerSecond), totalDuration);
+
+        // 🔥 Return lightweight result
+        BatchResult<T> result = new BatchResult<>();
+        result.setCreatedEntities(Collections.emptyList());
+        result.setSkippedCount(skipCount);
+        result.setSkippedReasons(skipReasons);
 
         return result;
     }
