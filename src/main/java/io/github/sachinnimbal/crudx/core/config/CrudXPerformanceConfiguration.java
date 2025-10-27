@@ -38,12 +38,6 @@ public class CrudXPerformanceConfiguration {
         return new CrudXLoggingFilter();
     }
 
-    @Bean
-    public CrudXMetricsRegistry crudxMetricsRegistry() {
-        log.info("✓ CrudX Metrics Registry initialized");
-        return new CrudXMetricsRegistry();
-    }
-
     private void logInfo(String message) {
         System.out.println(message);
     }

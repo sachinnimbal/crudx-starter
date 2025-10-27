@@ -23,6 +23,7 @@ public class CrudXLoggingFilter implements Filter {
     private CrudXMetricsRegistry metricsRegistry;
 
     private static final String REQUEST_START_TIME = "request.startTime";
+    private static final String REQUEST_LOGGED = "request.logged"; // 🔥 NEW: Track if already logged
 
     @Override
     public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
@@ -43,10 +44,18 @@ public class CrudXLoggingFilter implements Filter {
             return;
         }
 
+        // 🔥 CRITICAL: Check if already logged (prevent duplicates)
+        if (httpRequest.getAttribute(REQUEST_LOGGED) != null) {
+            log.trace("Request already logged, skipping: {}", uri);
+            chain.doFilter(request, response);
+            return;
+        }
+
         long startTime = System.currentTimeMillis();
         httpRequest.setAttribute(REQUEST_START_TIME, startTime);
+        httpRequest.setAttribute(REQUEST_LOGGED, true); // Mark as logged
 
-        // 🔥 CRITICAL: Wrap request to cache body for logging
+        // 🔥 Wrap request to cache body for logging
         CrudXRequestLogger.CachedBodyHttpServletRequest cachedRequest =
                 new CrudXRequestLogger.CachedBodyHttpServletRequest(httpRequest);
 
@@ -55,7 +64,7 @@ public class CrudXLoggingFilter implements Filter {
                 new ContentCachingResponseWrapper(httpResponse);
 
         try {
-            // Log request async
+            // Log request async (ONCE)
             CrudXRequestLogger.logRequest(cachedRequest, cachedRequest.getCachedBody(), startTime);
 
             // Process request
@@ -65,10 +74,10 @@ public class CrudXLoggingFilter implements Filter {
             long endTime = System.currentTimeMillis();
             long executionTimeMs = endTime - startTime;
 
-            // Log response async
+            // Log response async (ONCE)
             CrudXRequestLogger.logResponse(
                     cachedRequest,
-                    cachedResponse.getStatus(),
+                    cachedResponse,
                     formatExecutionTime(executionTimeMs)
             );
 
@@ -118,11 +127,18 @@ public class CrudXLoggingFilter implements Filter {
         return uri.contains("/swagger-ui/") ||
                 uri.contains("/v3/api-docs") ||
                 uri.contains("/webjars/") ||
+                uri.contains("/actuator/") ||
+                uri.contains("/crudx/performance/") ||
                 uri.endsWith(".css") ||
                 uri.endsWith(".js") ||
                 uri.endsWith(".png") ||
                 uri.endsWith(".jpg") ||
-                uri.endsWith(".ico");
+                uri.endsWith(".ico") ||
+                uri.endsWith(".svg") ||
+                uri.endsWith(".woff") ||
+                uri.endsWith(".woff2") ||
+                uri.endsWith(".ttf") ||
+                uri.endsWith(".eot");
     }
 
     @Override

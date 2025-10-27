@@ -6,6 +6,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletRequestWrapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.util.StreamUtils;
+import org.springframework.web.util.ContentCachingResponseWrapper;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
@@ -17,15 +18,11 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Enumeration;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/**
- * 🔥 ASYNC Request/Response Logger
- * Logs to rotating daily files: logs/requests/yyyy-MM-dd.log
- * Zero-copy streaming for large payloads
- * Non-blocking async writes
- */
 @Slf4j
 public class CrudXRequestLogger {
 
@@ -38,7 +35,8 @@ public class CrudXRequestLogger {
     private static final String LOG_DIR = "logs/requests";
     private static final DateTimeFormatter FILE_DATE_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd");
     private static final DateTimeFormatter LOG_TIME_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
-    private static final int MAX_INLINE_PAYLOAD_SIZE = 2048; // 2KB inline, rest streamed
+    private static final int MAX_INLINE_PAYLOAD_SIZE = 10240; // 10KB inline (increased from 2KB)
+    private static final int MAX_RESPONSE_BODY_SIZE = 51200; // 50KB max for response body
 
     static {
         // Create log directory on startup
@@ -50,12 +48,22 @@ public class CrudXRequestLogger {
     }
 
     /**
-     * Log request asynchronously
+     * 🔥 Log request with body
      */
     public static void logRequest(HttpServletRequest request, byte[] body, long startTime) {
+        // ✅ Deduplication check
+        if (request.getAttribute("crudx.request.logged") != null) {
+            return;
+        }
+        request.setAttribute("crudx.request.logged", true);
+
+        // Capture request data
+        RequestSnapshot snapshot = captureRequestSnapshot(request, body, startTime);
+
+        // Async logging
         ASYNC_LOGGER.submit(() -> {
             try {
-                String logEntry = buildRequestLog(request, body, startTime);
+                String logEntry = buildRequestLog(snapshot);
                 writeToFile(logEntry);
             } catch (Exception e) {
                 log.error("Failed to log request", e);
@@ -64,12 +72,24 @@ public class CrudXRequestLogger {
     }
 
     /**
-     * Log response asynchronously
+     * 🔥 ENHANCED: Log response with body
      */
-    public static void logResponse(HttpServletRequest request, int status, String executionTime) {
+    public static void logResponse(HttpServletRequest request,
+                                   ContentCachingResponseWrapper responseWrapper,
+                                   String executionTime) {
+        // ✅ Deduplication check
+        if (request.getAttribute("crudx.response.logged") != null) {
+            return;
+        }
+        request.setAttribute("crudx.response.logged", true);
+
+        // Capture response data (including body)
+        ResponseSnapshot snapshot = captureResponseSnapshot(request, responseWrapper, executionTime);
+
+        // Async logging
         ASYNC_LOGGER.submit(() -> {
             try {
-                String logEntry = buildResponseLog(request, status, executionTime);
+                String logEntry = buildResponseLog(snapshot);
                 writeToFile(logEntry);
             } catch (Exception e) {
                 log.error("Failed to log response", e);
@@ -78,87 +98,199 @@ public class CrudXRequestLogger {
     }
 
     /**
-     * Build CURL-style request log
+     * Capture request snapshot
      */
-    private static String buildRequestLog(HttpServletRequest request, byte[] body, long startTime) {
+    private static RequestSnapshot captureRequestSnapshot(HttpServletRequest request, byte[] body, long startTime) {
+        RequestSnapshot snapshot = new RequestSnapshot();
+
+        try {
+            snapshot.timestamp = LocalDateTime.now().format(LOG_TIME_FORMAT);
+            snapshot.method = request.getMethod();
+            snapshot.requestURI = request.getRequestURI();
+            snapshot.queryString = request.getQueryString();
+            snapshot.protocol = request.getProtocol();
+            snapshot.body = body;
+            snapshot.startTime = startTime;
+
+            // Capture headers
+            snapshot.headers = new HashMap<>();
+            Enumeration<String> headerNames = request.getHeaderNames();
+            while (headerNames.hasMoreElements()) {
+                String headerName = headerNames.nextElement();
+                snapshot.headers.put(headerName, request.getHeader(headerName));
+            }
+
+            // Build full URL
+            StringBuffer url = request.getRequestURL();
+            if (request.getQueryString() != null) {
+                url.append('?').append(request.getQueryString());
+            }
+            snapshot.fullURL = url.toString();
+
+        } catch (Exception e) {
+            log.error("Failed to capture request snapshot", e);
+        }
+
+        return snapshot;
+    }
+
+    /**
+     * 🔥 ENHANCED: Capture response snapshot including body
+     */
+    private static ResponseSnapshot captureResponseSnapshot(HttpServletRequest request,
+                                                            ContentCachingResponseWrapper responseWrapper,
+                                                            String executionTime) {
+        ResponseSnapshot snapshot = new ResponseSnapshot();
+
+        try {
+            snapshot.timestamp = LocalDateTime.now().format(LOG_TIME_FORMAT);
+            snapshot.method = request.getMethod();
+            snapshot.requestURI = request.getRequestURI();
+            snapshot.status = responseWrapper.getStatus();
+            snapshot.executionTime = executionTime;
+            snapshot.contentType = responseWrapper.getContentType();
+
+            // 🔥 CRITICAL: Capture response body
+            byte[] responseBody = responseWrapper.getContentAsByteArray();
+            if (responseBody != null && responseBody.length > 0) {
+                // Limit size to prevent huge logs
+                int bodySize = Math.min(responseBody.length, MAX_RESPONSE_BODY_SIZE);
+                snapshot.responseBody = new byte[bodySize];
+                System.arraycopy(responseBody, 0, snapshot.responseBody, 0, bodySize);
+                snapshot.responseBodySize = responseBody.length;
+                snapshot.bodyTruncated = responseBody.length > MAX_RESPONSE_BODY_SIZE;
+            }
+
+            // Capture response headers
+            snapshot.responseHeaders = new HashMap<>();
+            for (String headerName : responseWrapper.getHeaderNames()) {
+                snapshot.responseHeaders.put(headerName, responseWrapper.getHeader(headerName));
+            }
+
+        } catch (Exception e) {
+            log.error("Failed to capture response snapshot", e);
+        }
+
+        return snapshot;
+    }
+
+    /**
+     * Build request log
+     */
+    private static String buildRequestLog(RequestSnapshot snapshot) {
         StringBuilder log = new StringBuilder();
 
         log.append("\n");
         log.append("=".repeat(100)).append("\n");
-        log.append("📥 REQUEST @ ").append(LocalDateTime.now().format(LOG_TIME_FORMAT)).append("\n");
+        log.append("📥 REQUEST @ ").append(snapshot.timestamp).append("\n");
         log.append("=".repeat(100)).append("\n");
 
         // Request line
-        log.append(request.getMethod()).append(" ")
-                .append(request.getRequestURI());
+        log.append(snapshot.method).append(" ")
+                .append(snapshot.requestURI);
 
-        if (request.getQueryString() != null) {
-            log.append("?").append(request.getQueryString());
+        if (snapshot.queryString != null) {
+            log.append("?").append(snapshot.queryString);
         }
-        log.append(" ").append(request.getProtocol()).append("\n");
+        log.append(" ").append(snapshot.protocol).append("\n");
 
         // Headers
         log.append("\n📋 Headers:\n");
-        Enumeration<String> headerNames = request.getHeaderNames();
-        while (headerNames.hasMoreElements()) {
-            String headerName = headerNames.nextElement();
-            String headerValue = request.getHeader(headerName);
-            log.append("  ").append(headerName).append(": ").append(headerValue).append("\n");
-        }
+        snapshot.headers.forEach((name, value) ->
+                log.append("  ").append(name).append(": ").append(value).append("\n")
+        );
 
         // CURL command
         log.append("\n🔧 CURL Command:\n");
-        log.append(buildCurlCommand(request, body));
+        log.append(buildCurlCommand(snapshot));
 
-        // Body (inline or reference)
-        if (body != null && body.length > 0) {
-            log.append("\n📦 Request Body (").append(body.length).append(" bytes):\n");
+        // Body
+        if (snapshot.body != null && snapshot.body.length > 0) {
+            log.append("\n📦 Request Body (").append(snapshot.body.length).append(" bytes):\n");
 
-            if (body.length <= MAX_INLINE_PAYLOAD_SIZE) {
-                // Inline small payloads
-                log.append(new String(body, StandardCharsets.UTF_8)).append("\n");
+            if (snapshot.body.length <= MAX_INLINE_PAYLOAD_SIZE) {
+                // Inline full body
+                String bodyStr = new String(snapshot.body, StandardCharsets.UTF_8);
+                log.append(formatJson(bodyStr)).append("\n");
             } else {
-                // Large payloads: Show sample + file reference
-                String sample = new String(body, 0, Math.min(500, body.length), StandardCharsets.UTF_8);
-                log.append("  [First 500 bytes]\n");
-                log.append(sample).append("\n  ...[truncated]\n");
+                // Show sample for large bodies
+                String sample = new String(snapshot.body, 0, Math.min(1000, snapshot.body.length), StandardCharsets.UTF_8);
+                log.append("  [First 1000 bytes]\n");
+                log.append(formatJson(sample)).append("\n  ...[truncated]\n");
             }
         }
 
         log.append("\n");
+        return log.toString();
+    }
 
+    /**
+     * 🔥 ENHANCED: Build response log with body
+     */
+    private static String buildResponseLog(ResponseSnapshot snapshot) {
+        StringBuilder log = new StringBuilder();
+
+        log.append("\n");
+        log.append("📤 RESPONSE @ ").append(snapshot.timestamp).append("\n");
+        log.append("-".repeat(100)).append("\n");
+        log.append("Status: ").append(snapshot.status).append("\n");
+        log.append("Execution Time: ").append(snapshot.executionTime).append("\n");
+        log.append("Endpoint: ").append(snapshot.method).append(" ").append(snapshot.requestURI).append("\n");
+
+        if (snapshot.contentType != null) {
+            log.append("Content-Type: ").append(snapshot.contentType).append("\n");
+        }
+
+        // 🔥 Response Headers
+        if (snapshot.responseHeaders != null && !snapshot.responseHeaders.isEmpty()) {
+            log.append("\n📋 Response Headers:\n");
+            snapshot.responseHeaders.forEach((name, value) ->
+                    log.append("  ").append(name).append(": ").append(value).append("\n")
+            );
+        }
+
+        // 🔥 CRITICAL: Response Body
+        if (snapshot.responseBody != null && snapshot.responseBody.length > 0) {
+            log.append("\n📦 Response Body (").append(snapshot.responseBodySize).append(" bytes)");
+            if (snapshot.bodyTruncated) {
+                log.append(" [TRUNCATED TO ").append(MAX_RESPONSE_BODY_SIZE).append(" bytes]");
+            }
+            log.append(":\n");
+
+            String bodyStr = new String(snapshot.responseBody, StandardCharsets.UTF_8);
+            log.append(formatJson(bodyStr)).append("\n");
+        }
+
+        log.append("=".repeat(100)).append("\n\n");
         return log.toString();
     }
 
     /**
      * Build CURL command
      */
-    private static String buildCurlCommand(HttpServletRequest request, byte[] body) {
+    private static String buildCurlCommand(RequestSnapshot snapshot) {
         StringBuilder curl = new StringBuilder();
 
-        curl.append("curl -X ").append(request.getMethod()).append(" \\\n");
-        curl.append("  '").append(getFullURL(request)).append("' \\\n");
+        curl.append("curl -X ").append(snapshot.method).append(" \\\n");
+        curl.append("  '").append(snapshot.fullURL).append("' \\\n");
 
         // Headers
-        Enumeration<String> headerNames = request.getHeaderNames();
-        while (headerNames.hasMoreElements()) {
-            String headerName = headerNames.nextElement();
-            String headerValue = request.getHeader(headerName);
-
-            // Skip host and content-length
-            if (!"Host".equalsIgnoreCase(headerName) && !"Content-Length".equalsIgnoreCase(headerName)) {
-                curl.append("  -H '").append(headerName).append(": ").append(headerValue).append("' \\\n");
+        snapshot.headers.forEach((name, value) -> {
+            if (!"Host".equalsIgnoreCase(name) && !"Content-Length".equalsIgnoreCase(name)) {
+                curl.append("  -H '").append(name).append(": ").append(value).append("' \\\n");
             }
-        }
+        });
 
         // Body
-        if (body != null && body.length > 0) {
-            if (body.length <= MAX_INLINE_PAYLOAD_SIZE) {
-                String bodyStr = new String(body, StandardCharsets.UTF_8)
-                        .replace("'", "'\\''"); // Escape single quotes
+        if (snapshot.body != null && snapshot.body.length > 0) {
+            if (snapshot.body.length <= MAX_INLINE_PAYLOAD_SIZE) {
+                String bodyStr = new String(snapshot.body, StandardCharsets.UTF_8)
+                        .replace("'", "'\\''")
+                        .replace("\n", "")
+                        .replace("\r", "");
                 curl.append("  -d '").append(bodyStr).append("'");
             } else {
-                curl.append("  -d @<large_payload_file>");
+                curl.append("  -d @<request_body.json>");
             }
         }
 
@@ -166,24 +298,27 @@ public class CrudXRequestLogger {
     }
 
     /**
-     * Build response log
+     * 🔥 NEW: Format JSON for better readability
      */
-    private static String buildResponseLog(HttpServletRequest request, int status, String executionTime) {
-        StringBuilder log = new StringBuilder();
-
-        log.append("\n");
-        log.append("📤 RESPONSE @ ").append(LocalDateTime.now().format(LOG_TIME_FORMAT)).append("\n");
-        log.append("-".repeat(100)).append("\n");
-        log.append("Status: ").append(status).append("\n");
-        log.append("Execution Time: ").append(executionTime).append("\n");
-        log.append("Endpoint: ").append(request.getMethod()).append(" ").append(request.getRequestURI()).append("\n");
-        log.append("=".repeat(100)).append("\n\n");
-
-        return log.toString();
+    private static String formatJson(String json) {
+        try {
+            // Simple indentation for readability
+            if (json.trim().startsWith("{") || json.trim().startsWith("[")) {
+                // Already looks like JSON, add basic formatting
+                return json.replace(",", ",\n  ")
+                        .replace("{", "{\n  ")
+                        .replace("}", "\n}")
+                        .replace("[", "[\n  ")
+                        .replace("]", "\n]");
+            }
+        } catch (Exception e) {
+            // If formatting fails, return as-is
+        }
+        return json;
     }
 
     /**
-     * Write log entry to daily rotating file
+     * Write to file
      */
     private static void writeToFile(String logEntry) throws IOException {
         String todayFile = LocalDate.now().format(FILE_DATE_FORMAT) + ".log";
@@ -195,29 +330,14 @@ public class CrudXRequestLogger {
     }
 
     /**
-     * Get full request URL
-     */
-    private static String getFullURL(HttpServletRequest request) {
-        StringBuffer url = request.getRequestURL();
-        String queryString = request.getQueryString();
-
-        if (queryString != null) {
-            url.append('?').append(queryString);
-        }
-
-        return url.toString();
-    }
-
-    /**
-     * Shutdown logger (for graceful shutdown)
+     * Shutdown logger
      */
     public static void shutdown() {
         ASYNC_LOGGER.shutdown();
     }
 
-    /**
-     * 🔥 CRITICAL: Cacheable Request Wrapper for body reading
-     */
+    // ==================== REQUEST WRAPPER ====================
+
     public static class CachedBodyHttpServletRequest extends HttpServletRequestWrapper {
         private byte[] cachedBody;
 
@@ -242,9 +362,6 @@ public class CrudXRequestLogger {
         }
     }
 
-    /**
-     * Cached ServletInputStream
-     */
     private static class CachedBodyServletInputStream extends ServletInputStream {
         private final InputStream cachedBodyInputStream;
 
@@ -275,5 +392,32 @@ public class CrudXRequestLogger {
         public int read() throws IOException {
             return cachedBodyInputStream.read();
         }
+    }
+
+    // ==================== SNAPSHOT CLASSES ====================
+
+    private static class RequestSnapshot {
+        String timestamp;
+        String method;
+        String requestURI;
+        String queryString;
+        String protocol;
+        byte[] body;
+        long startTime;
+        Map<String, String> headers;
+        String fullURL;
+    }
+
+    private static class ResponseSnapshot {
+        String timestamp;
+        String method;
+        String requestURI;
+        int status;
+        String executionTime;
+        String contentType;
+        byte[] responseBody;
+        int responseBodySize;
+        boolean bodyTruncated;
+        Map<String, String> responseHeaders;
     }
 }
