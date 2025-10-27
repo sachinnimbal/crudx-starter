@@ -111,7 +111,8 @@ public abstract class CrudXMongoService<T extends CrudXMongoEntity<ID>, ID exten
     public BatchResult<T> createBatch(List<T> entities, boolean skipDuplicates) {
         long startTime = System.currentTimeMillis();
         int totalSize = entities.size();
-
+        int validCount = 0;
+        int skipCount = 0;
         log.info("🚀 ULTRA-OPTIMIZED MongoDB batch: {} entities (skipDuplicates: {})",
                 totalSize, skipDuplicates);
 
@@ -121,20 +122,15 @@ public abstract class CrudXMongoService<T extends CrudXMongoEntity<ID>, ID exten
         // 🔥 VALIDATION: Check entities and apply onCreate
         List<T> validatedEntities = new ArrayList<>(totalSize);
 
-        for (T entity : entities) {
+        for (int i = 0; i < entities.size(); i++) {
+            T entity = entities.get(i);
             try {
-                // Validate unique constraints
                 validateUniqueConstraints(entity);
                 entity.onCreate();
-                validatedEntities.add(entity);
-                metricsTracker.incrementSuccess();
+                validCount++;
             } catch (Exception e) {
-                if (!skipDuplicates) {
-                    log.error("Validation failed at entity - aborting batch: {}", e.getMessage());
-                    throw e;
-                }
-                metricsTracker.incrementFailed();
-                log.debug("Skipping invalid entity: {}", e.getMessage());
+                skipCount++;
+                entities.set(i, null); // ✅ NULL OUT failed entities
             }
         }
 

@@ -43,7 +43,8 @@ public class CrudXBatchMetricsTracker {
     private final Random random = new Random();
     private int processedCount = 0;
 
-    private static final int MAX_SAMPLES = 1000;
+    private static final int MAX_SAMPLES = 10;
+    private static final int SAMPLE_THRESHOLD = 10000;
 
     public CrudXBatchMetricsTracker() {
         this.startTime = System.currentTimeMillis();
@@ -92,7 +93,9 @@ public class CrudXBatchMetricsTracker {
      */
     public void addObjectTiming(String id, long mappingMs, long validationMs, long writeMs) {
         processedCount++;
-
+        if (processedCount > SAMPLE_THRESHOLD) {
+            return;
+        }
         long totalMs = mappingMs + validationMs + writeMs;
 
         ObjectTiming timing = ObjectTiming.builder()

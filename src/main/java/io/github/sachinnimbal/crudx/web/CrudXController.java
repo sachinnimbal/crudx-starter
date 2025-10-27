@@ -409,7 +409,9 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             long executionTime = System.currentTimeMillis() - startTime;
             String endpoint = request.getMethod() + " " + request.getRequestURI();
             EndpointMetrics metrics = metricsTracker.buildMetrics(endpoint, request.getMethod());
-
+            metrics.setSuccessCount(totalSuccessCount);
+            metrics.setTotalRecords(totalSize);
+            metrics.calculateThroughput();
             if (metricsRegistry != null) {
                 request.setAttribute("endpoint.metrics", metrics);
             }
