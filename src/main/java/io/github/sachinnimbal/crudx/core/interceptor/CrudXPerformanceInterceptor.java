@@ -10,9 +10,6 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.HandlerInterceptor;
 
-import java.lang.management.ManagementFactory;
-import java.lang.management.ThreadMXBean;
-
 @Slf4j
 @Component
 @ConditionalOnProperty(prefix = "crudx.performance", name = "enabled", havingValue = "true")
@@ -23,21 +20,10 @@ public class CrudXPerformanceInterceptor implements HandlerInterceptor {
     private static final String ENTITY_NAME_ATTR = "crudx.entityName";
 
     private final CrudXPerformanceTracker tracker;
-    private final ThreadMXBean threadMXBean;
 
     public CrudXPerformanceInterceptor(CrudXPerformanceTracker tracker) {
         this.tracker = tracker;
-        this.threadMXBean = ManagementFactory.getThreadMXBean();
-
-        // Enable thread memory allocation measurement if supported
-        if (threadMXBean instanceof com.sun.management.ThreadMXBean sunThreadMXBean) {
-            if (!sunThreadMXBean.isThreadAllocatedMemorySupported()) {
-                log.warn("Thread memory allocation tracking not supported on this JVM");
-            } else if (!sunThreadMXBean.isThreadAllocatedMemoryEnabled()) {
-                sunThreadMXBean.setThreadAllocatedMemoryEnabled(true);
-                log.info("Thread memory allocation tracking enabled");
-            }
-        }
+        log.info("✓ Performance tracking initialized (Heap memory monitoring)");
     }
 
     @Override
@@ -51,14 +37,10 @@ public class CrudXPerformanceInterceptor implements HandlerInterceptor {
                 // Record start time
                 request.setAttribute(START_TIME_ATTR, System.currentTimeMillis());
 
-                // Record thread-specific memory allocation (accurate!)
-                long threadId = Thread.currentThread().threadId();
-                if (threadMXBean instanceof com.sun.management.ThreadMXBean sunThreadMXBean) {
-                    if (sunThreadMXBean.isThreadAllocatedMemorySupported()) {
-                        long allocatedBytes = sunThreadMXBean.getThreadAllocatedBytes(threadId);
-                        request.setAttribute(START_MEMORY_ATTR, allocatedBytes);
-                    }
-                }
+                // 🔥 FIXED: Track HEAP memory usage (actual retention)
+                Runtime runtime = Runtime.getRuntime();
+                long startHeapUsed = runtime.totalMemory() - runtime.freeMemory();
+                request.setAttribute(START_MEMORY_ATTR, startHeapUsed);
 
                 // Extract entity name
                 try {
@@ -97,30 +79,32 @@ public class CrudXPerformanceInterceptor implements HandlerInterceptor {
                 }
             }
 
-            // Calculate memory
+            // 🔥 FIXED: Calculate PEAK heap usage (actual memory retained)
             Long memoryDeltaKb = null;
-            if (startMemory != null && threadMXBean instanceof com.sun.management.ThreadMXBean sunThreadMXBean) {
+            if (startMemory != null) {
                 try {
-                    long threadId = Thread.currentThread().threadId();
-                    long endMemory = sunThreadMXBean.getThreadAllocatedBytes(threadId);
-                    long allocatedBytes = endMemory - startMemory;
-                    memoryDeltaKb = allocatedBytes / 1024;
+                    Runtime runtime = Runtime.getRuntime();
+                    long endHeapUsed = runtime.totalMemory() - runtime.freeMemory();
+                    long heapDelta = endHeapUsed - startMemory;
+
+                    // Convert to KB (can be negative if GC occurred)
+                    memoryDeltaKb = Math.max(0, heapDelta / 1024);
 
                     // Validate memory value
-                    if (memoryDeltaKb < 0 || memoryDeltaKb > 3145728) { // > 3GB is unrealistic
-                        log.debug("Invalid memory value detected: {} KB, setting to null", memoryDeltaKb);
+                    if (memoryDeltaKb > 3145728) { // > 3GB is unrealistic
+                        log.debug("Unrealistic memory value: {} KB, setting to null", memoryDeltaKb);
                         memoryDeltaKb = null;
                     }
                 } catch (Exception e) {
-                    log.debug("Error measuring thread memory allocation", e);
+                    log.debug("Error measuring heap memory delta", e);
                 }
             }
 
-            // 🔥 FIX: Get DTO conversion time from request attribute (set by controller)
+            // Get DTO conversion time from request attribute (set by controller)
             Long dtoConversionTime = (Long) request.getAttribute("dtoConversionTime");
             Boolean dtoUsed = (Boolean) request.getAttribute("dtoUsed");
 
-            // 🔥 DEBUG: Log if DTO was used
+            // Debug: Log if DTO was used
             if (dtoUsed != null && dtoUsed && dtoConversionTime != null) {
                 log.debug("DTO conversion detected: {} ms for endpoint: {} {}",
                         dtoConversionTime, method, endpoint);
