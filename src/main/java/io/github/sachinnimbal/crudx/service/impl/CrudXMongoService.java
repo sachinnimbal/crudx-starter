@@ -18,6 +18,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.mongodb.core.BulkOperations;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
@@ -110,7 +111,8 @@ public abstract class CrudXMongoService<T extends CrudXMongoEntity<ID>, ID exten
         long startTime = System.currentTimeMillis();
         int totalSize = entities.size();
 
-        log.info(" Starting batch creation: {} entities", totalSize);
+        log.info("🚀 Starting MongoDB bulk insert: {} entities", totalSize);
+
         int batchSize = Math.min(50, crudxProperties.getBatchSize());
         int successCount = 0;
         int skipCount = 0;
@@ -122,7 +124,9 @@ public abstract class CrudXMongoService<T extends CrudXMongoEntity<ID>, ID exten
         for (int i = 0; i < totalSize; i += batchSize) {
             batchNumber++;
             int end = Math.min(i + batchSize, totalSize);
+
             List<T> validEntities = new ArrayList<>(batchSize);
+
             for (int j = i; j < end; j++) {
                 T entity = entities.get(j);
 
@@ -130,7 +134,6 @@ public abstract class CrudXMongoService<T extends CrudXMongoEntity<ID>, ID exten
                     validateUniqueConstraints(entity);
                     entity.onCreate();
                     validEntities.add(entity);
-
                 } catch (DuplicateEntityException e) {
                     if (skipDuplicates) {
                         skipCount++;
@@ -157,15 +160,33 @@ public abstract class CrudXMongoService<T extends CrudXMongoEntity<ID>, ID exten
 
             if (!validEntities.isEmpty()) {
                 try {
-                    mongoTemplate.insertAll(validEntities);
-                    successCount += validEntities.size();
+                    log.debug("📦 Batch {}/{}: Bulk inserting {} entities",
+                            batchNumber, totalBatches, validEntities.size());
+
+                    BulkOperations bulkOps = mongoTemplate.bulkOps(
+                            BulkOperations.BulkMode.UNORDERED,
+                            entityClass
+                    );
+
+                    bulkOps.insert(validEntities);
+
+                    com.mongodb.bulk.BulkWriteResult bulkResult = bulkOps.execute();
+                    int inserted = bulkResult.getInsertedCount();
+
+                    successCount += inserted;
+
+                    log.debug("✅ Batch {}/{}: {} entities inserted via bulk operation",
+                            batchNumber, totalBatches, inserted);
+
                 } catch (Exception e) {
-                    log.error("MongoDB batch insert failed: {}", e.getMessage());
+                    log.error("❌ Bulk insert failed for batch {}/{}: {}",
+                            batchNumber, totalBatches, e.getMessage());
 
                     if (!skipDuplicates) {
                         throw e;
                     }
 
+                    log.warn("⚠️  Falling back to individual inserts for batch {}", batchNumber);
                     for (T entity : validEntities) {
                         try {
                             mongoTemplate.save(entity);
@@ -173,7 +194,7 @@ public abstract class CrudXMongoService<T extends CrudXMongoEntity<ID>, ID exten
                         } catch (Exception ex) {
                             skipCount++;
                             if (skipReasons.size() < 1000) {
-                                skipReasons.add("Batch insert fallback: " + ex.getMessage());
+                                skipReasons.add("Bulk fallback: " + ex.getMessage());
                             }
                         }
                     }
@@ -182,9 +203,11 @@ public abstract class CrudXMongoService<T extends CrudXMongoEntity<ID>, ID exten
 
             validEntities.clear();
 
+            // Memory management
             if (batchNumber % 100 == 0) {
                 System.gc();
             }
+
             if (batchNumber % 20 == 0 || batchNumber == totalBatches) {
                 long currentMemory = (Runtime.getRuntime().totalMemory() -
                         Runtime.getRuntime().freeMemory()) / 1024 / 1024;
@@ -193,13 +216,17 @@ public abstract class CrudXMongoService<T extends CrudXMongoEntity<ID>, ID exten
             }
         }
 
-        // 🔥 CRITICAL: Clear input list
+        // Clear input list
         entities.clear();
 
         long duration = System.currentTimeMillis() - startTime;
-        log.info("MongoDB entities created | Time taken: {} ms", duration);
+        double recordsPerSecond = duration > 0 ? (successCount * 1000.0) / duration : 0.0;
+
+        log.info("✅ MongoDB bulk insert completed: {} created, {} skipped | {} rec/sec | {} ms",
+                successCount, skipCount, (int)recordsPerSecond, duration);
+
         BatchResult<T> result = new BatchResult<>();
-        result.setCreatedEntities(Collections.emptyList()); // Don't return full entities! only return first 50 entities just like /paged
+        result.setCreatedEntities(Collections.emptyList());
         result.setSkippedCount(skipCount);
         result.setSkippedReasons(skipReasons);
 

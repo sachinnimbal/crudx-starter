@@ -104,12 +104,13 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
     }
 
     @Override
-    @Transactional(timeout = 1800) // 30 minutes for very large batches
+    @Transactional(timeout = 1800)
     public BatchResult<T> createBatch(List<T> entities, boolean skipDuplicates) {
         long startTime = System.currentTimeMillis();
         int totalSize = entities.size();
 
-        log.info(" Starting batch creation: {} entities", totalSize);
+        log.info("🚀 Starting TRUE batch insert: {} entities", totalSize);
+
         int batchSize = Math.min(AGGRESSIVE_BATCH_SIZE, crudxProperties.getBatchSize());
         int successCount = 0;
         int skipCount = 0;
@@ -121,17 +122,16 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
         for (int i = 0; i < totalSize; i += batchSize) {
             batchNumber++;
             int end = Math.min(i + batchSize, totalSize);
-            int batchSuccessCount = 0;
+
+            // ✅ STEP 1: Collect valid entities WITHOUT persisting
+            List<T> validEntities = new ArrayList<>(batchSize);
 
             for (int j = i; j < end; j++) {
                 T entity = entities.get(j);
 
                 try {
                     validateUniqueConstraints(entity);
-                    entityManager.persist(entity);
-                    batchSuccessCount++;
-                    successCount++;
-
+                    validEntities.add(entity);
                 } catch (DuplicateEntityException e) {
                     if (skipDuplicates) {
                         skipCount++;
@@ -153,31 +153,84 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
                     }
                 }
 
+                // Free memory immediately
                 entities.set(j, null);
             }
 
-            if (batchSuccessCount > 0) {
-                entityManager.flush();
-                entityManager.clear();
+            // ✅ STEP 2: TRUE Batch Insert - ALL at once!
+            if (!validEntities.isEmpty()) {
+                try {
+                    log.debug("📦 Batch {}/{}: Inserting {} entities in SINGLE operation",
+                            batchNumber, totalBatches, validEntities.size());
+
+                    // 🔥 CRITICAL: Persist all entities first
+                    for (T entity : validEntities) {
+                        entityManager.persist(entity);
+                    }
+
+                    // 🔥 CRITICAL: Single flush for entire batch
+                    entityManager.flush();
+                    successCount += validEntities.size();
+
+                    log.debug("✅ Batch {}/{}: {} entities inserted successfully",
+                            batchNumber, totalBatches, validEntities.size());
+
+                } catch (Exception e) {
+                    log.error("❌ Batch {}/{} insert failed: {}", batchNumber, totalBatches, e.getMessage());
+
+                    if (!skipDuplicates) {
+                        throw e;
+                    }
+
+                    // Fallback: Try one-by-one only if batch fails
+                    log.warn("⚠️  Falling back to individual inserts for batch {}", batchNumber);
+                    for (T entity : validEntities) {
+                        try {
+                            entityManager.persist(entity);
+                            entityManager.flush();
+                            successCount++;
+                        } catch (Exception ex) {
+                            skipCount++;
+                            if (skipReasons.size() < 1000) {
+                                skipReasons.add("Batch fallback: " + ex.getMessage());
+                            }
+                        }
+                    }
+                } finally {
+                    // Clear persistence context to free memory
+                    entityManager.clear();
+                }
             }
 
+            validEntities.clear();
+
+            // Memory management
             if (batchNumber % MEMORY_CLEANUP_INTERVAL == 0) {
                 System.gc();
             }
+
             if (batchNumber % 20 == 0 || batchNumber == totalBatches) {
-                long currentMemory = (Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / 1024 / 1024;
+                long currentMemory = (Runtime.getRuntime().totalMemory() -
+                        Runtime.getRuntime().freeMemory()) / 1024 / 1024;
                 log.info("📊 Progress: {}/{} batches | Success: {} | Skipped: {} | Memory: {} MB",
                         batchNumber, totalBatches, successCount, skipCount, currentMemory);
             }
         }
 
+        // Clear input list
         entities.clear();
+
         long duration = System.currentTimeMillis() - startTime;
-        log.info("SQL entities created | Time taken: {} ms", duration);
+        double recordsPerSecond = duration > 0 ? (successCount * 1000.0) / duration : 0.0;
+
+        log.info("✅ SQL batch insert completed: {} created, {} skipped | {} rec/sec | {} ms",
+                successCount, skipCount, (int)recordsPerSecond, duration);
+
         BatchResult<T> result = new BatchResult<>();
-        result.setCreatedEntities(Collections.emptyList()); // Don't return full entities! only return first 50 entities just like /paged
+        result.setCreatedEntities(Collections.emptyList());
         result.setSkippedCount(skipCount);
         result.setSkippedReasons(skipReasons);
+
         return result;
     }
 

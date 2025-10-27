@@ -288,46 +288,28 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                 );
             }
 
-            // ✅ FIX: Convert ALL entities at once (streaming)
-            List<T> allEntities = new ArrayList<>(totalSize);
+            // ✅ FIX: Convert ALL DTOs to entities at ONCE - NO LOOP!
+            log.info("📦 Converting {} DTOs to entities in SINGLE batch operation...", totalSize);
+            long conversionStart = System.currentTimeMillis();
+
+            List<T> allEntities;
             int conversionFailures = 0;
-            List<String> conversionErrors = new ArrayList<>(Math.min(1000, totalSize / 10));
+            List<String> conversionErrors = new ArrayList<>();
 
-            log.info("📦 Converting {} DTOs to entities...", totalSize);
+            try {
+                // 🔥 CRITICAL: Single batch conversion - NO loop!
+                allEntities = convertBatchToEntities(requestBodies, BATCH_CREATE);
 
-            for (int i = 0; i < totalSize; i++) {
-                Map<String, Object> requestBody = requestBodies.get(i);
+                log.info("✅ Batch DTO conversion completed: {} entities in {} ms",
+                        allEntities.size(), System.currentTimeMillis() - conversionStart);
 
-                try {
-                    T entity = convertMapToEntity(requestBody, BATCH_CREATE);
-
-                    if (entity != null) {
-                        validateRequiredFields(entity);
-                        allEntities.add(entity);
-                    } else {
-                        conversionFailures++;
-                        if (conversionErrors.size() < 100) {
-                            conversionErrors.add(String.format("Index %d: Conversion returned null", i));
-                        }
-                    }
-
-                } catch (Exception e) {
-                    conversionFailures++;
-                    if (conversionErrors.size() < 100) {
-                        conversionErrors.add(String.format("Index %d: %s", i, e.getMessage()));
-                    }
-                    log.debug("Conversion failed at index {}: {}", i, e.getMessage());
-                }
-
-                // 🔥 Free memory immediately
-                requestBodies.set(i, null);
+            } catch (Exception e) {
+                log.error("❌ Batch DTO conversion failed: {}", e.getMessage());
+                throw new RuntimeException("Failed to convert request bodies to entities: " + e.getMessage(), e);
             }
 
-            // Clear input list
+            // Clear input list immediately to free memory
             requestBodies.clear();
-
-            log.info("✅ Conversion complete: {} valid entities, {} failures",
-                    allEntities.size(), conversionFailures);
 
             if (allEntities.isEmpty()) {
                 log.error("❌ All conversions failed! Check your DTO → Entity mapping");
@@ -335,8 +317,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                 Map<String, Object> errorData = new LinkedHashMap<>();
                 errorData.put("totalProcessed", totalSize);
                 errorData.put("successCount", 0);
-                errorData.put("conversionFailures", conversionFailures);
-                errorData.put("firstErrors", conversionErrors.subList(0, Math.min(10, conversionErrors.size())));
+                errorData.put("conversionFailures", totalSize);
 
                 return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                         .body(ApiResponse.error(
@@ -345,15 +326,50 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                                 System.currentTimeMillis() - startTime));
             }
 
-            // ✅ FIX: Call service ONCE with all entities
-            beforeCreateBatch(allEntities);
+            // ✅ Validate required fields in batch
+            log.info("🔍 Validating {} entities...", allEntities.size());
+            List<T> validEntities = new ArrayList<>(allEntities.size());
 
-            log.info("🚀 Sending {} entities to service layer...", allEntities.size());
-            BatchResult<T> result = crudService.createBatch(allEntities, skipDuplicates);
+            for (int i = 0; i < allEntities.size(); i++) {
+                T entity = allEntities.get(i);
+                try {
+                    validateRequiredFields(entity);
+                    validEntities.add(entity);
+                } catch (Exception e) {
+                    conversionFailures++;
+                    if (conversionErrors.size() < 100) {
+                        conversionErrors.add(String.format("Index %d validation: %s", i, e.getMessage()));
+                    }
+                }
+                // Free memory immediately
+                allEntities.set(i, null);
+            }
+
+            allEntities.clear();
+
+            if (validEntities.isEmpty()) {
+                log.error("❌ All validations failed!");
+
+                Map<String, Object> errorData = new LinkedHashMap<>();
+                errorData.put("totalProcessed", totalSize);
+                errorData.put("validationFailures", conversionFailures);
+                errorData.put("firstErrors", conversionErrors.subList(0, Math.min(10, conversionErrors.size())));
+
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                        .body(ApiResponse.error(
+                                "All entity validations failed.",
+                                HttpStatus.BAD_REQUEST,
+                                System.currentTimeMillis() - startTime));
+            }
+
+            // ✅ Call service with ALL validated entities - Service will handle TRUE batch insert
+            beforeCreateBatch(validEntities);
+
+            log.info("🚀 Sending {} entities to service layer for TRUE batch insert...", validEntities.size());
+            BatchResult<T> result = crudService.createBatch(validEntities, skipDuplicates);
 
             afterCreateBatch(result.getCreatedEntities());
 
-            // ✅ FIX: Get actual counts from service result
             int successCount = result.getCreatedEntities().size();
             int skipCount = result.getSkippedCount() + conversionFailures;
 
