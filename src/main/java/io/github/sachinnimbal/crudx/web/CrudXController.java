@@ -16,6 +16,9 @@ import io.github.sachinnimbal.crudx.core.model.CrudXBaseEntity;
 import io.github.sachinnimbal.crudx.core.model.CrudXMongoEntity;
 import io.github.sachinnimbal.crudx.core.model.CrudXMySQLEntity;
 import io.github.sachinnimbal.crudx.core.model.CrudXPostgreSQLEntity;
+import io.github.sachinnimbal.crudx.core.performance.CrudXBatchMetricsTracker;
+import io.github.sachinnimbal.crudx.core.performance.CrudXMetricsRegistry;
+import io.github.sachinnimbal.crudx.core.performance.EndpointMetrics;
 import io.github.sachinnimbal.crudx.core.response.ApiResponse;
 import io.github.sachinnimbal.crudx.core.response.BatchResult;
 import io.github.sachinnimbal.crudx.core.response.PageResponse;
@@ -48,6 +51,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 import static io.github.sachinnimbal.crudx.core.enums.CrudXOperation.*;
+import static io.github.sachinnimbal.crudx.core.util.TimeUtils.formatExecutionTime;
 
 @Slf4j
 public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends Serializable> {
@@ -60,6 +64,9 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
     @Autowired(required = false)
     protected CrudXMapperGenerator mapperGenerator;
+
+    @Autowired(required = false)
+    protected CrudXMetricsRegistry metricsRegistry;
 
     protected CrudXService<T, ID> crudService;
 
@@ -219,7 +226,9 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     // ==================== CRUD ENDPOINTS ====================
 
     @PostMapping
-    public ResponseEntity<ApiResponse<?>> create(@Valid @RequestBody Map<String, Object> requestBody) {
+    public ResponseEntity<ApiResponse<?>> create(
+            @Valid @RequestBody Map<String, Object> requestBody,
+            HttpServletRequest request) {
         long startTime = System.currentTimeMillis();
 
         try {
@@ -230,15 +239,26 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                 throw new IllegalArgumentException("Request body cannot be null or empty");
             }
 
+            long mappingStart = System.nanoTime();
             T entity = convertMapToEntity(requestBody, CREATE);
+            long mappingTime = (System.nanoTime() - mappingStart) / 1_000_000;
+
+            long validationStart = System.nanoTime();
             validateRequiredFields(entity);
+            long validationTime = (System.nanoTime() - validationStart) / 1_000_000;
 
             beforeCreate(entity);
+
+            long dbStart = System.nanoTime();
             T created = crudService.create(entity);
+            long dbTime = (System.nanoTime() - dbStart) / 1_000_000;
+
             afterCreate(created);
 
             long executionTime = System.currentTimeMillis() - startTime;
             Object response = convertEntityToResponse(created, CREATE);
+
+            recordSingleOperationMetrics(request, executionTime, mappingTime, validationTime, dbTime);
 
             log.info("Entity created with ID: {} | Time: {} ms | Mapper: {}",
                     created.getId(), executionTime, mapperMode);
@@ -258,7 +278,9 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     @PostMapping("/batch")
     public ResponseEntity<ApiResponse<?>> createBatch(
             @Valid @RequestBody List<Map<String, Object>> requestBodies,
-            @RequestParam(required = false, defaultValue = "true") boolean skipDuplicates) {
+            @RequestParam(required = false, defaultValue = "true") boolean skipDuplicates,
+            HttpServletRequest request) {
+        CrudXBatchMetricsTracker metricsTracker = new CrudXBatchMetricsTracker();
 
         long startTime = System.currentTimeMillis();
         int totalSize = requestBodies.size();
@@ -278,11 +300,9 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                 );
             }
 
-            // 🔥 CRITICAL: Use SMALLER batches for memory optimization
             int processingBatchSize = Math.min(500, crudxProperties.getBatchSize());
             int totalBatches = (totalSize + processingBatchSize - 1) / processingBatchSize;
 
-            // 🔥 OPTIMIZATION: Counter-based tracking (NO entity storage)
             int totalSuccessCount = 0;
             int totalSkipCount = 0;
             int conversionFailures = 0;
@@ -290,25 +310,39 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
             log.info("📦 Processing {} batches of {} entities each", totalBatches, processingBatchSize);
 
-            // 🔥 STREAMING BATCH PROCESSING
             for (int batchNum = 1; batchNum <= totalBatches; batchNum++) {
                 int batchStart = (batchNum - 1) * processingBatchSize;
                 int batchEnd = Math.min(batchStart + processingBatchSize, totalSize);
 
-                // 🔥 Convert ONLY current batch (not all at once!)
+                long mappingStartTime = System.currentTimeMillis();
                 List<T> batchEntities = new ArrayList<>(batchEnd - batchStart);
 
                 for (int i = batchStart; i < batchEnd; i++) {
                     Map<String, Object> requestBody = requestBodies.get(i);
 
                     try {
+                        long objectMappingStart = System.nanoTime();
                         T entity = convertMapToEntity(requestBody, BATCH_CREATE);
+                        long objectMappingTime = (System.nanoTime() - objectMappingStart) / 1_000_000;
 
                         if (entity != null) {
+                            long validationStart = System.nanoTime();
                             validateRequiredFields(entity);
+                            long validationTime = (System.nanoTime() - validationStart) / 1_000_000;
+
                             batchEntities.add(entity);
+
+                            if (totalSuccessCount < 1000) {
+                                metricsTracker.addObjectTiming(
+                                        entity.getId() != null ? entity.getId().toString() : "pending-" + i,
+                                        objectMappingTime,
+                                        validationTime,
+                                        0 // DB write tracked separately
+                                );
+                            }
                         } else {
                             conversionFailures++;
+                            metricsTracker.incrementFailed();
                             if (errorSamples.size() < 100) {
                                 errorSamples.add(String.format("Index %d: Conversion returned null", i));
                             }
@@ -316,22 +350,27 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
                     } catch (Exception e) {
                         conversionFailures++;
+                        metricsTracker.incrementFailed();
                         if (errorSamples.size() < 100) {
                             errorSamples.add(String.format("Index %d: %s", i, e.getMessage()));
                         }
                     }
 
-                    // 🔥 CRITICAL: Nullify processed DTO immediately
                     requestBodies.set(i, null);
                 }
 
-                // 🔥 Persist current batch
+                long mappingTime = System.currentTimeMillis() - mappingStartTime;
+                metricsTracker.addDtoMappingTime(mappingTime);
+
                 if (!batchEntities.isEmpty()) {
+                    long dbStartTime = System.currentTimeMillis();
+
                     try {
                         beforeCreateBatch(batchEntities);
-
-                        // Call service with THIS batch only
                         BatchResult<T> batchResult = crudService.createBatch(batchEntities, skipDuplicates);
+
+                        long dbTime = System.currentTimeMillis() - dbStartTime;
+                        metricsTracker.addDbWriteTime(dbTime);
 
                         totalSuccessCount += batchResult.getCreatedEntities().size();
                         totalSkipCount += batchResult.getSkippedCount();
@@ -339,6 +378,9 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                         afterCreateBatch(batchResult.getCreatedEntities());
 
                     } catch (Exception e) {
+                        long dbTime = System.currentTimeMillis() - dbStartTime;
+                        metricsTracker.addDbWriteTime(dbTime);
+
                         log.error("Batch {} failed: {}", batchNum, e.getMessage());
                         if (!skipDuplicates) {
                             throw e;
@@ -347,10 +389,8 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                     }
                 }
 
-                // 🔥 CRITICAL: Clear batch immediately
                 batchEntities.clear();
 
-                // 🔥 Memory cleanup hint every 100 batches
                 if (batchNum % 100 == 0) {
                     System.gc();
                 }
@@ -364,37 +404,44 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                 }
             }
 
-            // 🔥 CRITICAL: Clear input list
             requestBodies.clear();
 
             long executionTime = System.currentTimeMillis() - startTime;
-            double recordsPerSecond = executionTime > 0
-                    ? (totalSuccessCount * 1000.0) / executionTime
-                    : 0.0;
+            String endpoint = request.getMethod() + " " + request.getRequestURI();
+            EndpointMetrics metrics = metricsTracker.buildMetrics(endpoint, request.getMethod());
 
-            long finalMemory = (Runtime.getRuntime().totalMemory() -
-                    Runtime.getRuntime().freeMemory()) / 1024 / 1024;
+            if (metricsRegistry != null) {
+                request.setAttribute("endpoint.metrics", metrics);
+            }
 
-            // 🔥 LIGHTWEIGHT Response (NO entity list!)
             Map<String, Object> responseData = new LinkedHashMap<>();
             responseData.put("totalProcessed", totalSize);
             responseData.put("successCount", totalSuccessCount);
             responseData.put("skipCount", totalSkipCount + conversionFailures);
-            responseData.put("conversionFailures", conversionFailures);
-            responseData.put("recordsPerSecond", String.format("%.0f", recordsPerSecond));
-            responseData.put("executionTimeMs", executionTime);
-            responseData.put("executionTime", String.format("%.2fs", executionTime / 1000.0));
-            responseData.put("finalMemoryMB", finalMemory);
-            responseData.put("mapperMode", mapperMode.toString());
+            responseData.put("executionTime", formatExecutionTime(executionTime));
+            responseData.put("throughput", metrics.getThroughput());
+            responseData.put("memoryBeforeMB", metrics.getMemoryBeforeMB() + " MB");
+            responseData.put("memoryPeakMB", metrics.getMemoryPeakMB() + " MB");
+            responseData.put("memoryAfterMB", metrics.getMemoryAfterMB() + " MB");
+
+            if (mapperMode != MapperMode.NONE && metrics.getDtoMappingTime() != null) {
+                responseData.put("dtoMappingTime", metrics.getDtoMappingTime());
+            }
+            if (metrics.getValidationTime() != null) {
+                responseData.put("validationTime", metrics.getValidationTime());
+            }
+            if (metrics.getDbWriteTime() != null) {
+                responseData.put("dbWriteTime", metrics.getDbWriteTime());
+            }
 
             if (conversionFailures > 0 && !errorSamples.isEmpty()) {
                 responseData.put("errorSamples", errorSamples.subList(0, Math.min(10, errorSamples.size())));
             }
 
             String message = String.format(
-                    "✅ Batch completed: %d created, %d skipped | %.0f rec/sec | %d ms | Memory: %d MB",
+                    "✅ Batch completed: %d created, %d skipped | %s | %s",
                     totalSuccessCount, totalSkipCount + conversionFailures,
-                    recordsPerSecond, executionTime, finalMemory
+                    formatExecutionTime(executionTime), metrics.getThroughput()
             );
 
             log.info(message);
@@ -410,18 +457,26 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<ApiResponse<?>> getById(@PathVariable ID id) {
+    public ResponseEntity<ApiResponse<?>> getById(
+            @PathVariable ID id,
+            HttpServletRequest request) {
         long startTime = System.currentTimeMillis();
         validateId(id);
 
         try {
             log.debug("Fetching entity by ID: {} (Mapper: {})", id, mapperMode);
 
+            // 🔥 TRACK DB READ TIME
+            long dbStart = System.nanoTime();
             T entity = crudService.findById(id);
+            long dbTime = (System.nanoTime() - dbStart) / 1_000_000;
+
             afterFindById(entity);
 
             long executionTime = System.currentTimeMillis() - startTime;
             Object response = convertEntityToResponse(entity, GET_ID);
+
+            recordSingleOperationMetrics(request, executionTime, 0, 0, dbTime);
 
             log.info("Entity found: {} | Time: {} ms | Mapper: {}",
                     id, executionTime, mapperMode);
@@ -440,7 +495,8 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     @GetMapping
     public ResponseEntity<ApiResponse<?>> getAll(
             @RequestParam(required = false) String sortBy,
-            @RequestParam(required = false, defaultValue = "ASC") String sortDirection) {
+            @RequestParam(required = false, defaultValue = "ASC") String sortDirection,
+            HttpServletRequest request) {
 
         long startTime = System.currentTimeMillis();
 
@@ -453,12 +509,18 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                 log.warn("Large dataset ({} records) - auto-switching to pagination", totalCount);
 
                 Pageable pageable = createPageable(0, DEFAULT_PAGE_SIZE, sortBy, sortDirection);
+
+                long dbStart = System.nanoTime();
                 Page<T> springPage = crudService.findAll(pageable);
+                long dbTime = (System.nanoTime() - dbStart) / 1_000_000;
+
                 PageResponse<T> pageResponse = PageResponse.from(springPage);
                 afterFindPaged(pageResponse);
 
                 long executionTime = System.currentTimeMillis() - startTime;
                 Object response = convertPageResponseToDTO(pageResponse, GET_PAGED);
+
+                recordBatchReadMetrics(request, executionTime, pageResponse.getContent().size(), dbTime);
 
                 return ResponseEntity.ok(ApiResponse.success(response,
                         String.format("Large dataset (%d records). Returning first %d. Use /paged for more.",
@@ -466,14 +528,18 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                         executionTime));
             }
 
+            long dbStart = System.nanoTime();
             List<T> entities = sortBy != null ?
                     crudService.findAll(Sort.by(Sort.Direction.fromString(sortDirection), sortBy)) :
                     crudService.findAll();
+            long dbTime = (System.nanoTime() - dbStart) / 1_000_000;
 
             afterFindAll(entities);
 
             long executionTime = System.currentTimeMillis() - startTime;
             Object response = convertEntitiesToResponse(entities, GET_ALL);
+
+            recordBatchReadMetrics(request, executionTime, entities.size(), dbTime);
 
             log.info("Retrieved {} entities | Time: {} ms | Mapper: {} | DTO enabled: {}",
                     entities.size(), executionTime, mapperMode, mapperMode != MapperMode.NONE);
@@ -495,7 +561,8 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size,
             @RequestParam(required = false) String sortBy,
-            @RequestParam(required = false, defaultValue = "ASC") String sortDirection) {
+            @RequestParam(required = false, defaultValue = "ASC") String sortDirection,
+            HttpServletRequest request) {
 
         long startTime = System.currentTimeMillis();
 
@@ -505,12 +572,18 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             validatePagination(page, size);
 
             Pageable pageable = createPageable(page, size, sortBy, sortDirection);
+
+            long dbStart = System.nanoTime();
             Page<T> springPage = crudService.findAll(pageable);
+            long dbTime = (System.nanoTime() - dbStart) / 1_000_000;
+
             PageResponse<T> pageResponse = PageResponse.from(springPage);
             afterFindPaged(pageResponse);
 
             long executionTime = System.currentTimeMillis() - startTime;
             Object response = convertPageResponseToDTO(pageResponse, GET_PAGED);
+
+            recordBatchReadMetrics(request, executionTime, pageResponse.getContent().size(), dbTime);
 
             log.info("Page {} with {} entities (total: {}) | Time: {} ms | Mapper: {} | DTO enabled: {}",
                     page, pageResponse.getContent().size(), pageResponse.getTotalElements(),
@@ -532,7 +605,8 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     @PatchMapping("/{id}")
     public ResponseEntity<ApiResponse<?>> update(
             @PathVariable ID id,
-            @RequestBody @NotEmpty Map<String, Object> updates) {
+            @RequestBody @NotEmpty Map<String, Object> updates,
+            HttpServletRequest request) {
 
         long startTime = System.currentTimeMillis();
         validateId(id);
@@ -548,18 +622,31 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             beforeUpdate(id, updates, existingEntity);
             T oldEntity = cloneEntity(existingEntity);
 
+            long mappingTime = 0;
+            long validationTime = 0;
+
             if (mapperMode != MapperMode.NONE) {
+                long mappingStart = System.nanoTime();
                 Object requestDto = convertMapToDTO(updates, UPDATE);
+                mappingTime = (System.nanoTime() - mappingStart) / 1_000_000;
+
                 if (requestDto != null) {
+                    long validationStart = System.nanoTime();
                     validateRequiredFields(requestDto);
+                    validationTime = (System.nanoTime() - validationStart) / 1_000_000;
                 }
             }
 
+            long dbStart = System.nanoTime();
             T updated = crudService.update(id, updates);
+            long dbTime = (System.nanoTime() - dbStart) / 1_000_000;
+
             afterUpdate(updated, oldEntity);
 
             long executionTime = System.currentTimeMillis() - startTime;
             Object response = convertEntityToResponse(updated, UPDATE);
+
+            recordSingleOperationMetrics(request, executionTime, mappingTime, validationTime, dbTime);
 
             log.info("Entity {} updated | Time: {} ms | Mapper: {}",
                     id, executionTime, mapperMode);
@@ -577,8 +664,8 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
     @PatchMapping("/batch")
     public ResponseEntity<ApiResponse<?>> updateBatch(
-            @Valid @RequestBody Map<ID, Map<String, Object>> updates) {
-
+            @Valid @RequestBody Map<ID, Map<String, Object>> updates,
+            HttpServletRequest request) {
         long startTime = System.currentTimeMillis();
 
         try {
@@ -589,10 +676,15 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                 throw new IllegalArgumentException("Updates map cannot be empty");
             }
 
+            long dbStart = System.nanoTime();
             BatchResult<T> result = crudService.updateBatch(updates);
+            long dbTime = (System.nanoTime() - dbStart) / 1_000_000;
 
             long executionTime = System.currentTimeMillis() - startTime;
             Object responseData = convertBatchResultToResponse(result, BATCH_UPDATE);
+
+            recordBatchUpdateMetrics(request, executionTime, result.getCreatedEntities().size(),
+                    result.getSkippedCount(), dbTime);
 
             String message = result.hasSkipped() ?
                     String.format("Batch update: %d updated, %d skipped",
@@ -650,16 +742,23 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<ApiResponse<Void>> delete(@PathVariable ID id) {
+    public ResponseEntity<ApiResponse<Void>> delete(
+            @PathVariable ID id,
+            HttpServletRequest request) {
         long startTime = System.currentTimeMillis();
         validateId(id);
 
         try {
+            long dbStart = System.nanoTime();
             T deletedEntity = crudService.delete(id);
+            long dbTime = (System.nanoTime() - dbStart) / 1_000_000;
+
             beforeDelete(id, deletedEntity);
             afterDelete(id, deletedEntity);
 
             long executionTime = System.currentTimeMillis() - startTime;
+
+            recordSingleOperationMetrics(request, executionTime, 0, 0, dbTime);
 
             log.info("Entity {} deleted | Time: {} ms", id, executionTime);
 
@@ -674,7 +773,9 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     }
 
     @DeleteMapping("/batch")
-    public ResponseEntity<ApiResponse<BatchResult<ID>>> deleteBatch(@Valid @RequestBody List<ID> ids) {
+    public ResponseEntity<ApiResponse<BatchResult<ID>>> deleteBatch(
+            @Valid @RequestBody List<ID> ids,
+            HttpServletRequest request) {
         long startTime = System.currentTimeMillis();
 
         try {
@@ -685,7 +786,9 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             }
 
             beforeDeleteBatch(ids);
+            long dbStart = System.nanoTime();
             BatchResult<T> deletionResult = crudService.deleteBatch(ids);
+            long dbTime = (System.nanoTime() - dbStart) / 1_000_000;
 
             List<ID> deletedIds = deletionResult.getCreatedEntities().stream()
                     .map(T::getId)
@@ -699,6 +802,9 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             result.setSkippedReasons(deletionResult.getSkippedReasons());
 
             long executionTime = System.currentTimeMillis() - startTime;
+
+            recordBatchDeleteMetrics(request, executionTime, deletedIds.size(),
+                    deletionResult.getSkippedCount(), dbTime);
 
             String message = result.hasSkipped()
                     ? String.format("Batch deletion: %d deleted, %d skipped",
@@ -1342,6 +1448,153 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                     throw new IllegalArgumentException("ID must be positive");
             default -> {
             }
+        }
+    }
+
+    private void recordSingleOperationMetrics(
+            HttpServletRequest request,
+            long executionTimeMs,
+            long mappingTimeMs,
+            long validationTimeMs,
+            long dbTimeMs) {
+
+        if (metricsRegistry == null) return;
+
+        try {
+            Runtime runtime = Runtime.getRuntime();
+            double memoryMB = (runtime.totalMemory() - runtime.freeMemory()) / 1024.0 / 1024.0;
+
+            String endpoint = request.getMethod() + " " + request.getRequestURI();
+
+            EndpointMetrics metrics = EndpointMetrics.builder()
+                    .endpoint(endpoint)
+                    .method(request.getMethod())
+                    .totalRecords(1)
+                    .successCount(1)
+                    .avgExecutionTimeMs(executionTimeMs)
+                    .memoryAfterMB(memoryMB)
+                    .lastInvocationTime(System.currentTimeMillis())
+                    .build();
+
+            // Add timing breakdowns if applicable
+            if (mappingTimeMs > 0) {
+                metrics.setDtoMappingTime(formatExecutionTime(mappingTimeMs));
+            }
+            if (validationTimeMs > 0) {
+                metrics.setValidationTime(formatExecutionTime(validationTimeMs));
+            }
+            if (dbTimeMs > 0) {
+                metrics.setDbWriteTime(formatExecutionTime(dbTimeMs));
+            }
+
+            metrics.calculateThroughput();
+            request.setAttribute("endpoint.metrics", metrics);
+
+        } catch (Exception e) {
+            log.debug("Failed to record metrics: {}", e.getMessage());
+        }
+    }
+
+    private void recordBatchReadMetrics(
+            HttpServletRequest request,
+            long executionTimeMs,
+            int recordCount,
+            long dbTimeMs) {
+
+        if (metricsRegistry == null) return;
+
+        try {
+            Runtime runtime = Runtime.getRuntime();
+            double memoryMB = (runtime.totalMemory() - runtime.freeMemory()) / 1024.0 / 1024.0;
+
+            String endpoint = request.getMethod() + " " + request.getRequestURI();
+
+            EndpointMetrics metrics = EndpointMetrics.builder()
+                    .endpoint(endpoint)
+                    .method(request.getMethod())
+                    .totalRecords(recordCount)
+                    .successCount(recordCount)
+                    .avgExecutionTimeMs(executionTimeMs)
+                    .memoryAfterMB(memoryMB)
+                    .dbWriteTime(formatExecutionTime(dbTimeMs)) // READ time stored as "write" field
+                    .lastInvocationTime(System.currentTimeMillis())
+                    .build();
+
+            metrics.calculateThroughput();
+            request.setAttribute("endpoint.metrics", metrics);
+
+        } catch (Exception e) {
+            log.debug("Failed to record batch read metrics: {}", e.getMessage());
+        }
+    }
+
+    private void recordBatchDeleteMetrics(
+            HttpServletRequest request,
+            long executionTimeMs,
+            int successCount,
+            int failedCount,
+            long dbTimeMs) {
+
+        if (metricsRegistry == null) return;
+
+        try {
+            Runtime runtime = Runtime.getRuntime();
+            double memoryMB = (runtime.totalMemory() - runtime.freeMemory()) / 1024.0 / 1024.0;
+
+            String endpoint = request.getMethod() + " " + request.getRequestURI();
+
+            EndpointMetrics metrics = EndpointMetrics.builder()
+                    .endpoint(endpoint)
+                    .method(request.getMethod())
+                    .totalRecords(successCount + failedCount)
+                    .successCount(successCount)
+                    .failedCount(failedCount)
+                    .avgExecutionTimeMs(executionTimeMs)
+                    .memoryAfterMB(memoryMB)
+                    .dbWriteTime(formatExecutionTime(dbTimeMs))
+                    .lastInvocationTime(System.currentTimeMillis())
+                    .build();
+
+            metrics.calculateThroughput();
+            request.setAttribute("endpoint.metrics", metrics);
+
+        } catch (Exception e) {
+            log.debug("Failed to record batch delete metrics: {}", e.getMessage());
+        }
+    }
+
+    private void recordBatchUpdateMetrics(
+            HttpServletRequest request,
+            long executionTimeMs,
+            int successCount,
+            int failedCount,
+            long dbTimeMs) {
+
+        if (metricsRegistry == null) return;
+
+        try {
+            Runtime runtime = Runtime.getRuntime();
+            double memoryMB = (runtime.totalMemory() - runtime.freeMemory()) / 1024.0 / 1024.0;
+
+            String endpoint = request.getMethod() + " " + request.getRequestURI();
+
+            EndpointMetrics metrics = EndpointMetrics.builder()
+                    .endpoint(endpoint)
+                    .method(request.getMethod())
+                    .totalRecords(successCount + failedCount)
+                    .successCount(successCount)
+                    .failedCount(failedCount)
+                    .avgExecutionTimeMs(executionTimeMs)
+                    .memoryAfterMB(memoryMB)
+                    .dbWriteTime(formatExecutionTime(dbTimeMs))
+                    .lastInvocationTime(System.currentTimeMillis())
+                    .build();
+
+            metrics.calculateThroughput();
+            request.setAttribute("endpoint.metrics", metrics);
+
+        } catch (Exception e) {
+            log.debug("Failed to record batch update metrics: {}", e.getMessage());
         }
     }
 

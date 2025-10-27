@@ -6,8 +6,10 @@ import io.github.sachinnimbal.crudx.core.config.CrudXProperties;
 import io.github.sachinnimbal.crudx.core.exception.DuplicateEntityException;
 import io.github.sachinnimbal.crudx.core.exception.EntityNotFoundException;
 import io.github.sachinnimbal.crudx.core.model.CrudXMongoEntity;
+import io.github.sachinnimbal.crudx.core.performance.CrudXBatchMetricsTracker;
 import io.github.sachinnimbal.crudx.core.response.BatchResult;
 import io.github.sachinnimbal.crudx.service.CrudXService;
+import io.github.sachinnimbal.crudx.service.bulkImpl.CrudXMongoBulkOperations;
 import jakarta.annotation.PostConstruct;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
@@ -113,104 +115,37 @@ public abstract class CrudXMongoService<T extends CrudXMongoEntity<ID>, ID exten
         log.info("🚀 ULTRA-OPTIMIZED MongoDB batch: {} entities (skipDuplicates: {})",
                 totalSize, skipDuplicates);
 
-        // 🔥 CRITICAL: Use SMALLER batch size for MongoDB (no JDBC batching)
-        int batchSize = Math.min(50, crudxProperties.getBatchSize());
+        // 🔥 CRITICAL: Initialize metrics tracker (optional, can be null)
+        CrudXBatchMetricsTracker metricsTracker = new CrudXBatchMetricsTracker();
 
-        // 🔥 OPTIMIZATION: Counter-based tracking (NO result collection)
-        int successCount = 0;
-        int skipCount = 0;
-        List<String> skipReasons = new ArrayList<>(Math.min(1000, totalSize / 10));
+        // 🔥 VALIDATION: Check entities and apply onCreate
+        List<T> validatedEntities = new ArrayList<>(totalSize);
 
-        int batchNumber = 0;
-        int totalBatches = (totalSize + batchSize - 1) / batchSize;
-
-        for (int i = 0; i < totalSize; i += batchSize) {
-            batchNumber++;
-            int end = Math.min(i + batchSize, totalSize);
-
-            // 🔥 CRITICAL: Temporary batch list (cleared after each batch)
-            List<T> validEntities = new ArrayList<>(batchSize);
-
-            // Validate and prepare batch
-            for (int j = i; j < end; j++) {
-                T entity = entities.get(j);
-
-                try {
-                    validateUniqueConstraints(entity);
-                    entity.onCreate();
-                    validEntities.add(entity);
-
-                } catch (DuplicateEntityException e) {
-                    if (skipDuplicates) {
-                        skipCount++;
-                        if (skipReasons.size() < 1000) {
-                            skipReasons.add(String.format("Index %d: %s", j, e.getMessage()));
-                        }
-                    } else {
-                        log.error("Duplicate at index {} - aborting batch", j);
-                        throw e;
-                    }
-                } catch (Exception e) {
-                    if (skipDuplicates) {
-                        skipCount++;
-                        if (skipReasons.size() < 1000) {
-                            skipReasons.add(String.format("Index %d: %s", j, e.getMessage()));
-                        }
-                    } else {
-                        throw e;
-                    }
+        for (T entity : entities) {
+            try {
+                // Validate unique constraints
+                validateUniqueConstraints(entity);
+                entity.onCreate();
+                validatedEntities.add(entity);
+                metricsTracker.incrementSuccess();
+            } catch (Exception e) {
+                if (!skipDuplicates) {
+                    log.error("Validation failed at entity - aborting batch: {}", e.getMessage());
+                    throw e;
                 }
-
-                // 🔥 NULL OUT processed entity to free memory
-                entities.set(j, null);
-            }
-
-            // Insert batch
-            if (!validEntities.isEmpty()) {
-                try {
-                    mongoTemplate.insertAll(validEntities);
-                    successCount += validEntities.size();
-                } catch (Exception e) {
-                    log.error("MongoDB batch insert failed: {}", e.getMessage());
-
-                    if (!skipDuplicates) {
-                        throw e;
-                    }
-
-                    // Fallback: Insert one by one
-                    for (T entity : validEntities) {
-                        try {
-                            mongoTemplate.save(entity);
-                            successCount++;
-                        } catch (Exception ex) {
-                            skipCount++;
-                            if (skipReasons.size() < 1000) {
-                                skipReasons.add("Batch insert fallback: " + ex.getMessage());
-                            }
-                        }
-                    }
-                }
-            }
-
-            // 🔥 CRITICAL: Clear batch immediately
-            validEntities.clear();
-
-            // 🔥 Memory cleanup hint every 100 batches
-            if (batchNumber % 100 == 0) {
-                System.gc();
-            }
-
-            // Progress logging
-            if (batchNumber % 20 == 0 || batchNumber == totalBatches) {
-                long currentMemory = (Runtime.getRuntime().totalMemory() -
-                        Runtime.getRuntime().freeMemory()) / 1024 / 1024;
-                log.info("📊 MongoDB Progress: {}/{} batches | Success: {} | Skipped: {} | Memory: {} MB",
-                        batchNumber, totalBatches, successCount, skipCount, currentMemory);
+                metricsTracker.incrementFailed();
+                log.debug("Skipping invalid entity: {}", e.getMessage());
             }
         }
 
-        // 🔥 CRITICAL: Clear input list
-        entities.clear();
+        // 🔥 USE OPTIMIZED BULK OPERATIONS
+        int successCount = CrudXMongoBulkOperations.bulkInsert(
+                validatedEntities,
+                mongoTemplate,
+                entityClass,
+                skipDuplicates,
+                metricsTracker
+        );
 
         long totalDuration = System.currentTimeMillis() - startTime;
         double recordsPerSecond = (successCount * 1000.0) / totalDuration;
@@ -219,7 +154,7 @@ public abstract class CrudXMongoService<T extends CrudXMongoEntity<ID>, ID exten
                 Runtime.getRuntime().freeMemory()) / 1024 / 1024;
 
         log.info("✅ MongoDB batch completed:");
-        log.info("   📈 Created: {} | Skipped: {}", successCount, skipCount);
+        log.info("   📈 Created: {} | Skipped: {}", successCount, metricsTracker.getFailedCount());
         log.info("   ⚡ Speed: {} records/sec", String.format("%.0f", recordsPerSecond));
         log.info("   ⏱️  Time: {} ms", totalDuration);
         log.info("   💾 Final Memory: {} MB", finalMemory);
@@ -227,8 +162,7 @@ public abstract class CrudXMongoService<T extends CrudXMongoEntity<ID>, ID exten
         // 🔥 CRITICAL: Return lightweight result (NO entity list)
         BatchResult<T> result = new BatchResult<>();
         result.setCreatedEntities(Collections.emptyList()); // ✅ ZERO entities stored
-        result.setSkippedCount(skipCount);
-        result.setSkippedReasons(skipReasons);
+        result.setSkippedCount(metricsTracker.getFailedCount());
 
         return result;
     }

@@ -1,6 +1,7 @@
 package io.github.sachinnimbal.crudx.web;
 
 import io.github.sachinnimbal.crudx.core.dto.metadata.CrudXDTOMetadataReader;
+import io.github.sachinnimbal.crudx.core.performance.CrudXMetricsRegistry;
 import io.github.sachinnimbal.crudx.core.response.ApiResponse;
 import io.github.sachinnimbal.crudx.core.response.CrudxMetadataProperties;
 import io.swagger.v3.oas.annotations.Hidden;
@@ -23,13 +24,116 @@ import java.util.Map;
 @Slf4j
 @RestController
 @RequestMapping("${crudx.performance.dashboard-path:/crudx/performance}")
-@ConditionalOnProperty(prefix = "crudx.performance", name = "enabled", havingValue = "true")
+@ConditionalOnProperty(prefix = "crudx.performance", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class CrudXPerformanceController {
 
     @Autowired
     private CrudxMetadataProperties metadataProperties;
+
     @Autowired(required = false)
     private CrudXDTOMetadataReader dtoMetadataReader;
+
+    @Autowired
+    private CrudXMetricsRegistry metricsRegistry;
+
+    /**
+     * 🔥 NEW: Full Performance Report Endpoint
+     * Returns comprehensive performance metrics for all endpoints
+     */
+    @Hidden
+    @GetMapping("/full")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> getFullPerformanceReport() {
+        long startTime = System.currentTimeMillis();
+
+        try {
+            Map<String, Object> fullReport = metricsRegistry.getFullPerformanceReport();
+
+            long executionTime = System.currentTimeMillis() - startTime;
+
+            return ResponseEntity.ok(ApiResponse.success(
+                    fullReport,
+                    "Full performance report retrieved successfully",
+                    executionTime
+            ));
+
+        } catch (Exception e) {
+            log.error("Failed to generate performance report", e);
+            long executionTime = System.currentTimeMillis() - startTime;
+            return ResponseEntity.internalServerError().body(
+                    ApiResponse.error(
+                            "Failed to generate performance report: " + e.getMessage(),
+                            org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR,
+                            executionTime
+                    )
+            );
+        }
+    }
+
+    /**
+     * Get metrics for a specific endpoint
+     */
+    @Hidden
+    @GetMapping("/endpoint")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> getEndpointMetrics(
+            @org.springframework.web.bind.annotation.RequestParam String endpoint) {
+
+        long startTime = System.currentTimeMillis();
+
+        var metricsOpt = metricsRegistry.getMetrics(endpoint);
+
+        if (metricsOpt.isEmpty()) {
+            long executionTime = System.currentTimeMillis() - startTime;
+            return ResponseEntity.ok(ApiResponse.error(
+                    "No metrics found for endpoint: " + endpoint,
+                    org.springframework.http.HttpStatus.NOT_FOUND,
+                    executionTime
+            ));
+        }
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("endpoint", endpoint);
+        response.put("metrics", metricsOpt.get());
+
+        long executionTime = System.currentTimeMillis() - startTime;
+
+        return ResponseEntity.ok(ApiResponse.success(
+                response,
+                "Endpoint metrics retrieved successfully",
+                executionTime
+        ));
+    }
+
+    /**
+     * Clear all performance metrics
+     */
+    @Hidden
+    @GetMapping("/clear")
+    public ResponseEntity<ApiResponse<String>> clearAllMetrics() {
+        long startTime = System.currentTimeMillis();
+
+        try {
+            metricsRegistry.clearAll();
+
+            long executionTime = System.currentTimeMillis() - startTime;
+
+            return ResponseEntity.ok(ApiResponse.success(
+                    "All metrics cleared",
+                    "Performance metrics reset successfully",
+                    executionTime
+            ));
+
+        } catch (Exception e) {
+            log.error("Failed to clear metrics", e);
+            long executionTime = System.currentTimeMillis() - startTime;
+            return ResponseEntity.internalServerError().body(
+                    ApiResponse.error(
+                            "Failed to clear metrics: " + e.getMessage(),
+                            org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR,
+                            executionTime
+                    )
+            );
+        }
+    }
 
     @Hidden
     @GetMapping("/metadata")
