@@ -104,29 +104,14 @@ public abstract class CrudXMongoService<T extends CrudXMongoEntity<ID>, ID exten
         return saved;
     }
 
-    /**
-     * 🔥 ULTRA-OPTIMIZED: Zero-memory batch creation for MongoDB
-     * Memory: ~30-50MB for 100K records (vs 1.5GB before)
-     *
-     * Key Optimizations:
-     * 1. NO entity collection in result
-     * 2. Streaming validation and insertion
-     * 3. Aggressive memory cleanup
-     * 4. Counter-based tracking only
-     */
     @Override
     @Transactional(timeout = 1800)
     public BatchResult<T> createBatch(List<T> entities, boolean skipDuplicates) {
         long startTime = System.currentTimeMillis();
         int totalSize = entities.size();
 
-        log.info("🚀 ULTRA-OPTIMIZED MongoDB batch: {} entities (skipDuplicates: {})",
-                totalSize, skipDuplicates);
-
-        // 🔥 CRITICAL: Use smaller batch size for MongoDB (no JDBC batching)
+        log.info(" Starting batch creation: {} entities", totalSize);
         int batchSize = Math.min(50, crudxProperties.getBatchSize());
-
-        // 🔥 OPTIMIZATION: Counters only, NO result collection
         int successCount = 0;
         int skipCount = 0;
         List<String> skipReasons = new ArrayList<>(Math.min(1000, totalSize / 10));
@@ -137,11 +122,7 @@ public abstract class CrudXMongoService<T extends CrudXMongoEntity<ID>, ID exten
         for (int i = 0; i < totalSize; i += batchSize) {
             batchNumber++;
             int end = Math.min(i + batchSize, totalSize);
-
-            // 🔥 CRITICAL: Temporary batch list (cleared after each batch)
             List<T> validEntities = new ArrayList<>(batchSize);
-
-            // Validate and prepare batch
             for (int j = i; j < end; j++) {
                 T entity = entities.get(j);
 
@@ -171,11 +152,9 @@ public abstract class CrudXMongoService<T extends CrudXMongoEntity<ID>, ID exten
                     }
                 }
 
-                // 🔥 NULL OUT processed entity to free memory
                 entities.set(j, null);
             }
 
-            // Insert batch
             if (!validEntities.isEmpty()) {
                 try {
                     mongoTemplate.insertAll(validEntities);
@@ -187,7 +166,6 @@ public abstract class CrudXMongoService<T extends CrudXMongoEntity<ID>, ID exten
                         throw e;
                     }
 
-                    // Fallback: Insert one by one
                     for (T entity : validEntities) {
                         try {
                             mongoTemplate.save(entity);
@@ -202,15 +180,11 @@ public abstract class CrudXMongoService<T extends CrudXMongoEntity<ID>, ID exten
                 }
             }
 
-            // 🔥 CRITICAL: Clear batch immediately
             validEntities.clear();
 
-            // 🔥 Memory cleanup hint every 100 batches
             if (batchNumber % 100 == 0) {
                 System.gc();
             }
-
-            // Progress logging
             if (batchNumber % 20 == 0 || batchNumber == totalBatches) {
                 long currentMemory = (Runtime.getRuntime().totalMemory() -
                         Runtime.getRuntime().freeMemory()) / 1024 / 1024;
@@ -222,21 +196,10 @@ public abstract class CrudXMongoService<T extends CrudXMongoEntity<ID>, ID exten
         // 🔥 CRITICAL: Clear input list
         entities.clear();
 
-        long totalDuration = System.currentTimeMillis() - startTime;
-        double recordsPerSecond = (successCount * 1000.0) / totalDuration;
-
-        long finalMemory = (Runtime.getRuntime().totalMemory() -
-                Runtime.getRuntime().freeMemory()) / 1024 / 1024;
-
-        log.info("✅ MongoDB batch completed:");
-        log.info("   📈 Created: {} | Skipped: {}", successCount, skipCount);
-        log.info("   ⚡ Speed: {} records/sec", String.format("%.0f", recordsPerSecond));
-        log.info("   ⏱️  Time: {} ms", totalDuration);
-        log.info("   💾 Final Memory: {} MB", finalMemory);
-
-        // 🔥 CRITICAL: Return lightweight result (NO entity list)
+        long duration = System.currentTimeMillis() - startTime;
+        log.info("MongoDB entities created | Time taken: {} ms", duration);
         BatchResult<T> result = new BatchResult<>();
-        result.setCreatedEntities(Collections.emptyList()); // ✅ ZERO entities stored
+        result.setCreatedEntities(Collections.emptyList()); // Don't return full entities! only return first 50 entities just like /paged
         result.setSkippedCount(skipCount);
         result.setSkippedReasons(skipReasons);
 
