@@ -17,10 +17,6 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 
-/**
- * Annotation processor that generates a compile-time DTO usage report
- * This runs during compilation and creates a metadata file for runtime tracking
- */
 @AutoService(Processor.class)
 @SupportedAnnotationTypes({
         "io.github.sachinnimbal.crudx.core.dto.annotations.CrudXRequest",

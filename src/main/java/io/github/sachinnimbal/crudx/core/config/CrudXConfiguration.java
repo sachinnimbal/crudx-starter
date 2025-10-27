@@ -111,29 +111,27 @@ public class CrudXConfiguration {
     }
 
     private String buildNoDriverError() {
-        StringBuilder msg = new StringBuilder();
-        msg.append("\n");
-        msg.append(RED + "================================================\n" + RESET);
-        msg.append(RED + BOLD + "     NO DATABASE DRIVER FOUND\n" + RESET);
-        msg.append(RED + "================================================\n" + RESET);
-        msg.append(RED + "No database drivers detected in classpath!\n" + RESET);
-        msg.append("\n");
-        msg.append(YELLOW + "Add at least one database driver dependency:\n" + RESET);
-        msg.append("\n");
-        msg.append(GREEN + "For MySQL:\n" + RESET);
-        msg.append("  Gradle: runtimeOnly 'com.mysql:mysql-connector-j:8.3.0'\n");
-        msg.append("  Maven:  <artifactId>mysql-connector-j</artifactId>\n");
-        msg.append("\n");
-        msg.append(GREEN + "For PostgreSQL:\n" + RESET);
-        msg.append("  Gradle: runtimeOnly 'org.postgresql:postgresql:42.7.3'\n");
-        msg.append("  Maven:  <artifactId>postgresql</artifactId>\n");
-        msg.append("\n");
-        msg.append(GREEN + "For MongoDB:\n" + RESET);
-        msg.append("  Gradle: implementation 'org.springframework.boot:spring-boot-starter-data-mongodb'\n");
-        msg.append("  Maven:  <artifactId>spring-boot-starter-data-mongodb</artifactId>\n");
-        msg.append(RED + "================================================\n" + RESET);
-        msg.append(RED + BOLD + "Application startup aborted.\n" + RESET);
-        return msg.toString();
+        return "\n" +
+                RED + "================================================\n" + RESET +
+                RED + BOLD + "     NO DATABASE DRIVER FOUND\n" + RESET +
+                RED + "================================================\n" + RESET +
+                RED + "No database drivers detected in classpath!\n" + RESET +
+                "\n" +
+                YELLOW + "Add at least one database driver dependency:\n" + RESET +
+                "\n" +
+                GREEN + "For MySQL:\n" + RESET +
+                "  Gradle: runtimeOnly 'com.mysql:mysql-connector-j:8.3.0'\n" +
+                "  Maven:  <artifactId>mysql-connector-j</artifactId>\n" +
+                "\n" +
+                GREEN + "For PostgreSQL:\n" + RESET +
+                "  Gradle: runtimeOnly 'org.postgresql:postgresql:42.7.3'\n" +
+                "  Maven:  <artifactId>postgresql</artifactId>\n" +
+                "\n" +
+                GREEN + "For MongoDB:\n" + RESET +
+                "  Gradle: implementation 'org.springframework.boot:spring-boot-starter-data-mongodb'\n" +
+                "  Maven:  <artifactId>spring-boot-starter-data-mongodb</artifactId>\n" +
+                RED + "================================================\n" + RESET +
+                RED + BOLD + "Application startup aborted.\n" + RESET;
     }
 
     private String buildNoDatabaseConfigError(boolean hasMySQL, boolean hasPostgres, boolean hasMongo) {
@@ -174,48 +172,44 @@ public class CrudXConfiguration {
     }
 
     private String buildSqlDriverMissingError(String url) {
-        StringBuilder msg = new StringBuilder();
-        msg.append("\n");
-        msg.append(RED + "================================================\n" + RESET);
-        msg.append(RED + BOLD + "     SQL DRIVER MISSING\n" + RESET);
-        msg.append(RED + "================================================\n" + RESET);
-        msg.append(RED + "SQL database configured but driver not found!\n" + RESET);
-        msg.append("\n");
-        msg.append(CYAN + "Configured URL: " + maskPassword(url) + "\n" + RESET);
-        msg.append("\n");
-        msg.append(YELLOW + "Add the appropriate SQL driver:\n" + RESET);
-        msg.append("\n");
-        msg.append(GREEN + "For MySQL:\n" + RESET);
-        msg.append("  Gradle: runtimeOnly 'com.mysql:mysql-connector-j:8.3.0'\n");
-        msg.append("\n");
-        msg.append(GREEN + "For PostgreSQL:\n" + RESET);
-        msg.append("  Gradle: runtimeOnly 'org.postgresql:postgresql:42.7.3'\n");
-        msg.append(RED + "================================================\n" + RESET);
-        msg.append(RED + BOLD + "Application startup aborted.\n" + RESET);
-        return msg.toString();
+        return "\n" +
+                RED + "================================================\n" + RESET +
+                RED + BOLD + "     SQL DRIVER MISSING\n" + RESET +
+                RED + "================================================\n" + RESET +
+                RED + "SQL database configured but driver not found!\n" + RESET +
+                "\n" +
+                CYAN + "Configured URL: " + maskPassword(url) + "\n" + RESET +
+                "\n" +
+                YELLOW + "Add the appropriate SQL driver:\n" + RESET +
+                "\n" +
+                GREEN + "For MySQL:\n" + RESET +
+                "  Gradle: runtimeOnly 'com.mysql:mysql-connector-j:8.3.0'\n" +
+                "\n" +
+                GREEN + "For PostgreSQL:\n" + RESET +
+                "  Gradle: runtimeOnly 'org.postgresql:postgresql:42.7.3'\n" +
+                RED + "================================================\n" + RESET +
+                RED + BOLD + "Application startup aborted.\n" + RESET;
     }
 
     private String buildMongoDriverMissingError() {
-        StringBuilder msg = new StringBuilder();
-        msg.append("\n");
-        msg.append(RED + "================================================\n" + RESET);
-        msg.append(RED + BOLD + "     MONGODB DRIVER MISSING\n" + RESET);
-        msg.append(RED + "================================================\n" + RESET);
-        msg.append(RED + "MongoDB configured but driver not found!\n" + RESET);
-        msg.append("\n");
-        msg.append(YELLOW + "Add MongoDB driver:\n" + RESET);
-        msg.append("\n");
-        msg.append(GREEN + "Gradle:\n" + RESET);
-        msg.append("  implementation 'org.springframework.boot:spring-boot-starter-data-mongodb'\n");
-        msg.append("\n");
-        msg.append(GREEN + "Maven:\n" + RESET);
-        msg.append("  <dependency>\n");
-        msg.append("    <groupId>org.springframework.boot</groupId>\n");
-        msg.append("    <artifactId>spring-boot-starter-data-mongodb</artifactId>\n");
-        msg.append("  </dependency>\n");
-        msg.append(RED + "================================================\n" + RESET);
-        msg.append(RED + BOLD + "Application startup aborted.\n" + RESET);
-        return msg.toString();
+        return "\n" +
+                RED + "================================================\n" + RESET +
+                RED + BOLD + "     MONGODB DRIVER MISSING\n" + RESET +
+                RED + "================================================\n" + RESET +
+                RED + "MongoDB configured but driver not found!\n" + RESET +
+                "\n" +
+                YELLOW + "Add MongoDB driver:\n" + RESET +
+                "\n" +
+                GREEN + "Gradle:\n" + RESET +
+                "  implementation 'org.springframework.boot:spring-boot-starter-data-mongodb'\n" +
+                "\n" +
+                GREEN + "Maven:\n" + RESET +
+                "  <dependency>\n" +
+                "    <groupId>org.springframework.boot</groupId>\n" +
+                "    <artifactId>spring-boot-starter-data-mongodb</artifactId>\n" +
+                "  </dependency>\n" +
+                RED + "================================================\n" + RESET +
+                RED + BOLD + "Application startup aborted.\n" + RESET;
     }
 
     private void logInfo(String message) {

@@ -291,7 +291,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             // ✅ FIX: Convert ALL entities at once (streaming)
             List<T> allEntities = new ArrayList<>(totalSize);
             int conversionFailures = 0;
-            List<String> conversionErrors = new ArrayList<>(Math.min(100, totalSize / 10));
+            List<String> conversionErrors = new ArrayList<>(Math.min(1000, totalSize / 10));
 
             log.info("📦 Converting {} DTOs to entities...", totalSize);
 

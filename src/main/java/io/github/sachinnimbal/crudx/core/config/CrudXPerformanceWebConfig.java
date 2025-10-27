@@ -15,10 +15,10 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 public class CrudXPerformanceWebConfig implements WebMvcConfigurer {
 
     private final CrudXPerformanceInterceptor interceptor;
-    private final CrudXPerformanceProperties properties;
+    private final CrudXProperties properties;
 
     public CrudXPerformanceWebConfig(CrudXPerformanceInterceptor interceptor,
-                                     CrudXPerformanceProperties properties) {
+                                     CrudXProperties properties) {
         this.interceptor = interceptor;
         this.properties = properties;
     }
@@ -27,7 +27,7 @@ public class CrudXPerformanceWebConfig implements WebMvcConfigurer {
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(interceptor)
                 .addPathPatterns("/**")
-                .excludePathPatterns(properties.getDashboardPath() + "/**");
+                .excludePathPatterns(properties.getPerformance().getDashboardPath() + "/**");
 
         log.info("CrudX Performance Interceptor registered");
     }

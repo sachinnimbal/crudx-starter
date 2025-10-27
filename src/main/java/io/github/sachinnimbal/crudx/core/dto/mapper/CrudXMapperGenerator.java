@@ -22,16 +22,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 
-/**
- * 🔥 ULTRA-OPTIMIZED Mapper Generator with Streaming Support
- * Memory usage: ~30-50MB for 100K records (vs 1.5GB before)
- * <p>
- * Key Optimizations:
- * 1. Zero-copy streaming architecture
- * 2. Object pooling for hot paths
- * 3. Aggressive cache warming
- * 4. Compiled method handles (zero reflection)
- */
 @Slf4j
 @Component
 public class CrudXMapperGenerator {

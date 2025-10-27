@@ -1,6 +1,6 @@
 package io.github.sachinnimbal.crudx.core.metrics;
 
-import io.github.sachinnimbal.crudx.core.config.CrudXPerformanceProperties;
+import io.github.sachinnimbal.crudx.core.config.CrudXProperties;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -18,23 +18,25 @@ import static io.github.sachinnimbal.crudx.core.util.TimeUtils.formatExecutionTi
 @ConditionalOnProperty(prefix = "crudx.performance", name = "enabled", havingValue = "true")
 public class CrudXPerformanceTracker {
 
-    private final CrudXPerformanceProperties properties;
+    private final CrudXProperties properties;
     private final Deque<PerformanceMetric> metrics;
     private final LocalDateTime startTime;
     private final Runtime runtime;
 
-    public CrudXPerformanceTracker(CrudXPerformanceProperties properties) {
+    public CrudXPerformanceTracker(CrudXProperties properties) {
         this.properties = properties;
         this.metrics = new ConcurrentLinkedDeque<>();
         this.startTime = LocalDateTime.now();
         this.runtime = Runtime.getRuntime();
 
+        CrudXProperties.Performance perf = properties.getPerformance();
+
         log.info("CrudX Performance Monitoring ENABLED");
-        log.info("Dashboard: {}", properties.isDashboardEnabled() ?
-                "Enabled at " + properties.getDashboardPath() : "Disabled");
-        log.info("Memory Tracking: {}", properties.isTrackMemory() ? "Enabled" : "Disabled");
-        log.info("Max Stored Metrics: {}", properties.getMaxStoredMetrics());
-        log.info("Retention Period: {} minutes", properties.getRetentionMinutes());
+        log.info("Dashboard: {}", perf.isDashboardEnabled() ?
+                "Enabled at " + perf.getDashboardPath() : "Disabled");
+        log.info("Memory Tracking: {}", perf.isTrackMemory() ? "Enabled" : "Disabled");
+        log.info("Max Stored Metrics: {}", perf.getMaxStoredMetrics());
+        log.info("Retention Period: {} minutes", perf.getRetentionMinutes());
     }
 
     public void recordMetric(String endpoint, String method, String entityName,
@@ -64,7 +66,7 @@ public class CrudXPerformanceTracker {
 
         metrics.addLast(metric);
 
-        while (metrics.size() > properties.getMaxStoredMetrics()) {
+        while (metrics.size() > properties.getPerformance().getMaxStoredMetrics()) {
             metrics.removeFirst();
         }
     }
@@ -280,7 +282,7 @@ public class CrudXPerformanceTracker {
 
     @Scheduled(fixedRate = 300000) // 5 minutes
     public void cleanupOldMetrics() {
-        LocalDateTime cutoffTime = LocalDateTime.now().minusMinutes(properties.getRetentionMinutes());
+        LocalDateTime cutoffTime = LocalDateTime.now().minusMinutes((properties.getPerformance().getRetentionMinutes()));
 
         int removed = 0;
         while (!metrics.isEmpty()) {

@@ -7,7 +7,7 @@ import org.springframework.context.annotation.Configuration;
 
 @Configuration
 @ConditionalOnProperty(prefix = "crudx.performance", name = "enabled", havingValue = "true")
-@EnableConfigurationProperties(CrudXPerformanceProperties.class)
+@EnableConfigurationProperties(CrudXProperties.class)
 @ComponentScan(basePackages = {
         "io.github.sachinnimbal.crudx.core.metrics",
         "io.github.sachinnimbal.crudx.core.interceptor"

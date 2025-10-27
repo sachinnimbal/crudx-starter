@@ -13,7 +13,7 @@ import org.springframework.context.annotation.Import;
 @Slf4j
 @Configuration
 @ConditionalOnProperty(prefix = "crudx.dto", name = "enabled", havingValue = "true", matchIfMissing = true)
-@EnableConfigurationProperties(CrudXDTOProperties.class)
+@EnableConfigurationProperties(CrudXProperties.class)
 @ComponentScan(basePackages = "io.github.sachinnimbal.crudx.core.dto")
 @Import({
         CrudXMapperRegistry.class,

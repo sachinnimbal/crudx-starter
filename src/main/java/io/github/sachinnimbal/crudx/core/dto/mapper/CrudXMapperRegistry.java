@@ -1,5 +1,6 @@
 package io.github.sachinnimbal.crudx.core.dto.mapper;
 
+import io.github.sachinnimbal.crudx.core.config.CrudXProperties;
 import io.github.sachinnimbal.crudx.core.dto.annotations.CrudXRequest;
 import io.github.sachinnimbal.crudx.core.dto.annotations.CrudXResponse;
 import io.github.sachinnimbal.crudx.core.enums.CrudXOperation;
@@ -27,6 +28,9 @@ public class CrudXMapperRegistry {
     @Autowired
     private Environment environment;
 
+    @Autowired
+    private CrudXProperties properties;
+
     // entityClass -> operation -> requestDtoClass
     private final Map<Class<?>, Map<CrudXOperation, Class<?>>> requestMappings = new ConcurrentHashMap<>();
 
@@ -49,7 +53,7 @@ public class CrudXMapperRegistry {
         log.info("🔍 CrudX DTO Registry - Starting initialization...");
 
         // Get scan packages from properties
-        String scanPackages = environment.getProperty("crudx.dto.scan-packages", "");
+        String scanPackages = properties.getDto().getScanPackages();
 
         if (scanPackages.isEmpty()) {
             log.warn("⚠️  No scan packages configured. Set 'crudx.dto.scan-packages' property.");

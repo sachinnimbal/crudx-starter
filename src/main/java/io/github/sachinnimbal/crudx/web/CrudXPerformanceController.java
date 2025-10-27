@@ -1,6 +1,6 @@
 package io.github.sachinnimbal.crudx.web;
 
-import io.github.sachinnimbal.crudx.core.config.CrudXPerformanceProperties;
+import io.github.sachinnimbal.crudx.core.config.CrudXProperties;
 import io.github.sachinnimbal.crudx.core.dto.metadata.CrudXDTOMetadataReader;
 import io.github.sachinnimbal.crudx.core.metrics.CrudXPerformanceTracker;
 import io.github.sachinnimbal.crudx.core.metrics.PerformanceMetric;
@@ -36,13 +36,13 @@ import java.util.Map;
 public class CrudXPerformanceController {
 
     private final CrudXPerformanceTracker tracker;
-    private final CrudXPerformanceProperties properties;
+    private final CrudXProperties properties;
     @Autowired
     private CrudxMetadataProperties metadataProperties;
     @Autowired(required = false)
     private CrudXDTOMetadataReader dtoMetadataReader;
 
-    public CrudXPerformanceController(CrudXPerformanceTracker tracker, CrudXPerformanceProperties properties) {
+    public CrudXPerformanceController(CrudXPerformanceTracker tracker, CrudXProperties properties) {
         this.tracker = tracker;
         this.properties = properties;
     }
@@ -93,7 +93,7 @@ public class CrudXPerformanceController {
         String html = new String(resource.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
 
         // Replace placeholder with actual API path
-        html = html.replace("${API_BASE}", properties.getDashboardPath());
+        html = html.replace("${API_BASE}", properties.getPerformance().getDashboardPath());
 
         return ResponseEntity.ok()
                 .contentType(MediaType.TEXT_HTML)
@@ -127,7 +127,7 @@ public class CrudXPerformanceController {
         String html = new String(resource.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
 
         // Replace placeholders
-        html = html.replace("${API_BASE}", properties.getDashboardPath());
+        html = html.replace("${API_BASE}", properties.getPerformance().getDashboardPath());
 
         return ResponseEntity.ok()
                 .contentType(MediaType.TEXT_HTML)
@@ -141,7 +141,7 @@ public class CrudXPerformanceController {
         String html = new String(resource.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
 
         // Replace placeholder with actual API path if needed
-        html = html.replace("${API_BASE}", properties.getDashboardPath());
+        html = html.replace("${API_BASE}", properties.getPerformance().getDashboardPath());
 
         return ResponseEntity.ok()
                 .contentType(MediaType.TEXT_HTML)
