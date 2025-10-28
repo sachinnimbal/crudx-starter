@@ -112,7 +112,15 @@ public class CrudXSwaggerDTOCustomizer implements OperationCustomizer {
 
         Schema<?> schema;
 
-        if ("updateBatch".equals(methodName)) {
+        // Handle DELETE batch operations - only array of IDs
+        if (crudOperation == CrudXOperation.BATCH_DELETE) {
+            Schema<?> idSchema = determineIdSchema(entityClass);
+            ArraySchema arraySchema = new ArraySchema();
+            arraySchema.setItems(idSchema);
+            arraySchema.setDescription("Array of entity IDs to delete");
+            schema = arraySchema;
+        } else if ("updateBatch".equals(methodName)) {
+            // Handle updateBatch specially (Map<ID, UpdateData>)
             Schema<?> valueSchema = generateCompleteSchema(schemaClass, entityClass,
                     new HashSet<>(), 0, excludeAudit, excludeImmutable, excludeId, true, crudOperation);
 
@@ -127,6 +135,7 @@ public class CrudXSwaggerDTOCustomizer implements OperationCustomizer {
 
             schema = mapSchema;
         } else if (isBatchOperation(methodName)) {
+            // Array of objects for other batch operations (createBatch)
             Schema<?> itemSchema = generateCompleteSchema(schemaClass, entityClass,
                     new HashSet<>(), 0, excludeAudit, excludeImmutable, excludeId, true, crudOperation);
 
@@ -135,6 +144,7 @@ public class CrudXSwaggerDTOCustomizer implements OperationCustomizer {
 
             schema = arraySchema;
         } else {
+            // Single object
             schema = generateCompleteSchema(schemaClass, entityClass,
                     new HashSet<>(), 0, excludeAudit, excludeImmutable, excludeId, true, crudOperation);
         }
@@ -622,5 +632,26 @@ public class CrudXSwaggerDTOCustomizer implements OperationCustomizer {
 
     private boolean isGetAllOperation(String methodName) {
         return "getAll".equals(methodName) || "getPaged".equals(methodName);
+    }
+
+    private Schema<?> determineIdSchema(Class<?> entityClass) {
+        Field idField = findFieldInHierarchy(entityClass, "id");
+
+        if (idField != null) {
+            Class<?> idType = idField.getType();
+
+            if (idType == Long.class || idType == long.class) {
+                return new Schema<>().type("integer").format("int64");
+            } else if (idType == Integer.class || idType == int.class) {
+                return new Schema<>().type("integer").format("int32");
+            } else if (idType == String.class) {
+                return new Schema<>().type("string");
+            } else if (idType == java.util.UUID.class) {
+                return new Schema<>().type("string").format("uuid");
+            }
+        }
+
+        // Default to string if ID type cannot be determined
+        return new Schema<>().type("string");
     }
 }

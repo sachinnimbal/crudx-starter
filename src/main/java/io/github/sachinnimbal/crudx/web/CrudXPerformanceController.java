@@ -182,45 +182,4 @@ public class CrudXPerformanceController {
         return ResponseEntity.ok(ApiResponse.success(response,
                 "DTO metadata retrieved successfully"));
     }
-
-    @GetMapping("/test-dto-tracking")
-    public ResponseEntity<ApiResponse<?>> testDtoTracking() {
-        long start = System.currentTimeMillis();
-
-        try {
-            // Simulate DTO conversion work
-            long dtoStart = System.nanoTime();
-
-            // Simulate some DTO conversion work (e.g., 5-10ms)
-            Thread.sleep(5);
-
-            long dtoConversionMs = (System.nanoTime() - dtoStart) / 1_000_000;
-
-            // Set request attributes to simulate DTO usage
-            ServletRequestAttributes attrs = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
-            if (attrs != null) {
-                HttpServletRequest request = attrs.getRequest();
-                request.setAttribute("dtoConversionTime", dtoConversionMs);
-                request.setAttribute("dtoUsed", true);
-
-                log.info("✓ Test DTO tracking set: {} ms", dtoConversionMs);
-            }
-
-            Map<String, Object> result = new HashMap<>();
-            result.put("message", "DTO tracking test");
-            result.put("dtoConversionTimeMs", dtoConversionMs);
-            result.put("dtoUsed", true);
-
-            long executionTime = System.currentTimeMillis() - start;
-
-            return ResponseEntity.ok(ApiResponse.success(result,
-                    "Test completed - check performance metrics", executionTime));
-
-        } catch (Exception e) {
-            long executionTime = System.currentTimeMillis() - start;
-            log.error("Test failed: {} | Time taken: {} ms",
-                    e.getMessage(), executionTime, e);
-            throw new RuntimeException("Test failed: " + e.getMessage(), e);
-        }
-    }
 }
