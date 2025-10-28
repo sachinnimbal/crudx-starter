@@ -44,8 +44,6 @@ public class CrudXDTOProcessor extends AbstractProcessor {
         this.filer = processingEnv.getFiler();
         this.elementUtils = processingEnv.getElementUtils();
         this.typeUtils = processingEnv.getTypeUtils();
-
-        logInfo("🚀 CrudX DTO Processor - Enhanced Edition");
     }
 
     @Override
@@ -54,6 +52,12 @@ public class CrudXDTOProcessor extends AbstractProcessor {
             return false;
         }
 
+        int dtoCount = roundEnv.getElementsAnnotatedWith(CrudXRequest.class).size() +
+                roundEnv.getElementsAnnotatedWith(CrudXResponse.class).size();
+        if (dtoCount == 0) {
+            return false;
+        }
+        logInfo("🚀 CrudX DTO Processor - Processing " + dtoCount + " DTOs");
         try {
             collectRequestDTOs(roundEnv);
             collectResponseDTOs(roundEnv);
@@ -66,7 +70,6 @@ public class CrudXDTOProcessor extends AbstractProcessor {
         } catch (Exception e) {
             error("Critical error during processing: " + e.getMessage());
         }
-
         return false;
     }
 

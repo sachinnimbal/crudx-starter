@@ -58,13 +58,14 @@ public class CrudXSwaggerConfiguration {
     }
 
     @Bean
-    @ConditionalOnClass(name = "io.github.sachinnimbal.crudx.core.dto.mapper.CrudXMapperRegistry")
     public OperationCustomizer crudxDtoSchemaCustomizer() {
         if (dtoRegistry != null) {
-            log.info("✓ Swagger DTO schema customization enabled");
-            return new io.github.sachinnimbal.crudx.core.config.CrudXSwaggerDTOCustomizer(dtoRegistry);
+            log.info("✓ Swagger schema customization enabled (with DTO support)");
+        } else {
+            log.info("✓ Swagger schema customization enabled (entity-only mode)");
         }
-        return (operation, handlerMethod) -> operation; // No-op if DTOs not enabled
+
+        return new CrudXSwaggerDTOCustomizer(dtoRegistry);
     }
 
     private String getServerUrl() {

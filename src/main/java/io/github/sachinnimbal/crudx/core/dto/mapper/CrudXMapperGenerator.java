@@ -3,6 +3,7 @@ package io.github.sachinnimbal.crudx.core.dto.mapper;
 import io.github.sachinnimbal.crudx.core.dto.annotations.CrudXField;
 import io.github.sachinnimbal.crudx.core.dto.annotations.CrudXNested;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.lang.invoke.MethodHandle;
@@ -24,6 +25,7 @@ import java.util.function.Function;
 
 @Slf4j
 @Component
+@ConditionalOnProperty(prefix = "crudx.dto", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class CrudXMapperGenerator {
 
     private static final MethodHandles.Lookup LOOKUP = MethodHandles.lookup();

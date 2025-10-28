@@ -66,7 +66,6 @@ public class CrudXDTOCompileTimeTracker extends AbstractProcessor {
             }
         }
 
-        // Generate metadata file
         if (!dtoMetadata.isEmpty()) {
             generateMetadataFile();
             processed = true;
@@ -131,7 +130,7 @@ public class CrudXDTOCompileTimeTracker extends AbstractProcessor {
 
             processingEnv.getMessager().printMessage(
                     Diagnostic.Kind.NOTE,
-                    "✓ Generated CrudX DTO metadata for " + dtoMetadata.size() + " entities"
+                    "✓ CrudX: Generated DTO metadata for " + dtoMetadata.size() + " entities"
             );
 
         } catch (IOException e) {

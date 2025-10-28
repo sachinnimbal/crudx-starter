@@ -2,6 +2,7 @@ package io.github.sachinnimbal.crudx.core.dto.metadata;
 
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -14,6 +15,7 @@ import java.util.*;
  */
 @Slf4j
 @Component
+@ConditionalOnProperty(prefix = "crudx.dto", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class CrudXDTOMetadataReader {
 
     private final Map<String, EntityDTOInfo> metadata = new LinkedHashMap<>();

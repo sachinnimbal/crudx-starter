@@ -3,6 +3,7 @@ package io.github.sachinnimbal.crudx.core.config;
 import io.github.sachinnimbal.crudx.core.dto.annotations.CrudXRequest;
 import io.github.sachinnimbal.crudx.core.dto.mapper.CrudXMapperRegistry;
 import io.github.sachinnimbal.crudx.core.enums.CrudXOperation;
+import io.github.sachinnimbal.crudx.core.model.CrudXAudit;
 import io.swagger.v3.oas.models.Operation;
 import io.swagger.v3.oas.models.media.ArraySchema;
 import io.swagger.v3.oas.models.media.Content;
@@ -26,11 +27,17 @@ public class CrudXSwaggerDTOCustomizer implements OperationCustomizer {
     private final CrudXMapperRegistry dtoRegistry;
     private static final int MAX_DEPTH = 5;
 
-    // Define audit fields that can be user-provided
-    private static final Set<String> USER_PROVIDABLE_AUDIT_FIELDS = Set.of("createdBy", "updatedBy");
+    // For CREATE operations: ONLY createdBy can be provided
+    private static final Set<String> CREATE_PROVIDABLE_AUDIT_FIELDS = Set.of("createdBy");
 
-    // Define audit fields that are system-managed
+    // For UPDATE operations: ONLY updatedBy can be changed
+    private static final Set<String> UPDATE_PROVIDABLE_AUDIT_FIELDS = Set.of("updatedBy");
+
+    // System-managed fields (never user-provided)
     private static final Set<String> SYSTEM_AUDIT_FIELDS = Set.of("createdAt", "updatedAt");
+
+    // All audit fields for reference
+    private static final Set<String> ALL_AUDIT_FIELDS = Set.of("createdBy", "updatedBy", "createdAt", "updatedAt");
 
     public CrudXSwaggerDTOCustomizer(CrudXMapperRegistry dtoRegistry) {
         this.dtoRegistry = dtoRegistry;
@@ -45,11 +52,6 @@ public class CrudXSwaggerDTOCustomizer implements OperationCustomizer {
         if (entityClass == null) {
             return operation;
         }
-
-        log.debug("Customizing Swagger for {}.{} (entity: {})",
-                handlerMethod.getBeanType().getSimpleName(),
-                methodName,
-                entityClass.getSimpleName());
 
         CrudXOperation crudOperation = detectOperation(methodName);
 
@@ -78,44 +80,63 @@ public class CrudXSwaggerDTOCustomizer implements OperationCustomizer {
                 dtoRegistry.getRequestDTO(entityClass, crudOperation) : Optional.empty();
 
         Class<?> schemaClass = requestDtoClass.orElse(entityClass);
-        boolean usingDto = requestDtoClass.isPresent();
 
-        // 🔧 Get annotation from the ACTUAL DTO class (or entity if no DTO)
+        // Determine filtering rules based on annotation or operation type
         CrudXRequest annotation = schemaClass.getAnnotation(CrudXRequest.class);
 
-        // Determine filtering flags
         boolean excludeAudit;
         boolean excludeImmutable;
+        boolean excludeId;
 
         if (annotation != null) {
-            // Use explicit annotation values
+            // User explicitly configured via @CrudXRequest annotation
             excludeAudit = annotation.excludeAudit();
             excludeImmutable = annotation.excludeImmutable();
-            log.debug("✓ Request DTO annotation found: excludeAudit={}, excludeImmutable={}",
-                    excludeAudit, excludeImmutable);
+            excludeId = annotation.excludeImmutable();
         } else {
-            // Default behavior when no annotation (using entity directly)
-            excludeAudit = false;  // Show all fields by default
-            excludeImmutable = false;
-            log.debug("✓ No @CrudXRequest annotation, using defaults: excludeAudit=false, excludeImmutable=false");
+            // Default CrudX behavior based on operation
+            if (crudOperation == CrudXOperation.CREATE || crudOperation == CrudXOperation.BATCH_CREATE) {
+                excludeAudit = false;
+                excludeImmutable = true;
+                excludeId = true;
+            } else if (crudOperation == CrudXOperation.UPDATE || crudOperation == CrudXOperation.BATCH_UPDATE) {
+                excludeAudit = false;
+                excludeImmutable = true;
+                excludeId = true;
+            } else {
+                excludeAudit = false;
+                excludeImmutable = false;
+                excludeId = false;
+            }
         }
 
-        log.debug("✓ Using {} schema: {} for {} (excludeAudit={}, excludeImmutable={})",
-                usingDto ? "Request DTO" : "Entity",
-                schemaClass.getSimpleName(),
-                crudOperation,
-                excludeAudit,
-                excludeImmutable);
-
-        // Generate schema with filtering
         Schema<?> schema;
-        if (isBatchOperation(methodName)) {
-            schema = new ArraySchema().items(
-                    generateCompleteSchema(schemaClass, entityClass, new HashSet<>(), 0,
-                            excludeAudit, excludeImmutable, true));
+
+        if ("updateBatch".equals(methodName)) {
+            Schema<?> valueSchema = generateCompleteSchema(schemaClass, entityClass,
+                    new HashSet<>(), 0, excludeAudit, excludeImmutable, excludeId, true, crudOperation);
+
+            Schema<?> mapSchema = new Schema<>();
+            mapSchema.setType("object");
+
+            Map<String, Schema> properties = new LinkedHashMap<>();
+            properties.put("{entityId}", valueSchema);
+            mapSchema.setProperties(properties);
+
+            mapSchema.setDescription("Map where key is entity ID and value is update data. Replace {entityId} with actual ID.");
+
+            schema = mapSchema;
+        } else if (isBatchOperation(methodName)) {
+            Schema<?> itemSchema = generateCompleteSchema(schemaClass, entityClass,
+                    new HashSet<>(), 0, excludeAudit, excludeImmutable, excludeId, true, crudOperation);
+
+            ArraySchema arraySchema = new ArraySchema();
+            arraySchema.setItems(itemSchema);
+
+            schema = arraySchema;
         } else {
-            schema = generateCompleteSchema(schemaClass, entityClass, new HashSet<>(), 0,
-                    excludeAudit, excludeImmutable, true);
+            schema = generateCompleteSchema(schemaClass, entityClass,
+                    new HashSet<>(), 0, excludeAudit, excludeImmutable, excludeId, true, crudOperation);
         }
 
         mediaType.setSchema(schema);
@@ -129,12 +150,7 @@ public class CrudXSwaggerDTOCustomizer implements OperationCustomizer {
                 dtoRegistry.getResponseDTO(entityClass, crudOperation) : Optional.empty();
 
         Class<?> schemaClass = responseDtoClass.orElse(entityClass);
-        boolean usingDto = responseDtoClass.isPresent();
 
-        log.debug("✓ Using {} schema: {} for {}", usingDto ? "Response DTO" : "Entity",
-                schemaClass.getSimpleName(), crudOperation);
-
-        // Response DTOs don't need audit filtering in schema
         for (Map.Entry<String, ApiResponse> entry : operation.getResponses().entrySet()) {
             String statusCode = entry.getKey();
 
@@ -160,19 +176,32 @@ public class CrudXSwaggerDTOCustomizer implements OperationCustomizer {
         }
     }
 
+    /**
+     * Generates complete schema for a class with comprehensive filtering support.
+     *
+     * @param schemaClass      The class to generate schema for (DTO or Entity)
+     * @param entityClass      The original entity class (for reference when using DTOs)
+     * @param visited          Set of already visited classes (prevents circular references)
+     * @param depth            Current recursion depth (prevents infinite loops)
+     * @param excludeAudit     If true, completely excludes ALL audit fields/objects from schema
+     * @param excludeImmutable If true, excludes immutable fields AND filters audit fields based on operation
+     * @param excludeId        If true, excludes the 'id' field from schema (common for CREATE/UPDATE)
+     * @param isRequest        If true, applies filtering rules; if false, includes all fields (response schemas)
+     * @param operation        The CRUD operation type (CREATE, UPDATE, etc.) - determines which audit fields are allowed
+     * @return Generated OpenAPI Schema object
+     */
     private Schema<?> generateCompleteSchema(Class<?> schemaClass, Class<?> entityClass,
                                              Set<Class<?>> visited, int depth,
                                              boolean excludeAudit, boolean excludeImmutable,
-                                             boolean isRequest) {
+                                             boolean excludeId, boolean isRequest,
+                                             CrudXOperation operation) {
         if (visited.contains(schemaClass)) {
-            log.debug("Circular reference detected for {}, using $ref", schemaClass.getSimpleName());
             Schema<?> refSchema = new Schema<>();
             refSchema.set$ref("#/components/schemas/" + schemaClass.getSimpleName());
             return refSchema;
         }
 
         if (depth > MAX_DEPTH) {
-            log.debug("Maximum depth {} reached for {}, using $ref", MAX_DEPTH, schemaClass.getSimpleName());
             Schema<?> refSchema = new Schema<>();
             refSchema.set$ref("#/components/schemas/" + schemaClass.getSimpleName());
             return refSchema;
@@ -196,40 +225,54 @@ public class CrudXSwaggerDTOCustomizer implements OperationCustomizer {
 
                 String fieldName = field.getName();
 
-                // 🔧 KEY FIX: Only filter if isRequest AND filtering is enabled
-                if (isRequest && excludeAudit && shouldExcludeAuditField(fieldName, entityClass)) {
-                    log.debug("Excluding audit field '{}' from schema (excludeAudit=true)", fieldName);
-                    continue;
-                }
+                // Apply filtering only for request schemas
+                if (isRequest && operation != null) {
 
-                if (isRequest && excludeImmutable && isFieldImmutable(field, entityClass, fieldName)) {
-                    log.debug("Excluding immutable field '{}' from schema (excludeImmutable=true)", fieldName);
-                    continue;
-                }
+                    // RULE 1: Handle 'id' field exclusion
+                    if (excludeId && "id".equals(fieldName)) {
+                        continue;
+                    }
 
-                // 🔧 NEW: Show audit fields from entity when excludeAudit=false
-                if (isRequest && !excludeAudit) {
-                    // Check if this field needs to be fetched from entity's audit object
-                    Field entityField = findFieldInHierarchy(entityClass, fieldName);
-                    if (entityField == null && isAuditFieldName(fieldName)) {
-                        // Field might be in entity's audit object
-                        Field auditField = findFieldInHierarchy(entityClass, "audit");
-                        if (auditField != null) {
-                            Field auditSubField = findFieldInHierarchy(auditField.getType(), fieldName);
-                            if (auditSubField != null) {
-                                log.debug("✓ Including audit field '{}' from entity.audit (excludeAudit=false)",
-                                        fieldName);
-                                Schema<?> fieldSchema = generateFieldSchema(auditSubField, newVisited,
-                                        depth + 1, excludeAudit, excludeImmutable, isRequest);
-                                properties.put(fieldName, fieldSchema);
+                    // RULE 2: Handle 'audit' object (nested CrudXAudit)
+                    if ("audit".equals(fieldName) && isCrudXAuditType(field.getType())) {
+                        if (excludeAudit) {
+                            continue;
+                        } else if (excludeImmutable) {
+                            Schema<?> auditSchema = createOperationSpecificAuditSchema(operation);
+                            if (auditSchema.getProperties() == null || auditSchema.getProperties().isEmpty()) {
+                                continue;
+                            }
+                            properties.put(fieldName, auditSchema);
+                            continue;
+                        }
+                    }
+
+                    // RULE 3: Handle individual audit fields (flat structure)
+                    if (isAuditFieldName(fieldName)) {
+                        if (excludeAudit) {
+                            continue;
+                        } else if (excludeImmutable) {
+                            if (!isAuditFieldAllowedForOperation(fieldName, operation)) {
                                 continue;
                             }
                         }
                     }
+
+                    // RULE 4: Handle @CrudXImmutable annotated fields
+                    if (excludeImmutable && isFieldImmutable(field, entityClass, fieldName)) {
+                        continue;
+                    }
                 }
 
+                // Generate schema for this field
                 Schema<?> fieldSchema = generateFieldSchema(field, newVisited, depth + 1,
-                        excludeAudit, excludeImmutable, isRequest);
+                        excludeAudit, excludeImmutable, excludeId, isRequest, operation);
+
+                // Add description for audit fields if it's a request
+                if (isRequest && isAuditFieldName(fieldName)) {
+                    fieldSchema.setDescription(getAuditFieldDescription(fieldName, operation));
+                }
+
                 properties.put(fieldName, fieldSchema);
             }
 
@@ -237,58 +280,133 @@ public class CrudXSwaggerDTOCustomizer implements OperationCustomizer {
             return schema;
 
         } catch (Exception e) {
-            log.warn("Failed to generate complete schema for {}: {}",
-                    schemaClass.getSimpleName(), e.getMessage());
+            log.warn("Failed to generate complete schema for {}: {}", schemaClass.getSimpleName(), e.getMessage());
             return new Schema<>().type("object").name(schemaClass.getSimpleName());
         }
     }
 
-    private boolean isAuditFieldName(String fieldName) {
-        return USER_PROVIDABLE_AUDIT_FIELDS.contains(fieldName) ||
-                SYSTEM_AUDIT_FIELDS.contains(fieldName);
-    }
-
-    private boolean shouldExcludeAuditField(String fieldName, Class<?> entityClass) {
-        // Never exclude user-providable fields
-        if (USER_PROVIDABLE_AUDIT_FIELDS.contains(fieldName)) {
-            log.debug("Keeping user-providable audit field: {}", fieldName);
+    /**
+     * Check if a field type is CrudXAudit or extends it
+     */
+    private boolean isCrudXAuditType(Class<?> fieldType) {
+        if (fieldType == null) {
             return false;
         }
 
-        // Exclude system-managed fields
-        if (SYSTEM_AUDIT_FIELDS.contains(fieldName)) {
+        if (fieldType.equals(CrudXAudit.class)) {
             return true;
         }
 
-        // Exclude the "audit" object itself if it exists
-        if ("audit".equals(fieldName)) {
-            Field auditField = findFieldInHierarchy(entityClass, "audit");
-            if (auditField != null && isCrudXAuditType(auditField.getType())) {
+        Class<?> superClass = fieldType.getSuperclass();
+        while (superClass != null && superClass != Object.class) {
+            if (superClass.equals(CrudXAudit.class)) {
                 return true;
             }
+            superClass = superClass.getSuperclass();
+        }
+
+        return fieldType.getName().equals("io.github.sachinnimbal.crudx.core.model.CrudXAudit") ||
+                fieldType.getSimpleName().equals("CrudXAudit");
+    }
+
+    /**
+     * Creates audit schema based on the operation type
+     * CREATE -> only createdBy
+     * UPDATE -> only updatedBy
+     */
+    private Schema<?> createOperationSpecificAuditSchema(CrudXOperation operation) {
+        Schema<?> auditSchema = new Schema<>();
+        auditSchema.setType("object");
+
+        Set<String> allowedFields;
+        String description;
+
+        if (operation == CrudXOperation.CREATE || operation == CrudXOperation.BATCH_CREATE) {
+            allowedFields = CREATE_PROVIDABLE_AUDIT_FIELDS;
+            description = "Audit information (only createdBy can be set for creation)";
+        } else if (operation == CrudXOperation.UPDATE || operation == CrudXOperation.BATCH_UPDATE) {
+            allowedFields = UPDATE_PROVIDABLE_AUDIT_FIELDS;
+            description = "Audit information (only updatedBy can be set for updates)";
+        } else {
+            allowedFields = Collections.emptySet();
+            description = "Audit information";
+        }
+
+        auditSchema.setDescription(description);
+
+        Map<String, Schema> auditProps = new LinkedHashMap<>();
+
+        for (String allowedField : allowedFields) {
+            Schema<?> fieldSchema = new Schema<>();
+            fieldSchema.setType("string");
+            fieldSchema.setDescription(getAuditFieldDescription(allowedField, operation));
+            auditProps.put(allowedField, fieldSchema);
+        }
+
+        auditSchema.setProperties(auditProps);
+        return auditSchema;
+    }
+
+    /**
+     * Provides description for audit fields based on operation
+     */
+    private String getAuditFieldDescription(String fieldName, CrudXOperation operation) {
+        return switch (fieldName) {
+            case "createdBy" -> {
+                if (operation == CrudXOperation.CREATE || operation == CrudXOperation.BATCH_CREATE) {
+                    yield "User who is creating the record (optional, can be provided)";
+                }
+                yield "User who created the record";
+            }
+            case "updatedBy" -> {
+                if (operation == CrudXOperation.UPDATE || operation == CrudXOperation.BATCH_UPDATE) {
+                    yield "User who is updating the record (optional, can be provided)";
+                }
+                yield "User who last updated the record";
+            }
+            case "createdAt" -> "Timestamp when the record was created (system-managed, auto-generated)";
+            case "updatedAt" -> "Timestamp when the record was last updated (system-managed, auto-generated)";
+            default -> "Audit field: " + fieldName;
+        };
+    }
+
+    /**
+     * Checks if an audit field is allowed for a specific operation
+     * CREATE -> only createdBy allowed
+     * UPDATE -> only updatedBy allowed
+     * System fields (createdAt, updatedAt) are NEVER allowed in requests
+     */
+    private boolean isAuditFieldAllowedForOperation(String fieldName, CrudXOperation operation) {
+        if (SYSTEM_AUDIT_FIELDS.contains(fieldName)) {
+            return false;
+        }
+
+        if (operation == CrudXOperation.CREATE || operation == CrudXOperation.BATCH_CREATE) {
+            return CREATE_PROVIDABLE_AUDIT_FIELDS.contains(fieldName);
+        } else if (operation == CrudXOperation.UPDATE || operation == CrudXOperation.BATCH_UPDATE) {
+            return UPDATE_PROVIDABLE_AUDIT_FIELDS.contains(fieldName);
         }
 
         return false;
     }
 
-    private boolean isFieldImmutable(Field dtoField, Class<?> entityClass, String fieldName) {
-        // Always exclude 'id' field when excludeImmutable = true
-        if ("id".equals(fieldName)) {
-            return true;
-        }
+    /**
+     * Checks if a field name is an audit field
+     */
+    private boolean isAuditFieldName(String fieldName) {
+        return ALL_AUDIT_FIELDS.contains(fieldName);
+    }
 
-        // Check DTO field for @CrudXImmutable
+    /**
+     * Checks if a field is marked as immutable via @CrudXImmutable annotation
+     */
+    private boolean isFieldImmutable(Field dtoField, Class<?> entityClass, String fieldName) {
         if (hasImmutableAnnotation(dtoField)) {
             return true;
         }
 
-        // Check corresponding entity field
         Field entityField = findFieldInHierarchy(entityClass, fieldName);
-        if (entityField != null && hasImmutableAnnotation(entityField)) {
-            return true;
-        }
-
-        return false;
+        return entityField != null && hasImmutableAnnotation(entityField);
     }
 
     @SuppressWarnings("unchecked")
@@ -315,24 +433,30 @@ public class CrudXSwaggerDTOCustomizer implements OperationCustomizer {
         return null;
     }
 
-    private boolean isCrudXAuditType(Class<?> type) {
-        if (type == null) return false;
-        if (type.getName().endsWith(".CrudXAudit")) return true;
-        return isCrudXAuditType(type.getSuperclass());
-    }
-
     private Schema<?> generateFieldSchema(Field field, Set<Class<?>> visited, int depth,
                                           boolean excludeAudit, boolean excludeImmutable,
-                                          boolean isRequest) {
+                                          boolean excludeId, boolean isRequest,
+                                          CrudXOperation operation) {
         Class<?> fieldType = field.getType();
         Type genericType = field.getGenericType();
+
+        if (isCrudXAuditType(fieldType)) {
+            if (isRequest && operation != null) {
+                if (excludeAudit) {
+                    return new Schema<>().type("object");
+                } else if (excludeImmutable) {
+                    return createOperationSpecificAuditSchema(operation);
+                }
+            }
+            return generateSchemaForType(fieldType, visited, depth, false, false, false, false, null);
+        }
 
         if (Collection.class.isAssignableFrom(fieldType)) {
             if (genericType instanceof ParameterizedType paramType) {
                 Type[] typeArgs = paramType.getActualTypeArguments();
                 if (typeArgs.length > 0 && typeArgs[0] instanceof Class<?> itemClass) {
                     Schema<?> itemSchema = generateSchemaForType(itemClass, visited, depth,
-                            excludeAudit, excludeImmutable, isRequest);
+                            excludeAudit, excludeImmutable, excludeId, isRequest, operation);
                     return new ArraySchema().items(itemSchema);
                 }
             }
@@ -340,14 +464,29 @@ public class CrudXSwaggerDTOCustomizer implements OperationCustomizer {
         }
 
         return generateSchemaForType(fieldType, visited, depth, excludeAudit,
-                excludeImmutable, isRequest);
+                excludeImmutable, excludeId, isRequest, operation);
     }
 
     private Schema<?> generateSchemaForType(Class<?> type, Set<Class<?>> visited, int depth,
                                             boolean excludeAudit, boolean excludeImmutable,
-                                            boolean isRequest) {
+                                            boolean excludeId, boolean isRequest,
+                                            CrudXOperation operation) {
         if (type == null || type == Object.class) {
             return new Schema<>().type("object");
+        }
+
+        if (isCrudXAuditType(type)) {
+            if (isRequest && operation != null) {
+                if (excludeAudit) {
+                    Schema<?> emptySchema = new Schema<>();
+                    emptySchema.setType("object");
+                    emptySchema.setDescription("Audit information excluded for this operation");
+                    return emptySchema;
+                } else if (excludeImmutable) {
+                    return createOperationSpecificAuditSchema(operation);
+                }
+            }
+            return generateCompleteSchema(type, type, visited, depth, false, false, false, false, null);
         }
 
         // Primitive and common types
@@ -388,7 +527,6 @@ public class CrudXSwaggerDTOCustomizer implements OperationCustomizer {
                 (type.getPackage() != null && type.getPackage().getName().startsWith("java."))) {
             return new Schema<>().type("string");
         } else {
-            // Complex nested object
             if (visited.contains(type)) {
                 Schema<?> refSchema = new Schema<>();
                 refSchema.set$ref("#/components/schemas/" + type.getSimpleName());
@@ -401,9 +539,12 @@ public class CrudXSwaggerDTOCustomizer implements OperationCustomizer {
                 return new Schema<>().type("object");
             }
 
-            // 🔧 Don't pass entity class for nested objects - use type itself
+            boolean nestedExcludeAudit = isRequest && excludeAudit;
+            boolean nestedExcludeImmutable = isRequest && excludeImmutable;
+            boolean nestedExcludeId = isRequest && excludeId;
+
             return generateCompleteSchema(type, type, visited, depth,
-                    false, false, false); // Nested objects don't filter
+                    nestedExcludeAudit, nestedExcludeImmutable, nestedExcludeId, isRequest, null);
         }
     }
 
@@ -419,9 +560,8 @@ public class CrudXSwaggerDTOCustomizer implements OperationCustomizer {
         return fields;
     }
 
-    @SuppressWarnings({"rawtypes", "unchecked"})
-    private Schema<?> createApiResponseSchema(Class<?> dataClass, Class<?> entityClass,
-                                              boolean isList) {
+    @SuppressWarnings({"rawtypes"})
+    private Schema<?> createApiResponseSchema(Class<?> dataClass, Class<?> entityClass, boolean isList) {
         Schema<?> apiResponseSchema = new Schema<>();
         apiResponseSchema.setType("object");
 
@@ -429,10 +569,10 @@ public class CrudXSwaggerDTOCustomizer implements OperationCustomizer {
         if (isList) {
             dataSchema = new ArraySchema().items(
                     generateCompleteSchema(dataClass, entityClass, new HashSet<>(), 0,
-                            false, false, false)); // Response never filters
+                            false, false, false, false, null));
         } else {
             dataSchema = generateCompleteSchema(dataClass, entityClass, new HashSet<>(), 0,
-                    false, false, false); // Response never filters
+                    false, false, false, false, null);
         }
 
         Map<String, Schema> properties = new LinkedHashMap<>();
