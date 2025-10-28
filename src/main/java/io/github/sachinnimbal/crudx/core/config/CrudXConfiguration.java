@@ -26,8 +26,7 @@ import org.springframework.data.mongodb.repository.config.EnableMongoRepositorie
         CrudXBannerConfiguration.class,
         CrudXServiceAutoConfiguration.class,
         CrudXGlobalExceptionHandler.class,
-        CrudXPerformanceConfiguration.class,
-        CrudXDTOConfiguration.class
+        CrudXPerformanceConfiguration.class
 })
 public class CrudXConfiguration {
 
@@ -51,6 +50,14 @@ public class CrudXConfiguration {
         logInfo(BOLD + WHITE + "  CRUDX Framework Initialization" + RESET);
         logInfo(GREEN + "  Zero-Boilerplate Service Generation" + RESET);
         logInfo(CYAN + "========================================" + RESET);
+
+        // Show DTO feature status
+        boolean dtoEnabled = environment.getProperty("crudx.dto.enabled", Boolean.class, true);
+        if (dtoEnabled) {
+            logInfo(GREEN + "  ✓ DTO Feature: ENABLED" + RESET);
+        } else {
+            logInfo(YELLOW + "  ⚠ DTO Feature: DISABLED" + RESET);
+        }
     }
 
     @PostConstruct
@@ -224,6 +231,22 @@ public class CrudXConfiguration {
         if (url == null) return "null";
         return url.replaceAll(":[^:@]+@", ":****@");
     }
+
+    // ==================== CONDITIONAL DTO CONFIGURATION ====================
+
+    /**
+     * DTO Configuration - Only loaded when crudx.dto.enabled=true
+     */
+    @Configuration
+    @ConditionalOnProperty(prefix = "crudx.dto", name = "enabled", havingValue = "true", matchIfMissing = true)
+    @Import(CrudXDTOConfiguration.class)
+    static class DTOFeatureConfiguration {
+        public DTOFeatureConfiguration() {
+            log.info("✓ CrudX DTO Feature configuration loaded");
+        }
+    }
+
+    // ==================== DATABASE CONFIGURATIONS ====================
 
     @Configuration
     @ConditionalOnProperty(prefix = "spring.data.mongodb", name = "uri")
