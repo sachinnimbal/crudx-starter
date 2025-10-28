@@ -30,7 +30,14 @@ public class CrudXSwaggerConfiguration {
 
     public CrudXSwaggerConfiguration(Environment environment) {
         this.environment = environment;
-        log.info("✓ CrudX Swagger/OpenAPI enabled");
+        boolean dtoEnabled = Boolean.parseBoolean(
+                environment.getProperty("crudx.dto.enabled", "true"));
+
+        if (!dtoEnabled) {
+            log.info("✓ CrudX Swagger/OpenAPI enabled (DTO feature is DISABLED - entity-only mode)");
+        } else {
+            log.info("✓ CrudX Swagger/OpenAPI enabled");
+        }
     }
 
     @Bean
@@ -59,12 +66,13 @@ public class CrudXSwaggerConfiguration {
 
     @Bean
     public OperationCustomizer crudxDtoSchemaCustomizer() {
-        if (dtoRegistry != null) {
-            log.info("✓ Swagger schema customization enabled (with DTO support)");
+        boolean dtoEnabled = Boolean.parseBoolean(
+                environment.getProperty("crudx.dto.enabled", "true"));
+        if (!dtoEnabled || dtoRegistry == null) {
+            log.info("✓ Swagger schema customization enabled (entity-only mode - no DTOs)");
         } else {
-            log.info("✓ Swagger schema customization enabled (entity-only mode)");
+            log.info("✓ Swagger schema customization enabled (with DTO support)");
         }
-
         return new CrudXSwaggerDTOCustomizer(dtoRegistry);
     }
 

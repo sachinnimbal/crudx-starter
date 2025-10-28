@@ -49,6 +49,12 @@ public class CrudXMapperRegistry {
 
     @PostConstruct
     public void initialize() {
+        if (!properties.getDto().isEnabled()) {
+            log.warn("⚠️  CrudXMapperRegistry loaded but crudx.dto.enabled=false");
+            log.warn("   This component should not have been loaded!");
+            log.warn("   Check your @ConditionalOnProperty configuration.");
+            return; // Don't initialize
+        }
         if (initialized) return;
 
         long startTime = System.currentTimeMillis();

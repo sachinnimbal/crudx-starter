@@ -26,8 +26,10 @@ import java.util.*;
         "io.github.sachinnimbal.crudx.core.dto.annotations.CrudXResponse"
 })
 @SupportedSourceVersion(SourceVersion.RELEASE_21)
+@SupportedOptions("crudx.dto.enabled")
 public class CrudXDTOProcessor extends AbstractProcessor {
 
+    private boolean dtoEnabled = true;
     private Messager messager;
     private Filer filer;
     private Elements elementUtils;
@@ -44,10 +46,24 @@ public class CrudXDTOProcessor extends AbstractProcessor {
         this.filer = processingEnv.getFiler();
         this.elementUtils = processingEnv.getElementUtils();
         this.typeUtils = processingEnv.getTypeUtils();
+
+        String dtoEnabledOption = processingEnv.getOptions().get("crudx.dto.enabled");
+        if (dtoEnabledOption != null) {
+            dtoEnabled = Boolean.parseBoolean(dtoEnabledOption);
+        }
+
+        if (!dtoEnabled) {
+            messager.printMessage(Diagnostic.Kind.NOTE,
+                    "⚠️  CrudX DTO feature is DISABLED (crudx.dto.enabled=false) - Skipping mapper generation");
+        }
     }
 
     @Override
     public boolean process(Set<? extends TypeElement> annotations, RoundEnvironment roundEnv) {
+        if (!dtoEnabled) {
+            return false;
+        }
+
         if (hasProcessed || annotations.isEmpty()) {
             return false;
         }
@@ -55,6 +71,11 @@ public class CrudXDTOProcessor extends AbstractProcessor {
         int dtoCount = roundEnv.getElementsAnnotatedWith(CrudXRequest.class).size() +
                 roundEnv.getElementsAnnotatedWith(CrudXResponse.class).size();
         if (dtoCount == 0) {
+            return false;
+        }
+        if (dtoCount > 0 && !dtoEnabled) {
+            messager.printMessage(Diagnostic.Kind.WARNING,
+                    String.format("⚠️  Found %d DTO annotations but crudx.dto.enabled=false - Ignoring all DTOs", dtoCount));
             return false;
         }
         logInfo("🚀 CrudX DTO Processor - Processing " + dtoCount + " DTOs");

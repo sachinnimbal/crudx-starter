@@ -63,7 +63,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
     protected CrudXService<T, ID> crudService;
 
-    // 🔥 CRITICAL: Strongly typed compiled mapper
+    //  CRITICAL: Strongly typed compiled mapper
     protected CrudXMapper<T, Object, Object> compiledMapper;
 
     enum MapperMode {
@@ -82,11 +82,11 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
     private ObjectMapper objectMapper;
 
-    // 🔥 OPTIMIZATION: Cache DTO classes per operation
+    //  OPTIMIZATION: Cache DTO classes per operation
     private final Map<CrudXOperation, Class<?>> requestDtoCache = new ConcurrentHashMap<>(8);
     private final Map<CrudXOperation, Class<?>> responseDtoCache = new ConcurrentHashMap<>(8);
 
-    // 🔥 OPTIMIZATION: Cache field metadata for validation
+    //  OPTIMIZATION: Cache field metadata for validation
     private final Map<String, Field> requiredFieldsCache = new ConcurrentHashMap<>();
     private final Map<String, Field> entityFieldsCache = new ConcurrentHashMap<>();
 
@@ -131,19 +131,26 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                     "Service bean not found: " + serviceBeanName, e
             );
         }
+        boolean dtoEnabled = crudxProperties.getDto().isEnabled();
 
-        // 🔥 CRITICAL: Initialize DTO mapping with COMPILED mapper priority
+        if (!dtoEnabled) {
+            mapperMode = MapperMode.NONE;
+            log.warn("⚠️  DTO Feature is DISABLED (crudx.dto.enabled=false)");
+            log.warn("   - All DTO annotations will be ignored");
+            log.warn("   - Using direct entity mapping (zero overhead)");
+            log.warn("   - No compiled or runtime mappers will be used");
+            return;
+        }
         initializeDTOMapping();
-
-        // 🔥 OPTIMIZATION: Pre-cache field metadata
         cacheFieldMetadata();
     }
 
-    /**
-     * 🔥 CRITICAL: Initialize DTO mapping with compiled mapper priority
-     * This is the KEY OPTIMIZATION that makes CrudX the fastest!
-     */
     private void initializeDTOMapping() {
+        if (!crudxProperties.getDto().isEnabled()) {
+            mapperMode = MapperMode.NONE;
+            log.debug("DTO feature disabled - skipping mapper initialization");
+            return;
+        }
         if (dtoRegistry == null || !dtoRegistry.hasDTOMapping(entityClass)) {
             mapperMode = MapperMode.NONE;
             log.debug("No DTO mappings for {} - using entity directly (zero overhead)",
@@ -155,7 +162,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                 entityClass.getSimpleName().substring(1) + "MapperCrudX";
 
         try {
-            // 🔥 ATTEMPT 1: Get COMPILED mapper bean (annotation processor generated)
+            //  ATTEMPT 1: Get COMPILED mapper bean (annotation processor generated)
             @SuppressWarnings("unchecked")
             CrudXMapper<T, Object, Object> generatedMapper =
                     (CrudXMapper<T, Object, Object>) applicationContext.getBean(mapperBeanName);
@@ -170,7 +177,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             preCacheDTOClasses();
 
         } catch (Exception e) {
-            // 🔥 FALLBACK: Use runtime mapper generator
+            //  FALLBACK: Use runtime mapper generator
             if (mapperGenerator != null) {
                 mapperMode = MapperMode.RUNTIME;
                 log.warn("⚠️  Compiled mapper not found for {}, using runtime generation (slower by 10-100x)",
@@ -188,7 +195,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     }
 
     /**
-     * 🔥 OPTIMIZATION: Pre-cache DTO classes to avoid repeated Optional lookups
+     * OPTIMIZATION: Pre-cache DTO classes to avoid repeated Optional lookups
      */
     private void preCacheDTOClasses() {
         if (dtoRegistry == null) return;
@@ -206,7 +213,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     }
 
     /**
-     * 🔥 OPTIMIZATION: Pre-cache field metadata for fast validation
+     * OPTIMIZATION: Pre-cache field metadata for fast validation
      */
     private void cacheFieldMetadata() {
         try {
@@ -299,7 +306,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                         T entity = convertMapToEntity(requestBodies.get(j), BATCH_CREATE);
                         validateRequiredFields(entity);
                         chunkEntities.add(entity);
-                        convertedInChunk++; // 🔥 COUNT CONVERSIONS
+                        convertedInChunk++; //  COUNT CONVERSIONS
                     } catch (Exception e) {
                         skipCount++;
                         if (skipReasons.size() < 1000) {
@@ -729,7 +736,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     // ==================== DTO CONVERSION METHODS ====================
 
     /**
-     * 🔥 INTELLIGENT: Calculate optimal batch size based on dataset
+     * INTELLIGENT: Calculate optimal batch size based on dataset
      */
     private int calculateOptimalBatchSize(int totalSize) {
         if (totalSize <= 1000) return Math.min(500, totalSize);
@@ -740,7 +747,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     }
 
     /**
-     * 🔥 REAL-TIME: Progress logging with metrics
+     * REAL-TIME: Progress logging with metrics
      */
     private void logRealtimeProgress(int total, int current, int success, int skipped, long startTime) {
         double progress = (double) current / total * 100;
@@ -762,7 +769,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     }
 
     /**
-     * 🔥 Build comprehensive response
+     * Build comprehensive response
      */
     private Map<String, Object> buildBatchResponse(int total, int success, int skipped,
                                                    int dbHits, long duration, double recordsPerSecond, List<String> skipReasons) {
@@ -802,7 +809,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     }
 
     /**
-     * 🔥 CRITICAL: Convert Map → Entity with COMPILED mapper priority
+     * CRITICAL: Convert Map → Entity with COMPILED mapper priority
      * This method is the KEY to achieving 100x faster performance!
      */
     @SuppressWarnings("unchecked")
@@ -811,7 +818,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             return convertMapToEntityDirectly(map);
         }
 
-        // 🔥 ULTRA-FAST PATH: Use cached DTO class
+        //  ULTRA-FAST PATH: Use cached DTO class
         Class<?> requestDtoClass = requestDtoCache.get(operation);
 
         if (requestDtoClass == null) {
@@ -828,7 +835,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             T entity;
 
             if (mapperMode == MapperMode.COMPILED) {
-                // 🔥 FASTEST PATH: Use COMPILED mapper (zero reflection)
+                //  FASTEST PATH: Use COMPILED mapper (zero reflection)
                 entity = compiledMapper.toEntity(requestDto);
 
                 if (log.isTraceEnabled()) {
@@ -870,7 +877,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             return entity;
         }
 
-        // 🔥 ULTRA-FAST PATH: Use cached DTO class
+        //  ULTRA-FAST PATH: Use cached DTO class
         Class<?> responseDtoClass = responseDtoCache.get(operation);
 
         if (responseDtoClass == null) {
@@ -881,14 +888,14 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         long start = System.nanoTime();
 
         try {
-            // 🔥 Check if DTO has @CrudXResponse annotation
+            //  Check if DTO has @CrudXResponse annotation
             io.github.sachinnimbal.crudx.core.dto.annotations.CrudXResponse annotation =
                     responseDtoClass.getAnnotation(io.github.sachinnimbal.crudx.core.dto.annotations.CrudXResponse.class);
 
             Object response;
 
             if (mapperMode == MapperMode.COMPILED) {
-                // 🔥 FASTEST PATH: Use COMPILED mapper
+                //  FASTEST PATH: Use COMPILED mapper
 
                 if (annotation != null && (annotation.includeId() || annotation.includeAudit())) {
                     // Use Map-based response to auto-inject audit fields
@@ -947,7 +954,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             return entities;
         }
 
-        // 🔥 ULTRA-FAST PATH: Use cached DTO class
+        //  ULTRA-FAST PATH: Use cached DTO class
         Class<?> responseDtoClass = responseDtoCache.get(operation);
 
         if (responseDtoClass == null) {
@@ -958,14 +965,14 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         long start = System.nanoTime();
 
         try {
-            // 🔥 Check if DTO has @CrudXResponse annotation for includeId/includeAudit
+            //  Check if DTO has @CrudXResponse annotation for includeId/includeAudit
             io.github.sachinnimbal.crudx.core.dto.annotations.CrudXResponse annotation =
                     responseDtoClass.getAnnotation(io.github.sachinnimbal.crudx.core.dto.annotations.CrudXResponse.class);
 
             List<?> responses;
 
             if (mapperMode == MapperMode.COMPILED) {
-                // 🔥 FASTEST PATH: Use COMPILED batch mapper
+                //  FASTEST PATH: Use COMPILED batch mapper
 
                 if (annotation != null && (annotation.includeId() || annotation.includeAudit())) {
                     // Use Map-based response to auto-inject audit fields
@@ -1025,7 +1032,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     }
 
     /**
-     * 🔥 OPTIMIZATION: Convert BatchResult with cached mappers
+     * OPTIMIZATION: Convert BatchResult with cached mappers
      */
     @SuppressWarnings("unchecked")
     private Object convertBatchResultToResponse(BatchResult<T> entityResult, CrudXOperation operation) {
@@ -1059,7 +1066,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     }
 
     /**
-     * 🔥 OPTIMIZATION: Convert PageResponse with cached mappers
+     * OPTIMIZATION: Convert PageResponse with cached mappers
      */
     @SuppressWarnings("unchecked")
     private Object convertPageResponseToDTO(PageResponse<T> entityPage, CrudXOperation operation) {
@@ -1101,7 +1108,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     }
 
     /**
-     * 🔥 OPTIMIZATION: Convert Map → DTO for validation (cached)
+     * OPTIMIZATION: Convert Map → DTO for validation (cached)
      */
     @SuppressWarnings("unchecked")
     private Object convertMapToDTO(Map<String, Object> map, CrudXOperation operation) {
@@ -1128,7 +1135,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     }
 
     /**
-     * 🔥 FALLBACK: Direct Map → Entity conversion (no DTO)
+     * FALLBACK: Direct Map → Entity conversion (no DTO)
      */
     private T convertMapToEntityDirectly(Map<String, Object> map) {
         try {
@@ -1158,7 +1165,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     }
 
     /**
-     * 🔥 OPTIMIZATION: Pre-process enum fields for case-insensitive matching
+     * OPTIMIZATION: Pre-process enum fields for case-insensitive matching
      */
     private Map<String, Object> preprocessEnumFields(Map<String, Object> map) {
         Map<String, Object> processedMap = new LinkedHashMap<>(map);
@@ -1185,7 +1192,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     }
 
     /**
-     * 🔥 OPTIMIZATION: Case-insensitive enum lookup
+     * OPTIMIZATION: Case-insensitive enum lookup
      */
     @SuppressWarnings({"unchecked", "rawtypes"})
     private Object findEnumConstant(Class<?> enumClass, String value) {
@@ -1217,7 +1224,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     }
 
     /**
-     * 🔥 OPTIMIZATION: Fast field metadata retrieval
+     * OPTIMIZATION: Fast field metadata retrieval
      */
     private Field[] getFieldsFast(Class<?> clazz) {
         List<Field> fields = new ArrayList<>();
@@ -1232,7 +1239,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     }
 
     /**
-     * 🔥 OPTIMIZATION: Cached required field validation
+     * OPTIMIZATION: Cached required field validation
      */
     private void validateRequiredFields(Object obj) {
         if (obj == null || requiredFieldsCache.isEmpty()) return;
@@ -1274,7 +1281,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                         (request.getAttribute("dtoUsed") != null &&
                                 (Boolean) request.getAttribute("dtoUsed")));
 
-                // 🔥 FIX: Use debug level so it's visible
+                //  FIX: Use debug level so it's visible
                 if (log.isDebugEnabled() && durationMs > 0) {
                     log.debug("✓ DTO conversion: +{} ms = {} ms total [Mapper: {}]",
                             durationMs, totalTime, mapperMode);

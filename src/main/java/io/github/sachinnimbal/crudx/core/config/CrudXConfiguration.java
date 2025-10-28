@@ -56,7 +56,10 @@ public class CrudXConfiguration {
         if (dtoEnabled) {
             logInfo(GREEN + "  ✓ DTO Feature: ENABLED" + RESET);
         } else {
-            logInfo(YELLOW + "  ⚠ DTO Feature: DISABLED" + RESET);
+            logInfo(RED + "  ✗ DTO Feature: COMPLETELY DISABLED" + RESET);
+            logInfo(YELLOW + "    - No compile-time mapper generation" + RESET);
+            logInfo(YELLOW + "    - No runtime DTO mapping" + RESET);
+            logInfo(YELLOW + "    - @CrudXRequest/@CrudXResponse annotations will be ignored" + RESET);
         }
     }
 
@@ -234,9 +237,6 @@ public class CrudXConfiguration {
 
     // ==================== CONDITIONAL DTO CONFIGURATION ====================
 
-    /**
-     * DTO Configuration - Only loaded when crudx.dto.enabled=true
-     */
     @Configuration
     @ConditionalOnProperty(prefix = "crudx.dto", name = "enabled", havingValue = "true", matchIfMissing = true)
     @Import(CrudXDTOConfiguration.class)

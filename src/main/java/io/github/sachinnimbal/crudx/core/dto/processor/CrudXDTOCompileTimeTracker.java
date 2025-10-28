@@ -23,13 +23,28 @@ import java.util.Set;
         "io.github.sachinnimbal.crudx.core.dto.annotations.CrudXResponse"
 })
 @SupportedSourceVersion(SourceVersion.RELEASE_21)
+@SupportedOptions("crudx.dto.enabled")
 public class CrudXDTOCompileTimeTracker extends AbstractProcessor {
 
     private final Map<String, DTOMetadata> dtoMetadata = new LinkedHashMap<>();
     private boolean processed = false;
+    private boolean dtoEnabled = true;
+
+    @Override
+    public synchronized void init(ProcessingEnvironment processingEnv) {
+        super.init(processingEnv);
+        String dtoEnabledOption = processingEnv.getOptions().get("crudx.dto.enabled");
+        if (dtoEnabledOption != null) {
+            dtoEnabled = Boolean.parseBoolean(dtoEnabledOption);
+        }
+    }
 
     @Override
     public boolean process(Set<? extends TypeElement> annotations, RoundEnvironment roundEnv) {
+        if (!dtoEnabled) {
+            return false;
+        }
+
         if (processed || annotations.isEmpty()) {
             return false;
         }

@@ -104,6 +104,10 @@ dependencies {
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
     options.compilerArgs.add('-parameters')
+
+    if (project.hasProperty('crudx.dto.enabled')) {
+        options.compilerArgs.add("-Acrudx.dto.enabled=${project.property('crudx.dto.enabled')}")
+    }
 }
 
 tasks.withType(Javadoc).configureEach {
