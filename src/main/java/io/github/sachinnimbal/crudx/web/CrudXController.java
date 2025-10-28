@@ -271,156 +271,99 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             @RequestParam(required = false, defaultValue = "true") boolean skipDuplicates) {
 
         long startTime = System.currentTimeMillis();
+        int totalSize = requestBodies.size();
 
-        try {
-            int totalSize = requestBodies.size();
-            log.info("🚀 Starting batch creation: {} entities (Mapper: {})", totalSize, mapperMode);
+        log.info("🚀 Starting intelligent batch: {} entities", totalSize);
 
-            if (requestBodies.isEmpty()) {
-                throw new IllegalArgumentException("Entity list cannot be null or empty");
-            }
+        int dbBatchSize = calculateOptimalBatchSize(totalSize);
+        int conversionBatchSize = Math.min(200, dbBatchSize / 5);
 
-            final int MAX_BATCH_SIZE = crudxProperties.getMaxBatchSize();
-            if (totalSize > MAX_BATCH_SIZE) {
-                throw new IllegalArgumentException(
-                        String.format("Batch size exceeds maximum limit of %d. Current size: %d",
-                                MAX_BATCH_SIZE, totalSize)
-                );
-            }
+        int successCount = 0;
+        int skipCount = 0;
+        List<String> skipReasons = new ArrayList<>();
+        int dbHits = 0;
 
-            // ✅ FIX: Convert ALL DTOs to entities at ONCE - NO LOOP!
-            log.info("📦 Converting {} DTOs to entities in SINGLE batch operation...", totalSize);
-            long conversionStart = System.currentTimeMillis();
+        for (int chunkStart = 0; chunkStart < totalSize; chunkStart += dbBatchSize) {
+            int chunkEnd = Math.min(chunkStart + dbBatchSize, totalSize);
+            int chunkSize = chunkEnd - chunkStart;
 
-            List<T> allEntities;
-            int conversionFailures = 0;
-            List<String> conversionErrors = new ArrayList<>();
+            List<T> chunkEntities = new ArrayList<>(chunkSize);
 
-            try {
-                // 🔥 CRITICAL: Single batch conversion - NO loop!
-                allEntities = convertBatchToEntities(requestBodies, BATCH_CREATE);
+            // Conversion phase - track what we actually converted
+            int convertedInChunk = 0;
+            for (int i = chunkStart; i < chunkEnd; i += conversionBatchSize) {
+                int batchEnd = Math.min(i + conversionBatchSize, chunkEnd);
 
-                log.info("✅ Batch DTO conversion completed: {} entities in {} ms",
-                        allEntities.size(), System.currentTimeMillis() - conversionStart);
-
-            } catch (Exception e) {
-                log.error("❌ Batch DTO conversion failed: {}", e.getMessage());
-                throw new RuntimeException("Failed to convert request bodies to entities: " + e.getMessage(), e);
-            }
-
-            // Clear input list immediately to free memory
-            requestBodies.clear();
-
-            if (allEntities.isEmpty()) {
-                log.error("❌ All conversions failed! Check your DTO → Entity mapping");
-
-                Map<String, Object> errorData = new LinkedHashMap<>();
-                errorData.put("totalProcessed", totalSize);
-                errorData.put("successCount", 0);
-                errorData.put("conversionFailures", totalSize);
-
-                return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                        .body(ApiResponse.error(
-                                "All entity conversions failed. Check request format.",
-                                HttpStatus.BAD_REQUEST,
-                                System.currentTimeMillis() - startTime));
-            }
-
-            // ✅ Validate required fields in batch
-            log.info("🔍 Validating {} entities...", allEntities.size());
-            List<T> validEntities = new ArrayList<>(allEntities.size());
-
-            for (int i = 0; i < allEntities.size(); i++) {
-                T entity = allEntities.get(i);
-                try {
-                    validateRequiredFields(entity);
-                    validEntities.add(entity);
-                } catch (Exception e) {
-                    conversionFailures++;
-                    if (conversionErrors.size() < 100) {
-                        conversionErrors.add(String.format("Index %d validation: %s", i, e.getMessage()));
+                for (int j = i; j < batchEnd; j++) {
+                    try {
+                        T entity = convertMapToEntity(requestBodies.get(j), BATCH_CREATE);
+                        validateRequiredFields(entity);
+                        chunkEntities.add(entity);
+                        convertedInChunk++; // 🔥 COUNT CONVERSIONS
+                    } catch (Exception e) {
+                        skipCount++;
+                        if (skipReasons.size() < 1000) {
+                            skipReasons.add(String.format("Index %d: %s", j, e.getMessage()));
+                        }
                     }
+                    requestBodies.set(j, null);
                 }
-                // Free memory immediately
-                allEntities.set(i, null);
             }
+            int entitiesToInsert = chunkEntities.size();
+            // Insert phase
+            if (!chunkEntities.isEmpty()) {
+                try {
+                    beforeCreateBatch(chunkEntities);
+                    BatchResult<T> result = crudService.createBatch(chunkEntities, skipDuplicates);
+                    afterCreateBatch(result.getCreatedEntities());
 
-            allEntities.clear();
+                    int inserted = entitiesToInsert - result.getSkippedCount();
+                    successCount += inserted;
+                    skipCount += result.getSkippedCount();
+                    skipCount += result.getSkippedCount();
+                    dbHits++;
 
-            if (validEntities.isEmpty()) {
-                log.error("❌ All validations failed!");
+                    if (result.getSkippedReasons() != null) {
+                        skipReasons.addAll(result.getSkippedReasons());
+                    }
 
-                Map<String, Object> errorData = new LinkedHashMap<>();
-                errorData.put("totalProcessed", totalSize);
-                errorData.put("validationFailures", conversionFailures);
-                errorData.put("firstErrors", conversionErrors.subList(0, Math.min(10, conversionErrors.size())));
+                    log.debug("✅ Chunk {}: {} inserted, {} skipped",
+                            (chunkStart / dbBatchSize) + 1, inserted, result.getSkippedCount());
 
-                return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                        .body(ApiResponse.error(
-                                "All entity validations failed.",
-                                HttpStatus.BAD_REQUEST,
-                                System.currentTimeMillis() - startTime));
-            }
-
-            // ✅ Call service with ALL validated entities - Service will handle TRUE batch insert
-            beforeCreateBatch(validEntities);
-
-            log.info("🚀 Sending {} entities to service layer for TRUE batch insert...", validEntities.size());
-            BatchResult<T> result = crudService.createBatch(validEntities, skipDuplicates);
-
-            afterCreateBatch(result.getCreatedEntities());
-
-            int successCount = result.getCreatedEntities().size();
-            int skipCount = result.getSkippedCount() + conversionFailures;
-
-            long executionTime = System.currentTimeMillis() - startTime;
-            double recordsPerSecond = executionTime > 0
-                    ? (successCount * 1000.0) / executionTime
-                    : 0.0;
-
-            long finalMemory = (Runtime.getRuntime().totalMemory() -
-                    Runtime.getRuntime().freeMemory()) / 1024 / 1024;
-
-            // Build response
-            Map<String, Object> responseData = new LinkedHashMap<>();
-            responseData.put("totalProcessed", totalSize);
-            responseData.put("successCount", successCount);
-            responseData.put("skipCount", skipCount);
-            responseData.put("conversionFailures", conversionFailures);
-            responseData.put("recordsPerSecond", String.format("%.0f", recordsPerSecond));
-            responseData.put("executionTimeMs", executionTime);
-            responseData.put("finalMemoryMB", finalMemory);
-            responseData.put("mapperMode", mapperMode.toString());
-
-            if (conversionFailures > 0 && !conversionErrors.isEmpty()) {
-                responseData.put("conversionErrors",
-                        conversionErrors.subList(0, Math.min(10, conversionErrors.size())));
-                if (conversionErrors.size() > 10) {
-                    responseData.put("conversionErrorsNote",
-                            String.format("Showing first 10 of %d conversion errors", conversionErrors.size()));
+                } catch (Exception e) {
+                    log.error("❌ Chunk {} failed: {}", (chunkStart / dbBatchSize) + 1, e.getMessage());
+                    if (!skipDuplicates) throw e;
+                    skipCount += chunkEntities.size();
                 }
             }
 
-            if (result.getSkippedReasons() != null && !result.getSkippedReasons().isEmpty()) {
-                responseData.put("dbSkippedReasons",
-                        result.getSkippedReasons().subList(0, Math.min(10, result.getSkippedReasons().size())));
+            chunkEntities.clear();
+
+            if ((chunkStart / dbBatchSize) % 5 == 0 || chunkEnd == totalSize) {
+                logRealtimeProgress(totalSize, chunkEnd, successCount, skipCount, startTime);
             }
 
-            String message = String.format(
-                    "✅ Batch completed: %d created, %d skipped (%d conversion failures) | %.0f rec/sec | %d ms | Mapper: %s",
-                    successCount, skipCount, conversionFailures, recordsPerSecond, executionTime, mapperMode
-            );
-
-            log.info(message);
-
-            return ResponseEntity.status(HttpStatus.CREATED)
-                    .body(ApiResponse.success(responseData, message, HttpStatus.CREATED, executionTime));
-
-        } catch (Exception e) {
-            long executionTime = System.currentTimeMillis() - startTime;
-            log.error("Error creating batch: {} | Time: {} ms", e.getMessage(), executionTime, e);
-            throw new RuntimeException("Failed to create batch: " + e.getMessage(), e);
+            if ((chunkStart / dbBatchSize) % 50 == 0) {
+                System.gc();
+            }
         }
+
+        requestBodies.clear();
+
+        long duration = System.currentTimeMillis() - startTime;
+        double recordsPerSecond = duration > 0 ? (successCount * 1000.0) / duration : 0.0;
+
+        Map<String, Object> responseData = buildBatchResponse(
+                totalSize, successCount, skipCount, dbHits, duration,
+                recordsPerSecond, skipReasons);
+
+        log.info("✅ Batch completed: {} created, {} skipped | {} DB hits | {} rec/sec | {} ms",
+                successCount, skipCount, dbHits, (int) recordsPerSecond, duration);
+
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.success(responseData,
+                        String.format("Batch: %d created, %d skipped", successCount, skipCount),
+                        HttpStatus.CREATED, duration));
     }
 
     @GetMapping("/{id}")
@@ -783,7 +726,80 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         }
     }
 
-    // ==================== 🔥 ULTRA-OPTIMIZED DTO CONVERSION METHODS ====================
+    // ==================== DTO CONVERSION METHODS ====================
+
+    /**
+     * 🔥 INTELLIGENT: Calculate optimal batch size based on dataset
+     */
+    private int calculateOptimalBatchSize(int totalSize) {
+        if (totalSize <= 1000) return Math.min(500, totalSize);
+        if (totalSize <= 10_000) return 1000;
+        if (totalSize <= 50_000) return 2000;
+        if (totalSize <= 100_000) return 5000;
+        return 10_000; // Max batch for very large datasets
+    }
+
+    /**
+     * 🔥 REAL-TIME: Progress logging with metrics
+     */
+    private void logRealtimeProgress(int total, int current, int success, int skipped, long startTime) {
+        double progress = (double) current / total * 100;
+        long elapsed = System.currentTimeMillis() - startTime;
+        long estimated = elapsed > 0 ? (long) ((elapsed / progress) * 100) : 0;
+        long remaining = estimated - elapsed;
+
+        long currentMemory = (Runtime.getRuntime().totalMemory() -
+                Runtime.getRuntime().freeMemory()) / 1024 / 1024;
+        long maxMemory = Runtime.getRuntime().maxMemory() / 1024 / 1024;
+        double memoryUsage = (double) currentMemory / maxMemory * 100;
+
+        double speed = elapsed > 0 ? (success * 1000.0) / elapsed : 0;
+
+        log.info("📊 Progress: {}/{} ({:.1f}%) | Success: {} | Skipped: {} | Speed: {} rec/sec | " +
+                        "Memory: {} MB / {} MB ({:.1f}%) | Elapsed: {} ms | ETA: {} ms",
+                current, total, progress, success, skipped, (int) speed,
+                currentMemory, maxMemory, memoryUsage, elapsed, remaining);
+    }
+
+    /**
+     * 🔥 Build comprehensive response
+     */
+    private Map<String, Object> buildBatchResponse(int total, int success, int skipped,
+                                                   int dbHits, long duration, double recordsPerSecond, List<String> skipReasons) {
+
+        Map<String, Object> responseData = new LinkedHashMap<>();
+        responseData.put("totalProcessed", total);
+        responseData.put("successCount", success);
+        responseData.put("skipCount", skipped);
+        responseData.put("databaseHits", dbHits);
+        responseData.put("recordsPerSecond", (int) recordsPerSecond);
+        responseData.put("executionTimeMs", duration);
+        responseData.put("mapperMode", mapperMode.toString());
+
+        // Memory metrics
+        long finalMemory = (Runtime.getRuntime().totalMemory() -
+                Runtime.getRuntime().freeMemory()) / 1024 / 1024;
+        responseData.put("finalMemoryMB", finalMemory);
+
+        // Performance rating
+        String performanceRating;
+        if (recordsPerSecond > 5000) performanceRating = "EXCELLENT";
+        else if (recordsPerSecond > 2000) performanceRating = "GOOD";
+        else if (recordsPerSecond > 1000) performanceRating = "MODERATE";
+        else performanceRating = "SLOW";
+        responseData.put("performanceRating", performanceRating);
+
+        // Error details (first 10 only)
+        if (!skipReasons.isEmpty()) {
+            responseData.put("errorSample", skipReasons.subList(0, Math.min(10, skipReasons.size())));
+            if (skipReasons.size() > 10) {
+                responseData.put("errorNote",
+                        String.format("Showing first 10 of %d errors", skipReasons.size()));
+            }
+        }
+
+        return responseData;
+    }
 
     /**
      * 🔥 CRITICAL: Convert Map → Entity with COMPILED mapper priority
@@ -843,58 +859,6 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             log.error("DTO mapping failed for {}: {}, falling back to direct conversion",
                     operation, e.getMessage());
             return convertMapToEntityDirectly(map);
-        }
-    }
-
-    /**
-     * 🔥 OPTIMIZATION: Batch convert Maps → Entities
-     */
-    private List<T> convertBatchToEntities(List<Map<String, Object>> maps, CrudXOperation operation) {
-        if (mapperMode == MapperMode.NONE) {
-            return maps.stream()
-                    .map(this::convertMapToEntityDirectly)
-                    .collect(Collectors.toList());
-        }
-
-        Class<?> requestDtoClass = requestDtoCache.get(operation);
-
-        if (requestDtoClass == null) {
-            return maps.stream()
-                    .map(this::convertMapToEntityDirectly)
-                    .collect(Collectors.toList());
-        }
-
-        long start = System.nanoTime();
-
-        try {
-            List<T> entities = new ArrayList<>(maps.size());
-
-            for (Map<String, Object> map : maps) {
-                Object requestDto = objectMapper.convertValue(map, requestDtoClass);
-
-                T entity = mapperMode == MapperMode.COMPILED
-                        ? compiledMapper.toEntity(requestDto)
-                        : mapperGenerator.toEntity(requestDto, entityClass);
-
-                entities.add(entity);
-            }
-
-            trackDtoConversion(start, true);
-
-            if (log.isDebugEnabled()) {
-                long elapsed = (System.nanoTime() - start) / 1_000_000;
-                log.debug("✓ {} mapper: {} entities in {} ms ({} μs/entity)",
-                        mapperMode, entities.size(), elapsed,
-                        (elapsed * 1000) / entities.size());
-            }
-
-            return entities;
-
-        } catch (Exception e) {
-            log.error("Batch DTO mapping failed: {}", e.getMessage());
-            return maps.stream()
-                    .map(this::convertMapToEntityDirectly)
-                    .collect(Collectors.toList());
         }
     }
 
