@@ -1084,8 +1084,8 @@ public class EmployeeController extends CrudXController&lt;Employee, Long&gt; { 
                         <option value="">All DTO Types</option>
                         <option value="COMPILED">⚡ Compiled</option>
                         <option value="RUNTIME">🔧 Runtime</option>
-                        <option value="NONE">No DTO</option>
                         <option value="MIXED">🔀 Mixed</option>
+                        <option value="NONE">❌ NONE</option>
                     </select>
                     <select id="sortSelect" onchange="sortEndpoints()"
                             class="px-4 py-2 border rounded-lg text-sm transition-all"
@@ -1879,18 +1879,56 @@ public class EmployeeController extends CrudXController&lt;Employee, Long&gt; { 
             return { time: timeStr, class: 'bg-red-500/20 text-red-400 border border-red-500/30' };
         };
 
+        // Helper to get DTO badge with icon
+        const getDtoBadge = (dtoType, dtoConversionTime) => {
+            if (!dtoType || dtoType === 'NONE') return '';
+
+            const badges = {
+                'COMPILED': {
+                    class: 'bg-green-500/20 text-green-400 border-green-500/30',
+                    icon: '⚡',
+                    tooltip: 'Compile-time mapper (zero overhead)'
+                },
+                'RUNTIME': {
+                    class: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
+                    icon: '🔧',
+                    tooltip: 'Runtime mapper'
+                },
+                'MIXED': {
+                    class: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
+                    icon: '🔀',
+                    tooltip: 'Mixed mapper types'
+                }
+            };
+
+            const badge = badges[dtoType] || {
+                class: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
+                icon: '❓',
+                tooltip: 'Unknown mapper'
+            };
+
+            // Show conversion time only for RUNTIME mappers (COMPILED is too fast to measure)
+            const timeDisplay = (dtoType === 'RUNTIME' && dtoConversionTime)
+                ? ` • ${dtoConversionTime}`
+                : '';
+
+            return `<span class="badge ${badge.class} text-xs" title="${badge.tooltip}${dtoConversionTime && dtoType === 'RUNTIME' ? ' | Conversion: ' + dtoConversionTime : ''}">
+                        ${badge.icon} ${dtoType}${timeDisplay}
+                    </span>`;
+        };
+
         container.innerHTML = pageItems.map(m => {
             const timeBadge = getTimeBadge(m.executionTime);
             return `
                 <div class="flex items-center justify-between p-3 rounded border text-sm" style="background: var(--bg-tertiary); border-color: var(--border-color);">
-                    <div class="flex items-center gap-3 flex-1">
+                    <div class="flex items-center gap-3 flex-1 flex-wrap">
                         <span class="status-indicator ${m.success ? 'bg-green-400' : 'bg-red-400'}"></span>
                         <span style="color: var(--text-secondary);">${new Date(m.timestamp).toLocaleString()}</span>
                         <span class="badge ${timeBadge.class}">${timeBadge.time}</span>
-                        ${m.memoryUsed ? `<span style="color: var(--text-muted);">${m.memoryUsed}</span>` : ''}
-                        ${m.dtoConversionTime ? `<span class="badge bg-pink-500/20 text-pink-400 border-pink-500/30 text-xs">DTO: ${m.dtoConversionTime}</span>` : ''}
+                        ${m.memoryUsed ? `<span class="text-xs" style="color: var(--text-muted);">💾 ${m.memoryUsed}</span>` : ''}
+                        ${getDtoBadge(m.dtoType, m.dtoConversionTime)}
                     </div>
-                    ${m.errorType ? `<span class="text-red-400 text-xs ml-2">${m.errorType}</span>` : ''}
+                    ${m.errorType ? `<span class="text-red-400 text-xs ml-2">❌ ${m.errorType}</span>` : ''}
                 </div>
             `;
         }).join('');

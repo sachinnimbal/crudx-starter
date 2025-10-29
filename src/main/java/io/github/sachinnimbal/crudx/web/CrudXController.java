@@ -808,13 +808,28 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         return responseData;
     }
 
+    private void updateDtoTypeInRequest() {
+        try {
+            ServletRequestAttributes attrs = (ServletRequestAttributes)
+                    RequestContextHolder.getRequestAttributes();
+            if (attrs != null) {
+                HttpServletRequest request = attrs.getRequest();
+                // Only update if we're actually using DTOs (not NONE)
+                if (mapperMode != MapperMode.NONE) {
+                    request.setAttribute("dtoType", mapperMode.name());
+                    request.setAttribute("dtoUsed", true);
+                }
+            }
+        } catch (Exception e) {
+            log.trace("Failed to update DTO type: {}", e.getMessage());
+        }
+    }
+
     /**
-     * CRITICAL: Convert Map → Entity with COMPILED mapper priority
-     * This method is the KEY to achieving 100x faster performance!
+     * 1. convertMapToEntity() - Used in POST, PATCH operations
      */
     @SuppressWarnings("unchecked")
     private T convertMapToEntity(Map<String, Object> map, CrudXOperation operation) {
-        setDtoTypeInRequest();
         if (mapperMode == MapperMode.NONE) {
             return convertMapToEntityDirectly(map);
         }
@@ -823,6 +838,8 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         if (requestDtoClass == null) {
             return convertMapToEntityDirectly(map);
         }
+
+        updateDtoTypeInRequest();
 
         try {
             Object requestDto = objectMapper.convertValue(map, requestDtoClass);
@@ -845,6 +862,9 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         }
     }
 
+    /**
+     * 2. convertEntityToResponse() - Used in GET by ID, POST response
+     */
     @SuppressWarnings("unchecked")
     private Object convertEntityToResponse(T entity, CrudXOperation operation) {
         if (entity == null) return null;
@@ -852,6 +872,8 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
         Class<?> responseDtoClass = responseDtoCache.get(operation);
         if (responseDtoClass == null) return entity;
+
+        updateDtoTypeInRequest();
 
         try {
             io.github.sachinnimbal.crudx.core.dto.annotations.CrudXResponse annotation =
@@ -890,18 +912,9 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         }
     }
 
-    private void setDtoTypeInRequest() {
-        try {
-            ServletRequestAttributes attrs = (ServletRequestAttributes)
-                    RequestContextHolder.getRequestAttributes();
-            if (attrs != null) {
-                attrs.getRequest().setAttribute("dtoType", mapperMode.name());
-            }
-        } catch (Exception e) {
-            log.trace("Failed to set DTO type: {}", e.getMessage());
-        }
-    }
-
+    /**
+     * 3. convertEntitiesToResponse() - Used in GET all, batch responses
+     */
     @SuppressWarnings("unchecked")
     private List<?> convertEntitiesToResponse(List<T> entities, CrudXOperation operation) {
         if (entities == null || entities.isEmpty()) return entities;
@@ -909,6 +922,8 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
         Class<?> responseDtoClass = responseDtoCache.get(operation);
         if (responseDtoClass == null) return entities;
+
+        updateDtoTypeInRequest();
 
         try {
             io.github.sachinnimbal.crudx.core.dto.annotations.CrudXResponse annotation =
@@ -952,13 +967,15 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     }
 
     /**
-     * OPTIMIZATION: Convert BatchResult with cached mappers
+     * 4. convertBatchResultToResponse() - Used in batch operations
      */
     @SuppressWarnings("unchecked")
     private Object convertBatchResultToResponse(BatchResult<T> entityResult, CrudXOperation operation) {
         if (mapperMode == MapperMode.NONE) {
             return entityResult;
         }
+
+        updateDtoTypeInRequest();
 
         long start = System.nanoTime();
 
@@ -986,7 +1003,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     }
 
     /**
-     * OPTIMIZATION: Convert PageResponse with cached mappers
+     * 5. convertPageResponseToDTO() - Used in paginated GET
      */
     @SuppressWarnings("unchecked")
     private Object convertPageResponseToDTO(PageResponse<T> entityPage, CrudXOperation operation) {
@@ -997,6 +1014,8 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         if (entityPage.getContent() == null || entityPage.getContent().isEmpty()) {
             return entityPage;
         }
+
+        updateDtoTypeInRequest();
 
         long start = System.nanoTime();
 
@@ -1028,7 +1047,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     }
 
     /**
-     * OPTIMIZATION: Convert Map → DTO for validation (cached)
+     * 6. convertMapToDTO() - Used for validation in PATCH operations
      */
     @SuppressWarnings("unchecked")
     private Object convertMapToDTO(Map<String, Object> map, CrudXOperation operation) {
@@ -1041,6 +1060,8 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         if (requestDtoClass == null) {
             return null;
         }
+
+        updateDtoTypeInRequest();
 
         long start = System.nanoTime();
 

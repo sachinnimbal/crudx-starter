@@ -329,6 +329,7 @@ public class CrudXPerformanceTracker {
             this.endpoint = endpoint;
             this.method = method;
             this.entityName = entityName;
+            this.dtoType = "NONE";
         }
 
         void addMetric(PerformanceMetric m) {
@@ -363,12 +364,16 @@ public class CrudXPerformanceTracker {
                 if (dtoMs < minDtoMs) minDtoMs = dtoMs;
                 if (dtoMs > maxDtoMs) maxDtoMs = dtoMs;
             }
-            if (dtoType == null) {
-                dtoType = m.getDtoType() != null ? m.getDtoType() : "NONE";
-            } else if (!dtoType.equals(m.getDtoType()) &&
-                    m.getDtoType() != null &&
-                    !"NONE".equals(m.getDtoType())) {
-                dtoType = "MIXED";
+            String metricDtoType = m.getDtoType();
+            if (metricDtoType != null && !"NONE".equals(metricDtoType)) {
+                // If we have a non-NONE value
+                if ("NONE".equals(this.dtoType)) {
+                    // First non-NONE value, use it
+                    this.dtoType = metricDtoType;
+                } else if (!this.dtoType.equals(metricDtoType)) {
+                    // Different non-NONE values, mark as MIXED
+                    this.dtoType = "MIXED";
+                }
             }
         }
 
@@ -411,14 +416,13 @@ public class CrudXPerformanceTracker {
                         formatExecutionTime(minDtoMs) : "N/A");
                 stats.setMaxDtoConversionTime(formatExecutionTime(maxDtoMs));
                 stats.setDtoConversionCount(dtoCount);
-                stats.setDtoType(dtoType != null ? dtoType : "NONE");
             } else {
                 stats.setTotalDtoConversionTime("N/A");
                 stats.setAvgDtoConversionTime("N/A");
                 stats.setMinDtoConversionTime("N/A");
                 stats.setMaxDtoConversionTime("N/A");
             }
-
+            stats.setDtoType(this.dtoType);
             return stats;
         }
 

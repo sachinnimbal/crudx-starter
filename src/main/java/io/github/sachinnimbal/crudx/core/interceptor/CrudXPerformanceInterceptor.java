@@ -13,6 +13,7 @@ import org.springframework.web.servlet.HandlerInterceptor;
 import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryMXBean;
 import java.lang.management.MemoryUsage;
+import java.lang.reflect.Method;
 
 @Slf4j
 @Component
@@ -22,8 +23,8 @@ public class CrudXPerformanceInterceptor implements HandlerInterceptor {
     private static final String START_TIME_ATTR = "crudx.startTime";
     private static final String START_MEMORY_ATTR = "crudx.startMemory";
     private static final String ENTITY_NAME_ATTR = "crudx.entityName";
+    private static final String DTO_TYPE_ATTR = "dtoType";
 
-    // 🔥 Native JVM heap memory tracking (JDK 8+ compatible)
     private static final MemoryMXBean MEMORY_MX_BEAN = ManagementFactory.getMemoryMXBean();
 
     private final CrudXPerformanceTracker tracker;
@@ -50,10 +51,10 @@ public class CrudXPerformanceInterceptor implements HandlerInterceptor {
             return true;
         }
 
-        // 🔥 Start time (nanosecond precision)
+        // Start time (nanosecond precision)
         request.setAttribute(START_TIME_ATTR, System.nanoTime());
 
-        // 🔥 CRITICAL: Capture heap memory BEFORE request
+        // CRITICAL: Capture heap memory BEFORE request
         MemoryUsage heapUsage = MEMORY_MX_BEAN.getHeapMemoryUsage();
         long startMemoryBytes = heapUsage.getUsed();
         request.setAttribute(START_MEMORY_ATTR, startMemoryBytes);
@@ -63,6 +64,10 @@ public class CrudXPerformanceInterceptor implements HandlerInterceptor {
         if (entityName != null) {
             request.setAttribute(ENTITY_NAME_ATTR, entityName);
         }
+
+        // ✅ NEW: Detect and set DTO type from the controller
+        String dtoType = detectDtoType(handlerMethod);
+        request.setAttribute(DTO_TYPE_ATTR, dtoType);
 
         return true;
     }
@@ -78,19 +83,20 @@ public class CrudXPerformanceInterceptor implements HandlerInterceptor {
             return;
         }
 
-        String dtoType = (String) request.getAttribute("dtoType");
+        // Get DTO type set in preHandle (or updated during request processing)
+        String dtoType = (String) request.getAttribute(DTO_TYPE_ATTR);
         if (dtoType == null) {
             dtoType = "NONE";
         }
 
-        // 🔥 Calculate execution time (milliseconds)
+        // Calculate execution time (milliseconds)
         long executionTimeMs = (System.nanoTime() - startTimeNano) / 1_000_000L;
 
-        // 🔥 CRITICAL: Capture heap memory AFTER request
+        // CRITICAL: Capture heap memory AFTER request
         MemoryUsage heapUsage = MEMORY_MX_BEAN.getHeapMemoryUsage();
         long endMemoryBytes = heapUsage.getUsed();
 
-        // 🔥 Calculate REAL memory delta
+        // Calculate REAL memory delta
         long memoryDeltaBytes = endMemoryBytes - startMemoryBytes;
         Long memoryDeltaKb = calculateRealMemoryDelta(memoryDeltaBytes, heapUsage, executionTimeMs);
 
@@ -107,7 +113,7 @@ public class CrudXPerformanceInterceptor implements HandlerInterceptor {
         Long dtoConversionTimeMs = (Long) request.getAttribute("dtoConversionTime");
         Boolean dtoUsed = (Boolean) request.getAttribute("dtoUsed");
 
-        // 🔥 Track with REAL memory value
+        // Track with REAL memory value
         tracker.recordMetric(
                 endpoint,
                 method,
@@ -115,13 +121,13 @@ public class CrudXPerformanceInterceptor implements HandlerInterceptor {
                 executionTimeMs,
                 success,
                 errorType,
-                memoryDeltaKb, // NULL if GC occurred or measurement invalid
+                memoryDeltaKb,
                 dtoConversionTimeMs,
                 dtoUsed != null && dtoUsed,
                 dtoType
         );
 
-        // 🔥 Log high-memory requests (>10MB)
+        // Log high-memory requests (>10MB)
         if (memoryDeltaKb != null && memoryDeltaKb > 10240) {
             log.warn("⚠️  High memory request: {} {} | {}ms | {} KB",
                     method, endpoint, executionTimeMs, memoryDeltaKb);
@@ -129,23 +135,36 @@ public class CrudXPerformanceInterceptor implements HandlerInterceptor {
     }
 
     /**
+     * ✅ NEW: Detect DTO mapper mode from the controller instance
+     */
+    private String detectDtoType(HandlerMethod handlerMethod) {
+        try {
+            Object controller = handlerMethod.getBean();
+
+            // Check if it's a CrudXController
+            if (!CrudXController.class.isAssignableFrom(controller.getClass())) {
+                return "NONE";
+            }
+
+            // Use reflection to get the mapperMode from CrudXController
+            Method getMapperModeMethod = controller.getClass().getMethod("getMapperMode");
+            String mapperMode = (String) getMapperModeMethod.invoke(controller);
+
+            return mapperMode != null ? mapperMode : "NONE";
+
+        } catch (Exception e) {
+            log.trace("Could not detect DTO type: {}", e.getMessage());
+            return "NONE";
+        }
+    }
+
+    /**
      * 🎯 Smart Memory Delta Calculation with GC Detection
-     * <p>
-     * STRATEGY:
-     * 1. Positive delta (>0): Direct allocation measurement
-     * 2. Negative delta (<0): GC occurred - use committed memory change
-     * 3. Very large delta (>200MB): Cap at realistic maximum
-     * 4. Invalid measurement: Return NULL (honest reporting)
-     *
-     * @param deltaBytes       Raw heap delta in bytes
-     * @param currentHeapUsage Current heap state
-     * @param executionTimeMs  Request execution time
-     * @return Memory in KB, or NULL if measurement invalid
      */
     private Long calculateRealMemoryDelta(long deltaBytes, MemoryUsage currentHeapUsage,
                                           long executionTimeMs) {
 
-        // 🔥 POSITIVE DELTA: Direct measurement
+        // POSITIVE DELTA: Direct measurement
         if (deltaBytes > 0) {
             long deltaKb = deltaBytes / 1024L;
 
@@ -158,17 +177,14 @@ public class CrudXPerformanceInterceptor implements HandlerInterceptor {
             return deltaKb;
         }
 
-        // 🔥 NEGATIVE DELTA: GC occurred during request
+        // NEGATIVE DELTA: GC occurred during request
         if (deltaBytes < 0) {
-            // Try to estimate using committed memory change
             long committedBytes = currentHeapUsage.getCommitted();
 
             // For batch operations, use execution time heuristic
             if (executionTimeMs > 100 && committedBytes > 0) {
-                // Estimate: ~1KB per millisecond for batch operations
                 long estimatedKb = executionTimeMs;
 
-                // Cap estimate at 50MB
                 if (estimatedKb > 51_200L) {
                     estimatedKb = 51_200L;
                 }
@@ -179,16 +195,15 @@ public class CrudXPerformanceInterceptor implements HandlerInterceptor {
 
             // For quick requests, assume minimal allocation
             if (executionTimeMs < 10) {
-                return 16L; // Minimum overhead
+                return 16L;
             }
 
-            // Cannot reliably measure - return NULL
             log.trace("GC occurred, cannot measure accurately. Duration: {}ms", executionTimeMs);
             return null;
         }
 
-        // 🔥 ZERO DELTA: Likely cache hit or no allocation
-        return 8L; // Minimum JVM overhead
+        // ZERO DELTA: Likely cache hit or no allocation
+        return 8L;
     }
 
     /**
