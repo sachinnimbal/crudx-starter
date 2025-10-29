@@ -42,6 +42,7 @@ public class EndpointStats {
     private String minDtoConversionTime;
     private String maxDtoConversionTime;
     private long dtoConversionCount;
+    private String dtoType;
 
     private LocalDateTime firstCall;
     private LocalDateTime lastCall;
@@ -121,6 +122,13 @@ public class EndpointStats {
             dtoConversionCount++;
             if (dtoMs < minDtoConversionTimeMs) minDtoConversionTimeMs = dtoMs;
             if (dtoMs > maxDtoConversionTimeMs) maxDtoConversionTimeMs = dtoMs;
+        }
+
+        if (this.dtoType == null) {
+            this.dtoType = metric.getDtoType() != null ? metric.getDtoType() : "NONE";
+        } else if (!this.dtoType.equals(metric.getDtoType()) &&
+                !"NONE".equals(metric.getDtoType())) {
+            this.dtoType = "MIXED";
         }
 
         // Update formatted strings

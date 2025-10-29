@@ -28,6 +28,7 @@ public class PerformanceMetric {
     // DTO conversion metrics
     private String dtoConversionTime;
     private boolean dtoUsed;
+    private String dtoType;
 
     private Map<String, Object> additionalData;
 

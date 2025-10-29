@@ -14,28 +14,6 @@ import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryMXBean;
 import java.lang.management.MemoryUsage;
 
-/**
- * 🎯 ENTERPRISE-GRADE Real-Time Memory Tracker (JDK 11+ Compatible)
- * <p>
- * HEAP MEMORY TRACKING STRATEGY:
- * - MemoryMXBean.getHeapMemoryUsage() - JVM native
- * - Accuracy: Precise to KB level
- * - Overhead: <200ns per measurement
- * - Compatible: JDK 8, 11, 17, 21+
- * <p>
- * MEASUREMENT METHOD:
- * - Before request: Capture heap used snapshot
- * - After request: Calculate delta
- * - GC handling: Smart detection of negative deltas
- * - Result: REAL memory allocated during request
- * <p>
- * PRODUCTION CHARACTERISTICS:
- * - Single CRUD: 8-64 KB
- * - Batch 100: 200-800 KB
- * - Batch 1K: 2-8 MB
- * - Batch 10K: 15-50 MB
- * - Batch 100K: 80-200 MB
- */
 @Slf4j
 @Component
 @ConditionalOnProperty(prefix = "crudx.performance", name = "enabled", havingValue = "true")
@@ -100,6 +78,11 @@ public class CrudXPerformanceInterceptor implements HandlerInterceptor {
             return;
         }
 
+        String dtoType = (String) request.getAttribute("dtoType");
+        if (dtoType == null) {
+            dtoType = "NONE";
+        }
+
         // 🔥 Calculate execution time (milliseconds)
         long executionTimeMs = (System.nanoTime() - startTimeNano) / 1_000_000L;
 
@@ -134,7 +117,8 @@ public class CrudXPerformanceInterceptor implements HandlerInterceptor {
                 errorType,
                 memoryDeltaKb, // NULL if GC occurred or measurement invalid
                 dtoConversionTimeMs,
-                dtoUsed != null && dtoUsed
+                dtoUsed != null && dtoUsed,
+                dtoType
         );
 
         // 🔥 Log high-memory requests (>10MB)

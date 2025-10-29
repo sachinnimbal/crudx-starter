@@ -40,7 +40,7 @@ public class CrudXPerformanceTracker {
 
     public void recordMetric(String endpoint, String method, String entityName,
                              long executionTimeMs, boolean success, String errorType,
-                             Long memoryDeltaKb, Long dtoConversionTimeMs, boolean dtoUsed) {
+                             Long memoryDeltaKb, Long dtoConversionTimeMs, boolean dtoUsed, String dtoType) {
 
         // Update global counters
         totalRequests.increment();
@@ -59,6 +59,7 @@ public class CrudXPerformanceTracker {
                 .errorType(errorType)
                 .timestamp(LocalDateTime.now())
                 .dtoUsed(dtoUsed)
+                .dtoType(dtoType)
                 .build();
 
         metric.setExecutionTimeMs(executionTimeMs);
@@ -87,13 +88,13 @@ public class CrudXPerformanceTracker {
                              long executionTimeMs, boolean success, String errorType,
                              Long memoryDeltaKb) {
         recordMetric(endpoint, method, entityName, executionTimeMs, success, errorType,
-                memoryDeltaKb, null, false);
+                memoryDeltaKb, null, false, "NONE");
     }
 
     public void recordMetric(String endpoint, String method, String entityName,
                              long executionTimeMs, boolean success, String errorType) {
         recordMetric(endpoint, method, entityName, executionTimeMs, success, errorType,
-                null, null, false);
+                null, null, false, "NONE");
     }
 
     /**
@@ -316,7 +317,7 @@ public class CrudXPerformanceTracker {
      * LIGHTWEIGHT aggregator (primitives only, no intermediate formatting)
      */
     private static class EndpointStatsAggregator {
-        String endpoint, method, entityName;
+        String endpoint, method, entityName, dtoType;
         int totalCalls, successfulCalls, failedCalls;
         long totalExecutionTimeMs, minExecutionTimeMs = Long.MAX_VALUE, maxExecutionTimeMs;
         Long totalMemoryKb, minMemoryKb, maxMemoryKb;
@@ -362,6 +363,13 @@ public class CrudXPerformanceTracker {
                 if (dtoMs < minDtoMs) minDtoMs = dtoMs;
                 if (dtoMs > maxDtoMs) maxDtoMs = dtoMs;
             }
+            if (dtoType == null) {
+                dtoType = m.getDtoType() != null ? m.getDtoType() : "NONE";
+            } else if (!dtoType.equals(m.getDtoType()) &&
+                    m.getDtoType() != null &&
+                    !"NONE".equals(m.getDtoType())) {
+                dtoType = "MIXED";
+            }
         }
 
         EndpointStats build() {
@@ -403,6 +411,7 @@ public class CrudXPerformanceTracker {
                         formatExecutionTime(minDtoMs) : "N/A");
                 stats.setMaxDtoConversionTime(formatExecutionTime(maxDtoMs));
                 stats.setDtoConversionCount(dtoCount);
+                stats.setDtoType(dtoType != null ? dtoType : "NONE");
             } else {
                 stats.setTotalDtoConversionTime("N/A");
                 stats.setAvgDtoConversionTime("N/A");

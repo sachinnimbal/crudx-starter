@@ -814,6 +814,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
      */
     @SuppressWarnings("unchecked")
     private T convertMapToEntity(Map<String, Object> map, CrudXOperation operation) {
+        setDtoTypeInRequest();
         if (mapperMode == MapperMode.NONE) {
             return convertMapToEntityDirectly(map);
         }
@@ -886,6 +887,18 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         } catch (Exception e) {
             log.error("Response mapping failed: {}, returning entity", e.getMessage(), e);
             return entity;
+        }
+    }
+
+    private void setDtoTypeInRequest() {
+        try {
+            ServletRequestAttributes attrs = (ServletRequestAttributes)
+                    RequestContextHolder.getRequestAttributes();
+            if (attrs != null) {
+                attrs.getRequest().setAttribute("dtoType", mapperMode.name());
+            }
+        } catch (Exception e) {
+            log.trace("Failed to set DTO type: {}", e.getMessage());
         }
     }
 
@@ -1170,17 +1183,13 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
     // ==================== PERFORMANCE TRACKING ====================
 
-    /**
-     * SMART DTO TRACKING:
-     * - COMPILED mappers: NO tracking (overhead < 1ms, negligible)
-     * - RUNTIME mappers: YES tracking (measurable overhead 5-50ms)
-     */
     private void trackDtoConversion(long startNanos, boolean used) {
         long durationMs = (System.nanoTime() - startNanos) / 1_000_000;
         // Skip if < 1ms (COMPILED mappers are this fast)
         if (durationMs < 1) {
             return;
         }
+
         try {
             ServletRequestAttributes attrs = (ServletRequestAttributes)
                     RequestContextHolder.getRequestAttributes();
@@ -1195,6 +1204,9 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                 request.setAttribute("dtoUsed", used ||
                         (request.getAttribute("dtoUsed") != null &&
                                 (Boolean) request.getAttribute("dtoUsed")));
+
+                // ✅ NEW: Set DTO type in request attributes
+                request.setAttribute("dtoType", mapperMode.name());
 
                 if (log.isDebugEnabled()) {
                     log.debug("✓ DTO conversion: +{} ms = {} ms total [Mapper: {}]",
