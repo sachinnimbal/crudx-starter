@@ -195,13 +195,15 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
 
         long duration = System.currentTimeMillis() - startTime;
         double throughput = duration > 0 ? (successCount * 1000.0) / duration : 0.0;
+        String throughputStr = String.format("%.0f", throughput);
 
-        log.info("✅ SQL Batch Complete: {} success, {} skipped | {:.0f} rec/sec | {} ms",
-                successCount, skipCount, throughput, duration);
+        log.info("✅ SQL Batch Complete: {} success, {} skipped | {} rec/sec | {} ms",
+                successCount, skipCount, throughputStr, duration);
 
         // LIGHTWEIGHT result (no entity copies)
         BatchResult<T> result = new BatchResult<>();
-        result.setCreatedEntities(Collections.emptyList()); // Zero-copy
+        result.setCreatedEntities(Collections.emptyList());
+        result.setSuccessCount(successCount);
         result.setSkippedCount(skipCount);
         result.setSkippedReasons(skipReasons.isEmpty() ? null : skipReasons);
 
@@ -316,17 +318,18 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
         long elapsed = System.currentTimeMillis() - startTime;
         double progress = (double) current / total * 100;
         double throughput = elapsed > 0 ? (success * 1000.0) / elapsed : 0;
-
         long eta = elapsed > 0 ? (long) ((elapsed / progress) * (100 - progress)) : 0;
 
-        // Memory metrics (lightweight)
-        long heapUsed = (Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) >> 20; // MB
+        long heapUsed = (Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) >> 20;
         long heapMax = Runtime.getRuntime().maxMemory() >> 20;
 
-        log.info("📊 Progress: {}/{} ({:.1f}%) | Batch {}/{} | Success: {} | Skip: {} | " +
-                        "{:.0f} rec/sec | Mem: {}/{} MB | ETA: {} sec",
-                current, total, progress, batchNum, totalBatches, success, skipped,
-                throughput, heapUsed, heapMax, eta / 1000);
+        String progressStr = String.format("%.1f", progress);
+        String throughputStr = String.format("%.0f", throughput);
+
+        log.info("📊 Progress: {}/{} ({}%) | Batch {}/{} | Success: {} | Skip: {} | " +
+                        "{} rec/sec | Mem: {}/{} MB | ETA: {} sec",
+                current, total, progressStr, batchNum, totalBatches, success, skipped,
+                throughputStr, heapUsed, heapMax, eta / 1000);
     }
 
     /**

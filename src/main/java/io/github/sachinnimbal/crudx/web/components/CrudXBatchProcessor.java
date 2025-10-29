@@ -113,7 +113,7 @@ public class CrudXBatchProcessor<T extends CrudXBaseEntity<ID>, ID extends Seria
                     BatchResult<T> result = crudService.createBatch(chunkEntities, skipDuplicates);
                     lifecycleCallbacks.afterCreateBatch(result.getCreatedEntities());
 
-                    int inserted = chunkEntities.size() - result.getSkippedCount();
+                    int inserted = result.getSuccessCount();
                     successCount += inserted;
                     skipCount += result.getSkippedCount();
                     dbHits++;
@@ -274,13 +274,15 @@ public class CrudXBatchProcessor<T extends CrudXBaseEntity<ID>, ID extends Seria
                 Runtime.getRuntime().freeMemory()) / 1024 / 1024;
         long maxMemory = Runtime.getRuntime().maxMemory() / 1024 / 1024;
         double memoryUsage = (double) currentMemory / maxMemory * 100;
-
         double speed = elapsed > 0 ? (success * 1000.0) / elapsed : 0;
 
-        log.info("📊 Progress: {}/{} ({:.1f}%) | Success: {} | Skipped: {} | Speed: {} rec/sec | " +
-                        "Memory: {} MB / {} MB ({:.1f}%) | Elapsed: {} ms | ETA: {} ms",
-                current, total, progress, success, skipped, (int) speed,
-                currentMemory, maxMemory, memoryUsage, elapsed, remaining);
+        String progressStr = String.format("%.1f", progress);
+        String memoryUsageStr = String.format("%.1f", memoryUsage);
+
+        log.info("📊 Progress: {}/{} ({}%) | Success: {} | Skipped: {} | Speed: {} rec/sec | " +
+                        "Memory: {} MB / {} MB ({}%) | Elapsed: {} ms | ETA: {} ms",
+                current, total, progressStr, success, skipped, (int) speed,
+                currentMemory, maxMemory, memoryUsageStr, elapsed, remaining);
     }
 
     private String calculatePerformanceRating(double recordsPerSecond) {
