@@ -65,7 +65,7 @@ public class CrudXPerformanceInterceptor implements HandlerInterceptor {
             request.setAttribute(ENTITY_NAME_ATTR, entityName);
         }
 
-        // ✅ NEW: Detect and set DTO type from the controller
+        // NEW: Detect and set DTO type from the controller
         String dtoType = detectDtoType(handlerMethod);
         request.setAttribute(DTO_TYPE_ATTR, dtoType);
 
@@ -83,9 +83,18 @@ public class CrudXPerformanceInterceptor implements HandlerInterceptor {
             return;
         }
 
-        // Get DTO type set in preHandle (or updated during request processing)
+        // Get DTO type and usage info from request attributes
         String dtoType = (String) request.getAttribute(DTO_TYPE_ATTR);
+        Boolean dtoUsed = (Boolean) request.getAttribute("dtoUsed");
+
+        // Default to NONE only if not set at all
         if (dtoType == null) {
+            dtoType = "NONE";
+            dtoUsed = false;
+        }
+
+        // If dtoUsed is explicitly false but dtoType is not NONE, trust dtoUsed
+        if (dtoUsed != null && !dtoUsed) {
             dtoType = "NONE";
         }
 
@@ -109,11 +118,27 @@ public class CrudXPerformanceInterceptor implements HandlerInterceptor {
         String errorType = !success ?
                 (ex != null ? ex.getClass().getSimpleName() : "HTTP_" + response.getStatus()) : null;
 
-        // DTO metrics
+        // Get DTO metrics from request attributes
         Long dtoConversionTimeMs = (Long) request.getAttribute("dtoConversionTime");
-        Boolean dtoUsed = (Boolean) request.getAttribute("dtoUsed");
+        Integer dtoConversionCount = (Integer) request.getAttribute("dtoConversionCount");
 
-        // Track with REAL memory value
+        // Validate DTO conversion time against count
+        if (dtoConversionTimeMs != null && dtoConversionTimeMs > 0) {
+            dtoUsed = true; // If we have conversion time, we definitely used DTOs
+
+            if (dtoConversionCount == null || dtoConversionCount == 0) {
+                dtoConversionCount = 1; // Default to at least 1 conversion
+            }
+        }
+
+        // If no conversions but dtoType is not NONE, something's wrong
+        if ((dtoConversionCount == null || dtoConversionCount == 0) &&
+                !"NONE".equals(dtoType)) {
+            log.debug("⚠️  DTO type is {} but no conversions tracked. Endpoint: {} {}",
+                    dtoType, method, endpoint);
+        }
+
+        // Track with REAL values
         tracker.recordMetric(
                 endpoint,
                 method,
@@ -127,16 +152,22 @@ public class CrudXPerformanceInterceptor implements HandlerInterceptor {
                 dtoType
         );
 
+        // ENHANCED: Log DTO conversion details
+        if (log.isDebugEnabled() && dtoUsed != null && dtoUsed) {
+            log.debug("✓ DTO Metrics: Type={}, Conversions={}, Time={}ms, Endpoint={} {}",
+                    dtoType,
+                    dtoConversionCount != null ? dtoConversionCount : "?",
+                    dtoConversionTimeMs != null ? dtoConversionTimeMs : "?",
+                    method, endpoint);
+        }
+
         // Log high-memory requests (>10MB)
         if (memoryDeltaKb != null && memoryDeltaKb > 10240) {
-            log.warn("⚠️  High memory request: {} {} | {}ms | {} KB",
-                    method, endpoint, executionTimeMs, memoryDeltaKb);
+            log.warn("⚠️  High memory request: {} {} | {}ms | {} KB | DTO: {}",
+                    method, endpoint, executionTimeMs, memoryDeltaKb, dtoType);
         }
     }
 
-    /**
-     * ✅ NEW: Detect DTO mapper mode from the controller instance
-     */
     private String detectDtoType(HandlerMethod handlerMethod) {
         try {
             Object controller = handlerMethod.getBean();
@@ -158,9 +189,6 @@ public class CrudXPerformanceInterceptor implements HandlerInterceptor {
         }
     }
 
-    /**
-     * 🎯 Smart Memory Delta Calculation with GC Detection
-     */
     private Long calculateRealMemoryDelta(long deltaBytes, MemoryUsage currentHeapUsage,
                                           long executionTimeMs) {
 
@@ -206,9 +234,6 @@ public class CrudXPerformanceInterceptor implements HandlerInterceptor {
         return 8L;
     }
 
-    /**
-     * Extract entity name from controller class (cached)
-     */
     private static final java.util.concurrent.ConcurrentHashMap<Class<?>, String> ENTITY_NAME_CACHE =
             new java.util.concurrent.ConcurrentHashMap<>(64);
 

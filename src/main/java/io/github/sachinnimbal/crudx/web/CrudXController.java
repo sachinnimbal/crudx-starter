@@ -148,12 +148,14 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     private void initializeDTOMapping() {
         if (!crudxProperties.getDto().isEnabled()) {
             mapperMode = MapperMode.NONE;
-            log.debug("DTO feature disabled - skipping mapper initialization");
+            log.info("❌ DTO feature DISABLED for {} - using entity directly",
+                    entityClass.getSimpleName());
             return;
         }
+
         if (dtoRegistry == null || !dtoRegistry.hasDTOMapping(entityClass)) {
             mapperMode = MapperMode.NONE;
-            log.debug("No DTO mappings for {} - using entity directly (zero overhead)",
+            log.info("ℹ️  No DTO mappings for {} - using entity directly (zero overhead)",
                     entityClass.getSimpleName());
             return;
         }
@@ -162,7 +164,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                 entityClass.getSimpleName().substring(1) + "MapperCrudX";
 
         try {
-            //  ATTEMPT 1: Get COMPILED mapper bean (annotation processor generated)
+            // ✅ ATTEMPT 1: Get COMPILED mapper bean (annotation processor generated)
             @SuppressWarnings("unchecked")
             CrudXMapper<T, Object, Object> generatedMapper =
                     (CrudXMapper<T, Object, Object>) applicationContext.getBean(mapperBeanName);
@@ -170,28 +172,50 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             compiledMapper = generatedMapper;
             mapperMode = MapperMode.COMPILED;
 
-            log.info("🚀 Using COMPILED mapper for {}: {} (ZERO runtime overhead, 100x faster)",
-                    entityClass.getSimpleName(), mapperBeanName);
+            log.info("🚀 COMPILED mapper initialized for {}", entityClass.getSimpleName());
+            log.info("   ✓ Bean: {}", mapperBeanName);
+            log.info("   ✓ Performance: ZERO runtime overhead, ~100x faster than runtime");
+            log.info("   ✓ Memory: Minimal allocation, no reflection");
 
             // Pre-cache DTO classes for ultra-fast lookup
             preCacheDTOClasses();
 
+            // ✅ Log cached DTO count
+            log.info("   ✓ Pre-cached DTOs: {} request, {} response",
+                    requestDtoCache.size(), responseDtoCache.size());
+
         } catch (Exception e) {
-            //  FALLBACK: Use runtime mapper generator
+            // ✅ FALLBACK: Use runtime mapper generator
             if (mapperGenerator != null) {
                 mapperMode = MapperMode.RUNTIME;
-                log.warn("⚠️  Compiled mapper not found for {}, using runtime generation (slower by 10-100x)",
-                        entityClass.getSimpleName());
-                log.warn("💡 To enable compiled mappers: 1) Add annotation processor, 2) Rebuild project");
+
+                log.warn("⚠️  RUNTIME mapper fallback for {}", entityClass.getSimpleName());
+                log.warn("   ✗ Compiled mapper not found: {}", mapperBeanName);
+                log.warn("   ✓ Using runtime generation (10-100x slower than compiled)");
+                log.warn("   💡 To enable compiled mappers:");
+                log.warn("      1. Ensure annotation processor is in your build");
+                log.warn("      2. Rebuild project completely (mvn clean install)");
+                log.warn("      3. Check target/generated-sources for generated mapper");
 
                 // Still pre-cache DTO classes
                 preCacheDTOClasses();
+
+                log.info("   ✓ Pre-cached DTOs: {} request, {} response",
+                        requestDtoCache.size(), responseDtoCache.size());
             } else {
                 mapperMode = MapperMode.NONE;
-                log.warn("⚠️  No mapper available for {}, using direct entity (no DTOs)",
-                        entityClass.getSimpleName());
+                log.error("❌ No mapper available for {}", entityClass.getSimpleName());
+                log.error("   ✗ Compiled mapper not found: {}", mapperBeanName);
+                log.error("   ✗ Runtime generator also unavailable");
+                log.error("   → Using direct entity (DTOs ignored)");
             }
         }
+
+        // ✅ FINAL STATUS LOG
+        log.info("════════════════════════════════════════════════");
+        log.info("Controller: {} | Entity: {} | Mapper: {}",
+                getClass().getSimpleName(), entityClass.getSimpleName(), mapperMode);
+        log.info("════════════════════════════════════════════════");
     }
 
     /**
@@ -926,10 +950,19 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                     RequestContextHolder.getRequestAttributes();
             if (attrs != null) {
                 HttpServletRequest request = attrs.getRequest();
-                // Only update if we're actually using DTOs (not NONE)
+                // Set attributes even for COMPILED mode
                 if (mapperMode != MapperMode.NONE) {
                     request.setAttribute("dtoType", mapperMode.name());
                     request.setAttribute("dtoUsed", true);
+
+                    // Initialize counter if not present
+                    if (request.getAttribute("dtoConversionCount") == null) {
+                        request.setAttribute("dtoConversionCount", 0);
+                    }
+                } else {
+                    // Explicitly set NONE for non-DTO operations
+                    request.setAttribute("dtoType", "NONE");
+                    request.setAttribute("dtoUsed", false);
                 }
             }
         } catch (Exception e) {
@@ -951,20 +984,24 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             return convertMapToEntityDirectly(map);
         }
 
+        // Update request BEFORE conversion
         updateDtoTypeInRequest();
 
         try {
             Object requestDto = objectMapper.convertValue(map, requestDtoClass);
 
-            // COMPILED MODE: Don't track (< 1ms overhead)
+            // Track time for both COMPILED and RUNTIME
+            long start = System.nanoTime();
+
+            T entity;
             if (mapperMode == MapperMode.COMPILED) {
-                return compiledMapper.toEntity(requestDto);
+                entity = compiledMapper.toEntity(requestDto);
+            } else {
+                entity = mapperGenerator.toEntity(requestDto, entityClass);
             }
 
-            // RUNTIME MODE: Track time (measurable overhead)
-            long start = System.nanoTime();
-            T entity = mapperGenerator.toEntity(requestDto, entityClass);
             trackDtoConversion(start, true);
+
             return entity;
 
         } catch (Exception e) {
@@ -985,37 +1022,41 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         Class<?> responseDtoClass = responseDtoCache.get(operation);
         if (responseDtoClass == null) return entity;
 
+        // Update request BEFORE conversion
         updateDtoTypeInRequest();
 
         try {
             io.github.sachinnimbal.crudx.core.dto.annotations.CrudXResponse annotation =
                     responseDtoClass.getAnnotation(io.github.sachinnimbal.crudx.core.dto.annotations.CrudXResponse.class);
 
-            // COMPILED MODE: Don't track
+            // Track time for both modes
+            long start = System.nanoTime();
+
+            Object response;
+
             if (mapperMode == MapperMode.COMPILED) {
                 if (annotation != null && (annotation.includeId() || annotation.includeAudit())) {
                     try {
-                        return mapperGenerator != null
+                        response = mapperGenerator != null
                                 ? mapperGenerator.toResponseMap(entity, responseDtoClass)
                                 : compiledMapper.toResponse(entity);
                     } catch (Exception e) {
-                        return compiledMapper.toResponse(entity);
+                        response = compiledMapper.toResponse(entity);
                     }
+                } else {
+                    response = compiledMapper.toResponse(entity);
                 }
-                return compiledMapper.toResponse(entity);
-            }
-
-            // RUNTIME MODE: Track time
-            long start = System.nanoTime();
-            Object response;
-
-            if (annotation != null && (annotation.includeId() || annotation.includeAudit())) {
-                response = mapperGenerator.toResponseMap(entity, responseDtoClass);
             } else {
-                response = mapperGenerator.toResponse(entity, responseDtoClass);
+                // RUNTIME MODE
+                if (annotation != null && (annotation.includeId() || annotation.includeAudit())) {
+                    response = mapperGenerator.toResponseMap(entity, responseDtoClass);
+                } else {
+                    response = mapperGenerator.toResponse(entity, responseDtoClass);
+                }
             }
 
             trackDtoConversion(start, true);
+
             return response;
 
         } catch (Exception e) {
@@ -1035,16 +1076,21 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         Class<?> responseDtoClass = responseDtoCache.get(operation);
         if (responseDtoClass == null) return entities;
 
+        // Update request BEFORE conversion
         updateDtoTypeInRequest();
 
         try {
             io.github.sachinnimbal.crudx.core.dto.annotations.CrudXResponse annotation =
                     responseDtoClass.getAnnotation(io.github.sachinnimbal.crudx.core.dto.annotations.CrudXResponse.class);
 
-            // COMPILED MODE: Don't track
+            // Track time for both modes
+            long start = System.nanoTime();
+
+            List<?> responses;
+
             if (mapperMode == MapperMode.COMPILED) {
                 if (annotation != null && (annotation.includeId() || annotation.includeAudit())) {
-                    return entities.stream()
+                    responses = entities.stream()
                             .map(entity -> {
                                 try {
                                     return mapperGenerator != null
@@ -1055,21 +1101,20 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                                 }
                             })
                             .collect(Collectors.toList());
+                } else {
+                    responses = compiledMapper.toResponseList(entities);
                 }
-                return compiledMapper.toResponseList(entities);
-            }
-
-            // RUNTIME MODE: Track time
-            long start = System.nanoTime();
-            List<?> responses;
-
-            if (annotation != null && (annotation.includeId() || annotation.includeAudit())) {
-                responses = mapperGenerator.toResponseMapList(entities, responseDtoClass);
             } else {
-                responses = mapperGenerator.toResponseList(entities, responseDtoClass);
+                // RUNTIME MODE
+                if (annotation != null && (annotation.includeId() || annotation.includeAudit())) {
+                    responses = mapperGenerator.toResponseMapList(entities, responseDtoClass);
+                } else {
+                    responses = mapperGenerator.toResponseList(entities, responseDtoClass);
+                }
             }
 
             trackDtoConversion(start, true);
+
             return responses;
 
         } catch (Exception e) {
@@ -1087,11 +1132,14 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             return entityResult;
         }
 
+        // Update request BEFORE conversion
         updateDtoTypeInRequest();
 
-        long start = System.nanoTime();
-
         try {
+            // Track time for batch result wrapping
+            long start = System.nanoTime();
+
+            // This internally calls convertEntitiesToResponse which tracks its own time
             List<?> responseDtos = convertEntitiesToResponse(
                     entityResult.getCreatedEntities(), operation);
 
@@ -1102,8 +1150,11 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
             long elapsed = (System.nanoTime() - start) / 1_000_000;
 
-            if (elapsed > 1) {
-                log.debug("✓ BatchResult wrapping: {} ms", elapsed);
+            // Track the wrapping operation separately
+            // Note: convertEntitiesToResponse already tracked the entity conversions
+            // This tracks the BatchResult wrapping overhead only
+            if (elapsed > 0) {
+                log.trace("✓ BatchResult wrapping overhead: {} ms", elapsed);
             }
 
             return dtoResult;
@@ -1127,11 +1178,14 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             return entityPage;
         }
 
+        // Update request BEFORE conversion
         updateDtoTypeInRequest();
 
-        long start = System.nanoTime();
-
         try {
+            // Track time for page response wrapping
+            long start = System.nanoTime();
+
+            // This internally calls convertEntitiesToResponse which tracks its own time
             List<?> dtoContent = convertEntitiesToResponse(entityPage.getContent(), operation);
 
             PageResponse<Object> dtoPage = PageResponse.builder()
@@ -1147,8 +1201,11 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
             long elapsed = (System.nanoTime() - start) / 1_000_000;
 
-            log.debug("✓ PageResponse: {} items in {} ms (Mapper: {})",
-                    entityPage.getContent().size(), elapsed, mapperMode);
+            // Track the wrapping operation separately
+            if (elapsed > 0) {
+                log.trace("✓ PageResponse wrapping: {} items in {} ms (Mapper: {})",
+                        entityPage.getContent().size(), elapsed, mapperMode);
+            }
 
             return dtoPage;
 
@@ -1173,14 +1230,19 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             return null;
         }
 
+        // Update request BEFORE conversion
         updateDtoTypeInRequest();
 
-        long start = System.nanoTime();
-
         try {
+            // Track time for validation DTO conversion
+            long start = System.nanoTime();
+
             Object dto = objectMapper.convertValue(map, requestDtoClass);
+
             trackDtoConversion(start, true);
+
             return dto;
+
         } catch (Exception e) {
             log.debug("Map→DTO conversion failed for validation: {}", e.getMessage());
             return null;
@@ -1318,10 +1380,6 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
     private void trackDtoConversion(long startNanos, boolean used) {
         long durationMs = (System.nanoTime() - startNanos) / 1_000_000;
-        // Skip if < 1ms (COMPILED mappers are this fast)
-        if (durationMs < 1) {
-            return;
-        }
 
         try {
             ServletRequestAttributes attrs = (ServletRequestAttributes)
@@ -1330,20 +1388,26 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             if (attrs != null) {
                 HttpServletRequest request = attrs.getRequest();
 
+                // Accumulate total conversion time
                 Long existingTime = (Long) request.getAttribute("dtoConversionTime");
                 long totalTime = (existingTime != null ? existingTime : 0L) + durationMs;
 
+                // Accumulate conversion count
+                Integer existingCount = (Integer) request.getAttribute("dtoConversionCount");
+                int totalCount = (existingCount != null ? existingCount : 0) + 1;
+
                 request.setAttribute("dtoConversionTime", totalTime);
+                request.setAttribute("dtoConversionCount", totalCount);
                 request.setAttribute("dtoUsed", used ||
                         (request.getAttribute("dtoUsed") != null &&
                                 (Boolean) request.getAttribute("dtoUsed")));
 
-                // ✅ NEW: Set DTO type in request attributes
+                // ✅ CRITICAL: Set DTO type in request attributes
                 request.setAttribute("dtoType", mapperMode.name());
 
-                if (log.isDebugEnabled()) {
-                    log.debug("✓ DTO conversion: +{} ms = {} ms total [Mapper: {}]",
-                            durationMs, totalTime, mapperMode);
+                if (log.isTraceEnabled()) {
+                    log.trace("✓ DTO conversion #{}: +{} ms = {} ms total [Mapper: {}]",
+                            totalCount, durationMs, totalTime, mapperMode);
                 }
             }
         } catch (Exception e) {
