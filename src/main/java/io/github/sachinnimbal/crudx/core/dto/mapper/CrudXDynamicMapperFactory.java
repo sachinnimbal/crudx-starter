@@ -50,8 +50,8 @@ public class CrudXDynamicMapperFactory implements BeanFactoryPostProcessor,
 
         log.debug("Preparing to create dynamic mapper beans...");
 
-        // Register a placeholder - actual mapper will be created when CrudXMapperRegistry finds DTOs
-        // This ensures mapper beans exist when requested
+        // Note: Actual mapper beans are created by CrudXMapperRegistry
+        // This factory now only creates fallback mappers when compiled ones don't exist
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})
@@ -63,6 +63,17 @@ public class CrudXDynamicMapperFactory implements BeanFactoryPostProcessor,
             log.debug("Mapper bean already exists: {}", beanName);
             return;
         }
+
+        // 🔥 CRITICAL FIX: Check if compiled mapper exists first
+        if (compiledMapperExists(entityClass)) {
+            log.info("✓ Compiled mapper exists for {} - skipping runtime wrapper",
+                    entityClass.getSimpleName());
+            return;
+        }
+
+        // 🔥 Only create runtime wrapper if compiled mapper doesn't exist
+        log.warn("⚠️  No compiled mapper found for {} - creating runtime wrapper",
+                entityClass.getSimpleName());
 
         // Get generator from context if not injected
         CrudXMapperGenerator gen = this.generator;
@@ -86,8 +97,31 @@ public class CrudXDynamicMapperFactory implements BeanFactoryPostProcessor,
 
         registry.registerBeanDefinition(beanName, builder.getBeanDefinition());
 
-        log.info("✓ Created dynamic mapper bean: {} for entity {}",
+        log.info("✓ Created runtime mapper bean: {} for entity {}",
                 beanName, entityClass.getSimpleName());
+    }
+
+    /**
+     * 🔥 NEW: Check if compiled mapper class exists in classpath
+     */
+    private boolean compiledMapperExists(Class<?> entityClass) {
+        try {
+            // Expected compiled mapper class name pattern
+            String entityPackage = entityClass.getPackage().getName();
+            String entitySimpleName = entityClass.getSimpleName();
+            String compiledMapperClassName = entityPackage + ".generated." +
+                    entitySimpleName + "MapperCrudX";
+
+            // Try to load the compiled mapper class
+            Class<?> compiledMapperClass = Class.forName(compiledMapperClassName);
+
+            log.debug("✓ Found compiled mapper class: {}", compiledMapperClassName);
+            return true;
+
+        } catch (ClassNotFoundException e) {
+            log.debug("✗ No compiled mapper class found for {}", entityClass.getSimpleName());
+            return false;
+        }
     }
 
     public String getMapperBeanName(Class<?> entityClass) {
@@ -108,6 +142,9 @@ public class CrudXDynamicMapperFactory implements BeanFactoryPostProcessor,
             this.entityClass = (Class<E>) entityClass;
             this.generator = generator;
             this.registry = registry;
+
+            log.warn("⚠️  RuntimeGeneratedMapper created for {} - This should only happen when compiled mapper is missing!",
+                    entityClass.getSimpleName());
         }
 
         @Override

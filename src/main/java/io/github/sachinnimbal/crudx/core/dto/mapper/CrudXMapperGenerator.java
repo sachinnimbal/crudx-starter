@@ -534,9 +534,6 @@ public class CrudXMapperGenerator {
         return Character.toUpperCase(str.charAt(0)) + str.substring(1);
     }
 
-    /**
-     * 🔥 NEW: Clear caches to prevent memory leaks
-     */
     public void clearCaches() {
         mappingPlanCache.clear();
         accessorCache.clear();
@@ -545,7 +542,21 @@ public class CrudXMapperGenerator {
         formatters.clear();
         typeConverterCache.clear();
         OBJECT_POOL.remove();
-        log.info("✓ All caches cleared");
+        depthTracker.remove();
+
+        log.info("✓ Runtime mapper caches cleared for fresh generation");
+    }
+
+    public void logCacheStatistics() {
+        Map<String, Integer> stats = getCacheStats();
+
+        log.debug("Runtime Mapper Cache Statistics:");
+        log.debug("  • Mapping Plans: {}", stats.get("mappingPlans"));
+        log.debug("  • Accessors: {}", stats.get("accessors"));
+        log.debug("  • Fields: {}", stats.get("fields"));
+        log.debug("  • Constructors: {}", stats.get("constructors"));
+        log.debug("  • Formatters: {}", stats.get("formatters"));
+        log.debug("  • Type Converters: {}", stats.get("typeConverters"));
     }
 
     public Map<String, Integer> getCacheStats() {

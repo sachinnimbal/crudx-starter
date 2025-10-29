@@ -7,6 +7,7 @@ import io.github.sachinnimbal.crudx.core.enums.CrudXOperation;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.support.BeanDefinitionBuilder;
 import org.springframework.beans.factory.support.BeanDefinitionRegistry;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.ApplicationContext;
@@ -162,19 +163,90 @@ public class CrudXMapperRegistry {
         ConfigurableApplicationContext context = (ConfigurableApplicationContext) applicationContext;
         BeanDefinitionRegistry registry = (BeanDefinitionRegistry) context.getBeanFactory();
 
-        int createdCount = 0;
+        int compiledCount = 0;
+        int runtimeCount = 0;
 
         for (Class<?> entityClass : getRegisteredEntities()) {
+            String mapperBeanName = getMapperBeanName(entityClass);
+
             try {
-                mapperFactory.createMapperBean(entityClass, registry, this);
-                createdCount++;
+                // 🔥 CRITICAL: Check if compiled mapper class exists first
+                if (compiledMapperClassExists(entityClass)) {
+                    // Register the compiled mapper class as a bean
+                    registerCompiledMapperBean(entityClass, registry);
+                    compiledCount++;
+                    log.info("✓ Registered COMPILED mapper bean: {} for entity {}",
+                            mapperBeanName, entityClass.getSimpleName());
+                } else {
+                    // Fall back to runtime wrapper
+                    mapperFactory.createMapperBean(entityClass, registry, this);
+                    runtimeCount++;
+                    log.warn("⚠️  Created RUNTIME mapper bean: {} for entity {} (compiled mapper not found)",
+                            mapperBeanName, entityClass.getSimpleName());
+                }
             } catch (Exception e) {
                 log.error("❌ Failed to create mapper bean for {}: {}",
                         entityClass.getSimpleName(), e.getMessage());
             }
         }
 
-        log.info("🔧 Created {} mapper beans", createdCount);
+        if (runtimeCount > 0) {
+            log.warn("════════════════════════════════════════════════════════════════");
+            log.warn("⚠️  {} entities using RUNTIME mappers (slow)", runtimeCount);
+            log.warn("   Add annotationProcessor to build config for 100x speedup!");
+            log.warn("   Gradle: annotationProcessor 'io.github.sachinnimbal:crudx-starter:1.2.1'");
+            log.warn("   Maven: Add to <annotationProcessorPaths>");
+            log.warn("════════════════════════════════════════════════════════════════");
+        }
+
+        log.info("🔧 Created {} mapper beans: {} compiled, {} runtime",
+                compiledCount + runtimeCount, compiledCount, runtimeCount);
+    }
+
+    /**
+     * 🔥 NEW: Check if compiled mapper class exists
+     */
+    private boolean compiledMapperClassExists(Class<?> entityClass) {
+        try {
+            String entityPackage = entityClass.getPackage().getName();
+            String entitySimpleName = entityClass.getSimpleName();
+            String compiledMapperClassName = entityPackage + ".generated." +
+                    entitySimpleName + "MapperCrudX";
+
+            Class.forName(compiledMapperClassName);
+            return true;
+        } catch (ClassNotFoundException e) {
+            return false;
+        }
+    }
+
+    /**
+     * 🔥 NEW: Register compiled mapper bean from generated class
+     */
+    private void registerCompiledMapperBean(Class<?> entityClass, BeanDefinitionRegistry registry) {
+        try {
+            String entityPackage = entityClass.getPackage().getName();
+            String entitySimpleName = entityClass.getSimpleName();
+            String compiledMapperClassName = entityPackage + ".generated." +
+                    entitySimpleName + "MapperCrudX";
+
+            Class<?> compiledMapperClass = Class.forName(compiledMapperClassName);
+
+            String beanName = getMapperBeanName(entityClass);
+
+            // Create bean definition for the compiled mapper
+            BeanDefinitionBuilder builder = BeanDefinitionBuilder
+                    .genericBeanDefinition(compiledMapperClass);
+
+            registry.registerBeanDefinition(beanName, builder.getBeanDefinition());
+
+            log.debug("✓ Registered compiled mapper class: {}", compiledMapperClassName);
+
+        } catch (Exception e) {
+            log.error("Failed to register compiled mapper for {}: {}",
+                    entityClass.getSimpleName(), e.getMessage());
+            throw new RuntimeException("Failed to register compiled mapper", e);
+        }
     }
 
     public Optional<Class<?>> getRequestDTO(Class<?> entityClass, CrudXOperation operation) {

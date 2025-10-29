@@ -28,7 +28,9 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.ApplicationContext;
+import org.springframework.context.event.EventListener;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -94,6 +96,9 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     private static final int LARGE_DATASET_THRESHOLD = 1000;
     private static final int DEFAULT_PAGE_SIZE = 50;
 
+
+// Updated CrudXController.java - Allow Runtime Fallback with Warnings
+
     @PostConstruct
     protected void initializeService() {
         resolveGenericTypes();
@@ -131,6 +136,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                     "Service bean not found: " + serviceBeanName, e
             );
         }
+
         boolean dtoEnabled = crudxProperties.getDto().isEnabled();
 
         if (!dtoEnabled) {
@@ -138,9 +144,9 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             log.warn("⚠️  DTO Feature is DISABLED (crudx.dto.enabled=false)");
             log.warn("   - All DTO annotations will be ignored");
             log.warn("   - Using direct entity mapping (zero overhead)");
-            log.warn("   - No compiled or runtime mappers will be used");
             return;
         }
+
         initializeDTOMapping();
         cacheFieldMetadata();
     }
@@ -164,43 +170,171 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                 entityClass.getSimpleName().substring(1) + "MapperCrudX";
 
         try {
-            // ✅ ATTEMPT 1: Get COMPILED mapper bean (annotation processor generated)
+            // ✅ ATTEMPT 1: Get mapper bean
             @SuppressWarnings("unchecked")
             CrudXMapper<T, Object, Object> generatedMapper =
                     (CrudXMapper<T, Object, Object>) applicationContext.getBean(mapperBeanName);
 
-            compiledMapper = generatedMapper;
-            mapperMode = MapperMode.COMPILED;
+            if (generatedMapper == null) {
+                throw new IllegalStateException("Mapper bean found but is null!");
+            }
 
-            log.info("🚀 COMPILED mapper initialized for {}", entityClass.getSimpleName());
-            log.info("   ✓ Bean: {}", mapperBeanName);
-            log.info("   ✓ Performance: ZERO runtime overhead, ~100x faster than runtime");
-            log.info("   ✓ Memory: Minimal allocation, no reflection");
+            // 🔥 CRITICAL: Detect if this is actually a RuntimeGeneratedMapper
+            String mapperClassName = generatedMapper.getClass().getName();
+            boolean isRuntimeMapper = mapperClassName.contains("RuntimeGeneratedMapper");
 
-            // Pre-cache DTO classes for ultra-fast lookup
-            preCacheDTOClasses();
-
-            // ✅ Log cached DTO count
-            log.info("   ✓ Pre-cached DTOs: {} request, {} response",
-                    requestDtoCache.size(), responseDtoCache.size());
-
-        } catch (Exception e) {
-            // ✅ FALLBACK: Use runtime mapper generator
-            if (mapperGenerator != null) {
+            if (isRuntimeMapper) {
+                // This is the runtime fallback wrapper, not a compiled mapper
                 mapperMode = MapperMode.RUNTIME;
+                compiledMapper = null; // Don't use it as compiled mapper
 
-                log.warn("⚠️  RUNTIME mapper fallback for {}", entityClass.getSimpleName());
-                log.warn("   ✗ Compiled mapper not found: {}", mapperBeanName);
-                log.warn("   ✓ Using runtime generation (10-100x slower than compiled)");
-                log.warn("   💡 To enable compiled mappers:");
-                log.warn("      1. Ensure annotation processor is in your build");
-                log.warn("      2. Rebuild project completely (mvn clean install)");
-                log.warn("      3. Check target/generated-sources for generated mapper");
+                // Clear caches for fresh generation
+                clearRuntimeMapperCaches();
 
-                // Still pre-cache DTO classes
+                log.warn("════════════════════════════════════════════════════════════════");
+                log.warn("⚠️  RUNTIME MAPPER DETECTED FOR {}", entityClass.getSimpleName());
+                log.warn("════════════════════════════════════════════════════════════════");
+                log.warn("");
+                log.warn("📊 PERFORMANCE IMPACT:");
+                log.warn("   ✗ Bean type: {}", mapperClassName);
+                log.warn("   ✗ Compiled mapper not found in classpath");
+                log.warn("   ✗ Using runtime reflection-based mapping");
+                log.warn("   ✗ Performance: 10-100x SLOWER than compiled mappers");
+                log.warn("   ✗ Memory: Higher allocation, reflection overhead");
+                log.warn("");
+                log.warn("🔧 TO ENABLE FAST COMPILED MAPPERS:");
+                log.warn("");
+                log.warn("   GRADLE (build.gradle):");
+                log.warn("   ─────────────────────");
+                log.warn("   dependencies {{");
+                log.warn("       implementation 'io.github.sachinnimbal:crudx-starter:1.2.1'");
+                log.warn("       annotationProcessor 'io.github.sachinnimbal:crudx-starter:1.2.1'  // ← ADD THIS");
+                log.warn("   }}");
+                log.warn("");
+                log.warn("   MAVEN (pom.xml):");
+                log.warn("   ────────────────");
+                log.warn("   <build>");
+                log.warn("       <plugins>");
+                log.warn("           <plugin>");
+                log.warn("               <groupId>org.apache.maven.plugins</groupId>");
+                log.warn("               <artifactId>maven-compiler-plugin</artifactId>");
+                log.warn("               <configuration>");
+                log.warn("                   <annotationProcessorPaths>");
+                log.warn("                       <path>");
+                log.warn("                           <groupId>io.github.sachinnimbal</groupId>");
+                log.warn("                           <artifactId>crudx-starter</artifactId>");
+                log.warn("                           <version>1.2.1</version>");
+                log.warn("                       </path>");
+                log.warn("                   </annotationProcessorPaths>");
+                log.warn("               </configuration>");
+                log.warn("           </plugin>");
+                log.warn("       </plugins>");
+                log.warn("   </build>");
+                log.warn("");
+                log.warn("   THEN RUN:");
+                log.warn("   ─────────");
+                log.warn("   mvn clean install   (Maven)");
+                log.warn("   gradle clean build  (Gradle)");
+                log.warn("");
+                log.warn("💡 BENEFITS OF COMPILED MAPPERS:");
+                log.warn("   ✓ 100x faster mapping performance");
+                log.warn("   ✓ Zero reflection overhead");
+                log.warn("   ✓ Compile-time validation of DTOs");
+                log.warn("   ✓ Lower memory usage");
+                log.warn("   ✓ Better IDE support and debugging");
+                log.warn("");
+                log.warn("════════════════════════════════════════════════════════════════");
+
+                // Pre-cache DTO classes even in runtime mode
+                preCacheDTOClasses();
+
+                log.info("   ✓ Pre-cached DTOs: {} request, {} response (runtime mode)",
+                        requestDtoCache.size(), responseDtoCache.size());
+            } else {
+                // This is a real compiled mapper!
+                compiledMapper = generatedMapper;
+                mapperMode = MapperMode.COMPILED;
+
+                log.info("🚀 COMPILED mapper initialized for {}", entityClass.getSimpleName());
+                log.info("   ✓ Bean: {}", mapperBeanName);
+                log.info("   ✓ Bean Type: {}", mapperClassName);
+                log.info("   ✓ Performance: ZERO runtime overhead, ~100x faster than runtime");
+                log.info("   ✓ Memory: Minimal allocation, no reflection");
+
+                // Pre-cache DTO classes for ultra-fast lookup
                 preCacheDTOClasses();
 
                 log.info("   ✓ Pre-cached DTOs: {} request, {} response",
+                        requestDtoCache.size(), responseDtoCache.size());
+            }
+
+        } catch (Exception e) {
+            // ✅ FALLBACK: Use runtime mapper generator (with strong warning)
+            if (mapperGenerator != null) {
+                // 🔥 CLEAR OLD RUNTIME CACHES - Force fresh generation
+                clearRuntimeMapperCaches();
+
+                mapperMode = MapperMode.RUNTIME;
+
+                log.warn("════════════════════════════════════════════════════════════════");
+                log.warn("⚠️  RUNTIME MAPPER FALLBACK ACTIVE FOR {}", entityClass.getSimpleName());
+                log.warn("════════════════════════════════════════════════════════════════");
+                log.warn("");
+                log.warn("📊 PERFORMANCE IMPACT:");
+                log.warn("   ✗ Compiled mapper not found: {}", mapperBeanName);
+                log.warn("   ✗ Error: {}", e.getMessage());
+                log.warn("   ✗ Using runtime reflection-based mapping");
+                log.warn("   ✗ Performance: 10-100x SLOWER than compiled mappers");
+                log.warn("   ✗ Memory: Higher allocation, reflection overhead");
+                log.warn("   ✗ Startup: Slower due to runtime code generation");
+                log.warn("");
+                log.warn("🔧 TO ENABLE FAST COMPILED MAPPERS:");
+                log.warn("");
+                log.warn("   GRADLE (build.gradle):");
+                log.warn("   ─────────────────────");
+                log.warn("   dependencies {{");
+                log.warn("       implementation 'io.github.sachinnimbal:crudx-starter:1.2.1'");
+                log.warn("       annotationProcessor 'io.github.sachinnimbal:crudx-starter:1.2.1'  // ← ADD THIS");
+                log.warn("   }}");
+                log.warn("");
+                log.warn("   MAVEN (pom.xml):");
+                log.warn("   ────────────────");
+                log.warn("   <build>");
+                log.warn("       <plugins>");
+                log.warn("           <plugin>");
+                log.warn("               <groupId>org.apache.maven.plugins</groupId>");
+                log.warn("               <artifactId>maven-compiler-plugin</artifactId>");
+                log.warn("               <configuration>");
+                log.warn("                   <annotationProcessorPaths>");
+                log.warn("                       <path>");
+                log.warn("                           <groupId>io.github.sachinnimbal</groupId>");
+                log.warn("                           <artifactId>crudx-starter</artifactId>");
+                log.warn("                           <version>1.2.1</version>");
+                log.warn("                       </path>");
+                log.warn("                   </annotationProcessorPaths>");
+                log.warn("               </configuration>");
+                log.warn("           </plugin>");
+                log.warn("       </plugins>");
+                log.warn("   </build>");
+                log.warn("");
+                log.warn("   THEN RUN:");
+                log.warn("   ─────────");
+                log.warn("   mvn clean install   (Maven)");
+                log.warn("   gradle clean build  (Gradle)");
+                log.warn("");
+                log.warn("💡 BENEFITS OF COMPILED MAPPERS:");
+                log.warn("   ✓ 100x faster mapping performance");
+                log.warn("   ✓ Zero reflection overhead");
+                log.warn("   ✓ Compile-time validation of DTOs");
+                log.warn("   ✓ Lower memory usage");
+                log.warn("   ✓ Better IDE support and debugging");
+                log.warn("");
+                log.warn("════════════════════════════════════════════════════════════════");
+
+                // Pre-cache DTO classes even in runtime mode
+                preCacheDTOClasses();
+
+                log.info("   ✓ Pre-cached DTOs: {} request, {} response (runtime mode)",
                         requestDtoCache.size(), responseDtoCache.size());
             } else {
                 mapperMode = MapperMode.NONE;
@@ -215,7 +349,29 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         log.info("════════════════════════════════════════════════");
         log.info("Controller: {} | Entity: {} | Mapper: {}",
                 getClass().getSimpleName(), entityClass.getSimpleName(), mapperMode);
+        if (mapperMode == MapperMode.COMPILED) {
+            log.info("✓ COMPILED mapper active: {}", compiledMapper.getClass().getSimpleName());
+        } else if (mapperMode == MapperMode.RUNTIME) {
+            log.warn("⚠️  RUNTIME mapper active - Add annotationProcessor for 100x speedup");
+        } else {
+            log.info("ℹ️  No DTOs configured - using direct entity mapping");
+        }
         log.info("════════════════════════════════════════════════");
+    }
+
+    /**
+     * 🔥 NEW: Clear runtime mapper caches to force fresh generation
+     * Prevents using stale cached mapping plans from previous runs
+     */
+    private void clearRuntimeMapperCaches() {
+        if (mapperGenerator != null) {
+            try {
+                mapperGenerator.clearCaches();
+                log.info("✓ Cleared runtime mapper caches for fresh generation");
+            } catch (Exception e) {
+                log.warn("Failed to clear runtime mapper caches: {}", e.getMessage());
+            }
+        }
     }
 
     /**
@@ -236,9 +392,6 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                 requestDtoCache.size(), responseDtoCache.size());
     }
 
-    /**
-     * OPTIMIZATION: Pre-cache field metadata for fast validation
-     */
     private void cacheFieldMetadata() {
         try {
             for (Field field : getFieldsFast(entityClass)) {
@@ -429,7 +582,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                         skipReasons.addAll(result.getSkippedReasons());
                     }
 
-                    log.debug("✅ Chunk {}: {} inserted, {} skipped",
+                    log.debug("Chunk {}: {} inserted, {} skipped",
                             (chunkStart / dbBatchSize) + 1, inserted, result.getSkippedCount());
 
                 } catch (Exception e) {
@@ -474,7 +627,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                 recordsPerSecond, skipReasons
         );
 
-        log.info("✅ Batch completed: {} created, {} skipped | {} DB hits | {} rec/sec | {} ms",
+        log.info("Batch completed: {} created, {} skipped | {} DB hits | {} rec/sec | {} ms",
                 successCount, skipCount, dbHits, (int) recordsPerSecond, duration);
 
         // Determine response status
@@ -970,33 +1123,46 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         }
     }
 
+    // ==================== DTO CONVERSION METHODS ====================
+
     /**
      * 1. convertMapToEntity() - Used in POST, PATCH operations
+     * Supports both COMPILED and RUNTIME modes
      */
     @SuppressWarnings("unchecked")
     private T convertMapToEntity(Map<String, Object> map, CrudXOperation operation) {
         if (mapperMode == MapperMode.NONE) {
+            log.trace("Map→Entity: NONE mode (direct conversion)");
             return convertMapToEntityDirectly(map);
         }
 
         Class<?> requestDtoClass = requestDtoCache.get(operation);
         if (requestDtoClass == null) {
+            log.trace("Map→Entity: No DTO class for operation {}, using direct conversion", operation);
             return convertMapToEntityDirectly(map);
         }
 
-        // Update request BEFORE conversion
         updateDtoTypeInRequest();
 
         try {
             Object requestDto = objectMapper.convertValue(map, requestDtoClass);
 
-            // Track time for both COMPILED and RUNTIME
             long start = System.nanoTime();
 
             T entity;
             if (mapperMode == MapperMode.COMPILED) {
+                // 🔥 DEBUG: Verify compiled mapper is actually being used
+                if (compiledMapper == null) {
+                    log.error("❌ CRITICAL: mapperMode is COMPILED but compiledMapper is NULL!");
+                    throw new IllegalStateException("Compiled mapper is null despite COMPILED mode");
+                }
+                log.debug("✓ Using COMPILED mapper: {} → {}",
+                        requestDto.getClass().getSimpleName(), entityClass.getSimpleName());
                 entity = compiledMapper.toEntity(requestDto);
             } else {
+                // RUNTIME mode: Generate fresh mapping each time
+                log.debug("⚠️  Using RUNTIME mapper: {} → {}",
+                        requestDto.getClass().getSimpleName(), entityClass.getSimpleName());
                 entity = mapperGenerator.toEntity(requestDto, entityClass);
             }
 
@@ -1006,13 +1172,14 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
         } catch (Exception e) {
             log.error("DTO mapping failed for {}: {}, falling back to direct conversion",
-                    operation, e.getMessage());
+                    operation, e.getMessage(), e);
             return convertMapToEntityDirectly(map);
         }
     }
 
     /**
      * 2. convertEntityToResponse() - Used in GET by ID, POST response
+     * Supports both COMPILED and RUNTIME modes
      */
     @SuppressWarnings("unchecked")
     private Object convertEntityToResponse(T entity, CrudXOperation operation) {
@@ -1022,14 +1189,12 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         Class<?> responseDtoClass = responseDtoCache.get(operation);
         if (responseDtoClass == null) return entity;
 
-        // Update request BEFORE conversion
         updateDtoTypeInRequest();
 
         try {
             io.github.sachinnimbal.crudx.core.dto.annotations.CrudXResponse annotation =
                     responseDtoClass.getAnnotation(io.github.sachinnimbal.crudx.core.dto.annotations.CrudXResponse.class);
 
-            // Track time for both modes
             long start = System.nanoTime();
 
             Object response;
@@ -1047,7 +1212,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                     response = compiledMapper.toResponse(entity);
                 }
             } else {
-                // RUNTIME MODE
+                // RUNTIME MODE: Generate fresh mapping
                 if (annotation != null && (annotation.includeId() || annotation.includeAudit())) {
                     response = mapperGenerator.toResponseMap(entity, responseDtoClass);
                 } else {
@@ -1067,6 +1232,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
     /**
      * 3. convertEntitiesToResponse() - Used in GET all, batch responses
+     * Supports both COMPILED and RUNTIME modes
      */
     @SuppressWarnings("unchecked")
     private List<?> convertEntitiesToResponse(List<T> entities, CrudXOperation operation) {
@@ -1076,14 +1242,12 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         Class<?> responseDtoClass = responseDtoCache.get(operation);
         if (responseDtoClass == null) return entities;
 
-        // Update request BEFORE conversion
         updateDtoTypeInRequest();
 
         try {
             io.github.sachinnimbal.crudx.core.dto.annotations.CrudXResponse annotation =
                     responseDtoClass.getAnnotation(io.github.sachinnimbal.crudx.core.dto.annotations.CrudXResponse.class);
 
-            // Track time for both modes
             long start = System.nanoTime();
 
             List<?> responses;
@@ -1105,7 +1269,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                     responses = compiledMapper.toResponseList(entities);
                 }
             } else {
-                // RUNTIME MODE
+                // RUNTIME MODE: Generate fresh mapping
                 if (annotation != null && (annotation.includeId() || annotation.includeAudit())) {
                     responses = mapperGenerator.toResponseMapList(entities, responseDtoClass);
                 } else {
@@ -1123,8 +1287,51 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         }
     }
 
+    // ==================== PERFORMANCE TRACKING ====================
+
+    private void trackDtoConversion(long startNanos, boolean used) {
+        long durationMs = (System.nanoTime() - startNanos) / 1_000_000;
+
+        try {
+            ServletRequestAttributes attrs = (ServletRequestAttributes)
+                    RequestContextHolder.getRequestAttributes();
+
+            if (attrs != null) {
+                HttpServletRequest request = attrs.getRequest();
+
+                Long existingTime = (Long) request.getAttribute("dtoConversionTime");
+                long totalTime = (existingTime != null ? existingTime : 0L) + durationMs;
+
+                Integer existingCount = (Integer) request.getAttribute("dtoConversionCount");
+                int totalCount = (existingCount != null ? existingCount : 0) + 1;
+
+                request.setAttribute("dtoConversionTime", totalTime);
+                request.setAttribute("dtoConversionCount", totalCount);
+                request.setAttribute("dtoUsed", used ||
+                        (request.getAttribute("dtoUsed") != null &&
+                                (Boolean) request.getAttribute("dtoUsed")));
+
+                request.setAttribute("dtoType", mapperMode.name());
+
+                if (log.isTraceEnabled()) {
+                    log.trace("✓ DTO conversion #{}: +{} ms = {} ms total [Mapper: {}]",
+                            totalCount, durationMs, totalTime, mapperMode);
+                }
+
+                // 🔥 NEW: Log warning on slow runtime conversions
+                if (mapperMode == MapperMode.RUNTIME && durationMs > 50) {
+                    log.warn("⚠️  Slow DTO conversion detected: {} ms (Runtime mode). " +
+                            "Enable annotation processor for 100x speedup.", durationMs);
+                }
+            }
+        } catch (Exception e) {
+            log.trace("DTO tracking failed: {}", e.getMessage());
+        }
+    }
+
     /**
      * 4. convertBatchResultToResponse() - Used in batch operations
+     * Supports both COMPILED and RUNTIME modes
      */
     @SuppressWarnings("unchecked")
     private Object convertBatchResultToResponse(BatchResult<T> entityResult, CrudXOperation operation) {
@@ -1132,14 +1339,12 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             return entityResult;
         }
 
-        // Update request BEFORE conversion
         updateDtoTypeInRequest();
 
         try {
-            // Track time for batch result wrapping
             long start = System.nanoTime();
 
-            // This internally calls convertEntitiesToResponse which tracks its own time
+            // This internally calls convertEntitiesToResponse which handles both modes
             List<?> responseDtos = convertEntitiesToResponse(
                     entityResult.getCreatedEntities(), operation);
 
@@ -1150,11 +1355,15 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
             long elapsed = (System.nanoTime() - start) / 1_000_000;
 
-            // Track the wrapping operation separately
-            // Note: convertEntitiesToResponse already tracked the entity conversions
-            // This tracks the BatchResult wrapping overhead only
             if (elapsed > 0) {
-                log.trace("✓ BatchResult wrapping overhead: {} ms", elapsed);
+                log.trace("✓ BatchResult wrapping: {} ms (Mapper: {})", elapsed, mapperMode);
+            }
+
+            // 🔥 Warn on slow runtime batch conversions
+            if (mapperMode == MapperMode.RUNTIME && elapsed > 100) {
+                log.warn("⚠️  Slow batch conversion: {} ms for {} entities (Runtime mode). " +
+                                "Enable annotation processor for major speedup.",
+                        elapsed, entityResult.getCreatedEntities().size());
             }
 
             return dtoResult;
@@ -1167,6 +1376,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
     /**
      * 5. convertPageResponseToDTO() - Used in paginated GET
+     * Supports both COMPILED and RUNTIME modes
      */
     @SuppressWarnings("unchecked")
     private Object convertPageResponseToDTO(PageResponse<T> entityPage, CrudXOperation operation) {
@@ -1178,14 +1388,12 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             return entityPage;
         }
 
-        // Update request BEFORE conversion
         updateDtoTypeInRequest();
 
         try {
-            // Track time for page response wrapping
             long start = System.nanoTime();
 
-            // This internally calls convertEntitiesToResponse which tracks its own time
+            // This internally calls convertEntitiesToResponse which handles both modes
             List<?> dtoContent = convertEntitiesToResponse(entityPage.getContent(), operation);
 
             PageResponse<Object> dtoPage = PageResponse.builder()
@@ -1201,10 +1409,16 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
             long elapsed = (System.nanoTime() - start) / 1_000_000;
 
-            // Track the wrapping operation separately
             if (elapsed > 0) {
                 log.trace("✓ PageResponse wrapping: {} items in {} ms (Mapper: {})",
                         entityPage.getContent().size(), elapsed, mapperMode);
+            }
+
+            // 🔥 Warn on slow runtime page conversions
+            if (mapperMode == MapperMode.RUNTIME && elapsed > 100) {
+                log.warn("⚠️  Slow page conversion: {} ms for {} entities (Runtime mode). " +
+                                "Enable annotation processor for major speedup.",
+                        elapsed, entityPage.getContent().size());
             }
 
             return dtoPage;
@@ -1217,6 +1431,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
     /**
      * 6. convertMapToDTO() - Used for validation in PATCH operations
+     * This only converts to DTO class, actual mapping happens in update logic
      */
     @SuppressWarnings("unchecked")
     private Object convertMapToDTO(Map<String, Object> map, CrudXOperation operation) {
@@ -1230,13 +1445,12 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             return null;
         }
 
-        // Update request BEFORE conversion
         updateDtoTypeInRequest();
 
         try {
-            // Track time for validation DTO conversion
             long start = System.nanoTime();
 
+            // Convert map to DTO for validation (works same in both COMPILED and RUNTIME modes)
             Object dto = objectMapper.convertValue(map, requestDtoClass);
 
             trackDtoConversion(start, true);
@@ -1246,6 +1460,31 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         } catch (Exception e) {
             log.debug("Map→DTO conversion failed for validation: {}", e.getMessage());
             return null;
+        }
+    }
+
+    // ==================== STARTUP BANNER ====================
+
+    /**
+     * 🔥 NEW: Display performance summary at startup
+     */
+    @EventListener(ApplicationReadyEvent.class)
+    public void displayPerformanceSummary() {
+        if (mapperMode == MapperMode.RUNTIME) {
+            log.warn("");
+            log.warn("╔════════════════════════════════════════════════════════════╗");
+            log.warn("║  ⚠️  PERFORMANCE WARNING: Runtime Mapper Active          ║");
+            log.warn("╠════════════════════════════════════════════════════════════╣");
+            log.warn("║  Entity: {}", String.format("%-48s", entityClass.getSimpleName()) + "║");
+            log.warn("║  Status: SLOW - Using reflection-based mapping            ║");
+            log.warn("║                                                            ║");
+            log.warn("║  💡 TO FIX: Add annotation processor to build config      ║");
+            log.warn("║     Gradle: annotationProcessor 'io.github...:crudx...'   ║");
+            log.warn("║     Maven: Add to <annotationProcessorPaths>              ║");
+            log.warn("║                                                            ║");
+            log.warn("║  Expected speedup: 100x faster after rebuild              ║");
+            log.warn("╚════════════════════════════════════════════════════════════╝");
+            log.warn("");
         }
     }
 
@@ -1376,45 +1615,6 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         }
     }
 
-    // ==================== PERFORMANCE TRACKING ====================
-
-    private void trackDtoConversion(long startNanos, boolean used) {
-        long durationMs = (System.nanoTime() - startNanos) / 1_000_000;
-
-        try {
-            ServletRequestAttributes attrs = (ServletRequestAttributes)
-                    RequestContextHolder.getRequestAttributes();
-
-            if (attrs != null) {
-                HttpServletRequest request = attrs.getRequest();
-
-                // Accumulate total conversion time
-                Long existingTime = (Long) request.getAttribute("dtoConversionTime");
-                long totalTime = (existingTime != null ? existingTime : 0L) + durationMs;
-
-                // Accumulate conversion count
-                Integer existingCount = (Integer) request.getAttribute("dtoConversionCount");
-                int totalCount = (existingCount != null ? existingCount : 0) + 1;
-
-                request.setAttribute("dtoConversionTime", totalTime);
-                request.setAttribute("dtoConversionCount", totalCount);
-                request.setAttribute("dtoUsed", used ||
-                        (request.getAttribute("dtoUsed") != null &&
-                                (Boolean) request.getAttribute("dtoUsed")));
-
-                // ✅ CRITICAL: Set DTO type in request attributes
-                request.setAttribute("dtoType", mapperMode.name());
-
-                if (log.isTraceEnabled()) {
-                    log.trace("✓ DTO conversion #{}: +{} ms = {} ms total [Mapper: {}]",
-                            totalCount, durationMs, totalTime, mapperMode);
-                }
-            }
-        } catch (Exception e) {
-            log.trace("DTO tracking failed: {}", e.getMessage());
-        }
-    }
-
     // ==================== HELPER METHODS ====================
 
     private void validatePagination(int page, int size) {
@@ -1498,100 +1698,6 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         private List<T> createdEntities;
         private int skippedCount;
         private List<String> skippedReasons;
-    }
-
-    private BatchResult<T> processChunkedBatch(List<T> entities, boolean skipDuplicates,
-                                               int chunkSize, long startTime) {
-        BatchResult<T> combinedResult = new BatchResult<>();
-        List<T> allCreated = new ArrayList<>((int) (entities.size() * 0.9));
-        int totalSkipped = 0;
-        List<String> allSkippedReasons = new ArrayList<>();
-
-        int totalChunks = (entities.size() + chunkSize - 1) / chunkSize;
-        int chunkNumber = 0;
-
-        for (int i = 0; i < entities.size(); i += chunkSize) {
-            chunkNumber++;
-            int end = Math.min(i + chunkSize, entities.size());
-
-            ChunkProcessingResult<T> result = processSingleChunk(
-                    entities, i, end, chunkNumber, totalChunks, skipDuplicates);
-
-            allCreated.addAll(result.getCreatedEntities());
-            totalSkipped += result.getSkippedCount();
-
-            if (result.getSkippedReasons() != null && !result.getSkippedReasons().isEmpty()) {
-                allSkippedReasons.addAll(result.getSkippedReasons());
-            }
-
-            if (chunkNumber % 10 == 0 || entities.size() > 10000) {
-                logProgress(entities.size(), end, startTime);
-            }
-
-            if (chunkNumber % 10 == 0 && entities.size() > 10000) {
-                System.gc();
-            }
-        }
-
-        combinedResult.setCreatedEntities(allCreated);
-        combinedResult.setSkippedCount(totalSkipped);
-        if (!allSkippedReasons.isEmpty()) {
-            combinedResult.setSkippedReasons(allSkippedReasons);
-        }
-
-        return combinedResult;
-    }
-
-    private ChunkProcessingResult<T> processSingleChunk(List<T> entities, int start, int end,
-                                                        int chunkNumber, int totalChunks,
-                                                        boolean skipDuplicates) {
-        List<T> chunk = new ArrayList<>(entities.subList(start, end));
-        long chunkStart = System.currentTimeMillis();
-
-        log.debug("Processing chunk {}/{}: records {}-{}",
-                chunkNumber, totalChunks, start + 1, end);
-
-        try {
-            BatchResult<T> chunkResult = crudService.createBatch(chunk, skipDuplicates);
-
-            long chunkTime = System.currentTimeMillis() - chunkStart;
-            log.debug("Chunk {}/{} completed: {} created, {} skipped | {} ms",
-                    chunkNumber, totalChunks,
-                    chunkResult.getCreatedEntities().size(),
-                    chunkResult.getSkippedCount(),
-                    chunkTime);
-
-            return new ChunkProcessingResult<>(
-                    chunkResult.getCreatedEntities(),
-                    chunkResult.getSkippedCount(),
-                    chunkResult.getSkippedReasons()
-            );
-
-        } catch (Exception chunkError) {
-            log.error("Chunk {}/{} failed (records {}-{}): {}",
-                    chunkNumber, totalChunks, start + 1, end, chunkError.getMessage());
-
-            if (!skipDuplicates) {
-                throw chunkError;
-            }
-
-            return new ChunkProcessingResult<>(
-                    Collections.emptyList(),
-                    end - start,
-                    Collections.singletonList(String.format(
-                            "Chunk %d/%d failed: %s",
-                            chunkNumber, totalChunks, chunkError.getMessage()))
-            );
-        }
-    }
-
-    private void logProgress(int totalSize, int currentEnd, long startTime) {
-        double progress = (double) currentEnd / totalSize * 100;
-        long elapsed = System.currentTimeMillis() - startTime;
-        long estimated = (long) (elapsed / progress * 100);
-
-        log.info("Progress: {}/{} ({}%) | Elapsed: {} ms | Est. total: {} ms",
-                currentEnd, totalSize, String.format("%.1f", progress), elapsed, estimated);
     }
 
     // ==================== PUBLIC ACCESSORS ====================
