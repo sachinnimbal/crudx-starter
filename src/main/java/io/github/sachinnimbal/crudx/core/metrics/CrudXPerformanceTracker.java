@@ -13,17 +13,6 @@ import java.util.concurrent.atomic.LongAdder;
 
 import static io.github.sachinnimbal.crudx.core.util.TimeUtils.formatExecutionTime;
 
-/**
- * 🚀 ENTERPRISE-GRADE Performance Tracker
- * <p>
- * KEY OPTIMIZATIONS:
- * - Lock-free concurrent data structures
- * - Primitive-based aggregations (no boxing)
- * - Lazy metric construction (on-demand)
- * - Bounded memory with circular buffer semantics
- * - Zero-copy metric recording
- * - Single-pass streaming aggregation
- */
 @Slf4j
 @Service
 @ConditionalOnProperty(prefix = "crudx.performance", name = "enabled", havingValue = "true")
@@ -33,7 +22,7 @@ public class CrudXPerformanceTracker {
     private final Deque<PerformanceMetric> metrics;
     private final LocalDateTime startTime;
 
-    // 🔥 LOCK-FREE counters for real-time stats
+    // LOCK-FREE counters for real-time stats
     private final LongAdder totalRequests = new LongAdder();
     private final LongAdder successfulRequests = new LongAdder();
     private final LongAdder failedRequests = new LongAdder();
@@ -49,17 +38,11 @@ public class CrudXPerformanceTracker {
                 perf.getMaxStoredMetrics(), perf.getRetentionMinutes());
     }
 
-    /**
-     * 🔥 ZERO-COPY metric recording
-     * - Metrics stored as-is, no transformation
-     * - Bounded size enforced via lock-free eviction
-     * - GUARANTEED memory tracking (never null)
-     */
     public void recordMetric(String endpoint, String method, String entityName,
                              long executionTimeMs, boolean success, String errorType,
                              Long memoryDeltaKb, Long dtoConversionTimeMs, boolean dtoUsed) {
 
-        // 🔥 Update global counters (atomic, lock-free)
+        // Update global counters
         totalRequests.increment();
         if (success) {
             successfulRequests.increment();
@@ -67,7 +50,7 @@ public class CrudXPerformanceTracker {
             failedRequests.increment();
         }
 
-        // 🔥 Lazy metric construction (only when needed)
+        // Build metric
         PerformanceMetric metric = PerformanceMetric.builder()
                 .endpoint(endpoint)
                 .method(method)
@@ -78,12 +61,12 @@ public class CrudXPerformanceTracker {
                 .dtoUsed(dtoUsed)
                 .build();
 
-        // Set formatted values via setters
         metric.setExecutionTimeMs(executionTimeMs);
 
-        // 🔥 ALWAYS track memory (use default if null or zero)
-        long memoryKb = (memoryDeltaKb != null && memoryDeltaKb > 0) ? memoryDeltaKb : 64L;
-        metric.setMemoryUsedKb(memoryKb);
+        // CRITICAL: Only set memory if valid (non-null)
+        if (memoryDeltaKb != null && memoryDeltaKb > 0) {
+            metric.setMemoryUsedKb(memoryDeltaKb);
+        }
 
         if (dtoConversionTimeMs != null && dtoConversionTimeMs > 0) {
             metric.setDtoConversionTimeMs(dtoConversionTimeMs);
@@ -92,7 +75,7 @@ public class CrudXPerformanceTracker {
         // Add to bounded queue
         metrics.addLast(metric);
 
-        // 🔥 BOUNDED: Evict oldest if over limit (lock-free)
+        // Evict oldest if over limit
         int maxSize = properties.getPerformance().getMaxStoredMetrics();
         while (metrics.size() > maxSize) {
             metrics.pollFirst();
@@ -114,7 +97,7 @@ public class CrudXPerformanceTracker {
     }
 
     /**
-     * 🔥 LAZY: Metrics snapshot (minimal allocation)
+     * LAZY: Metrics snapshot (minimal allocation)
      */
     public List<PerformanceMetric> getMetrics() {
         return new ArrayList<>(metrics);
@@ -143,7 +126,7 @@ public class CrudXPerformanceTracker {
             return createEmptySummary();
         }
 
-        // 🔥 STREAMING aggregation with primitive accumulators
+        // STREAMING aggregation with primitive accumulators
         long totalMs = 0L;
         long minMs = Long.MAX_VALUE;
         long maxMs = 0L;
@@ -161,7 +144,7 @@ public class CrudXPerformanceTracker {
         // Endpoint aggregator
         Map<String, EndpointStatsAggregator> endpointAgg = new HashMap<>(64);
 
-        // 🔥 SINGLE PASS: Process all metrics
+        // SINGLE PASS: Process all metrics
         for (PerformanceMetric m : snapshot) {
             // Execution time
             Long execMs = m.getExecutionTimeMs();
@@ -199,24 +182,24 @@ public class CrudXPerformanceTracker {
                     .addMetric(m);
         }
 
-        // 🔥 Use atomic counters for totals
+        // Use atomic counters for totals
         long total = totalRequests.sum();
         long successful = successfulRequests.sum();
         long failed = failedRequests.sum();
         double successRate = total > 0 ? (double) successful / total * 100 : 0.0;
 
-        // 🔥 Calculate averages (primitives)
+        // Calculate averages (primitives)
         long avgMs = total > 0 ? totalMs / total : 0L;
         long avgMemKb = memoryCount > 0 ? totalMemoryKb / memoryCount : 0L;
         long avgDtoMs = dtoCount > 0 ? totalDtoMs / dtoCount : 0L;
 
-        // 🔥 Build final stats map (lazy)
+        // Build final stats map (lazy)
         Map<String, EndpointStats> finalStats = new HashMap<>(endpointAgg.size());
         for (Map.Entry<String, EndpointStatsAggregator> entry : endpointAgg.entrySet()) {
             finalStats.put(entry.getKey(), entry.getValue().build());
         }
 
-        // 🔥 Top endpoints (extract from aggregators)
+        // Top endpoints (extract from aggregators)
         Map<String, Long> topSlow = extractTopN(endpointAgg,
                 (agg) -> agg.maxExecutionTimeMs, 5);
 
@@ -309,7 +292,7 @@ public class CrudXPerformanceTracker {
     }
 
     /**
-     * 🔥 Extract top-N with custom extractor (zero intermediate collections)
+     * Extract top-N with custom extractor (zero intermediate collections)
      */
     private Map<String, Long> extractTopN(
             Map<String, EndpointStatsAggregator> aggregators,
@@ -330,7 +313,7 @@ public class CrudXPerformanceTracker {
     }
 
     /**
-     * 🔥 LIGHTWEIGHT aggregator (primitives only, no intermediate formatting)
+     * LIGHTWEIGHT aggregator (primitives only, no intermediate formatting)
      */
     private static class EndpointStatsAggregator {
         String endpoint, method, entityName;
