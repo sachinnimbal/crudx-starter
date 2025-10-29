@@ -818,47 +818,22 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             return convertMapToEntityDirectly(map);
         }
 
-        //  ULTRA-FAST PATH: Use cached DTO class
         Class<?> requestDtoClass = requestDtoCache.get(operation);
-
         if (requestDtoClass == null) {
-            log.debug("No Request DTO for operation {}, using direct conversion", operation);
             return convertMapToEntityDirectly(map);
         }
 
-        long start = System.nanoTime();
-
         try {
-            // Step 1: Map → Request DTO (Jackson)
             Object requestDto = objectMapper.convertValue(map, requestDtoClass);
 
-            T entity;
-
+            // COMPILED MODE: Don't track (< 1ms overhead)
             if (mapperMode == MapperMode.COMPILED) {
-                //  FASTEST PATH: Use COMPILED mapper (zero reflection)
-                entity = compiledMapper.toEntity(requestDto);
-
-                if (log.isTraceEnabled()) {
-                    long elapsed = (System.nanoTime() - start) / 1_000;
-                    log.trace("⚡ COMPILED mapper: Map→{}→{} in {} μs",
-                            requestDtoClass.getSimpleName(),
-                            entityClass.getSimpleName(),
-                            elapsed);
-                }
-
-            } else {
-                // Fallback: Runtime generation
-                entity = mapperGenerator.toEntity(requestDto, entityClass);
-
-                if (log.isTraceEnabled()) {
-                    long elapsed = (System.nanoTime() - start) / 1_000;
-                    log.trace("⚠️  RUNTIME mapper: Map→{}→{} in {} μs (slower)",
-                            requestDtoClass.getSimpleName(),
-                            entityClass.getSimpleName(),
-                            elapsed);
-                }
+                return compiledMapper.toEntity(requestDto);
             }
 
+            // RUNTIME MODE: Track time (measurable overhead)
+            long start = System.nanoTime();
+            T entity = mapperGenerator.toEntity(requestDto, entityClass);
             trackDtoConversion(start, true);
             return entity;
 
@@ -872,69 +847,37 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     @SuppressWarnings("unchecked")
     private Object convertEntityToResponse(T entity, CrudXOperation operation) {
         if (entity == null) return null;
+        if (mapperMode == MapperMode.NONE) return entity;
 
-        if (mapperMode == MapperMode.NONE) {
-            return entity;
-        }
-
-        //  ULTRA-FAST PATH: Use cached DTO class
         Class<?> responseDtoClass = responseDtoCache.get(operation);
-
-        if (responseDtoClass == null) {
-            log.debug("No Response DTO for operation {}, returning entity", operation);
-            return entity;
-        }
-
-        long start = System.nanoTime();
+        if (responseDtoClass == null) return entity;
 
         try {
-            //  Check if DTO has @CrudXResponse annotation
             io.github.sachinnimbal.crudx.core.dto.annotations.CrudXResponse annotation =
                     responseDtoClass.getAnnotation(io.github.sachinnimbal.crudx.core.dto.annotations.CrudXResponse.class);
 
-            Object response;
-
+            // COMPILED MODE: Don't track
             if (mapperMode == MapperMode.COMPILED) {
-                //  FASTEST PATH: Use COMPILED mapper
-
                 if (annotation != null && (annotation.includeId() || annotation.includeAudit())) {
-                    // Use Map-based response to auto-inject audit fields
                     try {
-                        response = mapperGenerator != null
+                        return mapperGenerator != null
                                 ? mapperGenerator.toResponseMap(entity, responseDtoClass)
                                 : compiledMapper.toResponse(entity);
-                        log.trace("⚡ COMPILED mapper (Map mode): {}→{}",
-                                entityClass.getSimpleName(), responseDtoClass.getSimpleName());
                     } catch (Exception e) {
-                        log.warn("Map-based response failed, using direct: {}", e.getMessage());
-                        response = compiledMapper.toResponse(entity);
+                        return compiledMapper.toResponse(entity);
                     }
-                } else {
-                    // Direct DTO mapping (no audit injection needed)
-                    response = compiledMapper.toResponse(entity);
-                    log.trace("⚡ COMPILED mapper (Direct mode): {}→{}",
-                            entityClass.getSimpleName(), responseDtoClass.getSimpleName());
                 }
+                return compiledMapper.toResponse(entity);
+            }
 
-                if (log.isTraceEnabled()) {
-                    long elapsed = (System.nanoTime() - start) / 1_000;
-                    log.trace("⚡ Conversion time: {} μs", elapsed);
-                }
+            // RUNTIME MODE: Track time
+            long start = System.nanoTime();
+            Object response;
 
+            if (annotation != null && (annotation.includeId() || annotation.includeAudit())) {
+                response = mapperGenerator.toResponseMap(entity, responseDtoClass);
             } else {
-                // Fallback: Runtime generation
-                if (annotation != null && (annotation.includeId() || annotation.includeAudit())) {
-                    response = mapperGenerator.toResponseMap(entity, responseDtoClass);
-                    log.trace("⚠️  RUNTIME mapper (Map mode)");
-                } else {
-                    response = mapperGenerator.toResponse(entity, responseDtoClass);
-                    log.trace("⚠️  RUNTIME mapper (Direct mode)");
-                }
-
-                if (log.isTraceEnabled()) {
-                    long elapsed = (System.nanoTime() - start) / 1_000;
-                    log.trace("⚠️  Conversion time: {} μs", elapsed);
-                }
+                response = mapperGenerator.toResponse(entity, responseDtoClass);
             }
 
             trackDtoConversion(start, true);
@@ -949,77 +892,41 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
     @SuppressWarnings("unchecked")
     private List<?> convertEntitiesToResponse(List<T> entities, CrudXOperation operation) {
         if (entities == null || entities.isEmpty()) return entities;
+        if (mapperMode == MapperMode.NONE) return entities;
 
-        if (mapperMode == MapperMode.NONE) {
-            return entities;
-        }
-
-        //  ULTRA-FAST PATH: Use cached DTO class
         Class<?> responseDtoClass = responseDtoCache.get(operation);
-
-        if (responseDtoClass == null) {
-            log.debug("No Response DTO for operation {}, returning entities", operation);
-            return entities;
-        }
-
-        long start = System.nanoTime();
+        if (responseDtoClass == null) return entities;
 
         try {
-            //  Check if DTO has @CrudXResponse annotation for includeId/includeAudit
             io.github.sachinnimbal.crudx.core.dto.annotations.CrudXResponse annotation =
                     responseDtoClass.getAnnotation(io.github.sachinnimbal.crudx.core.dto.annotations.CrudXResponse.class);
 
-            List<?> responses;
-
+            // COMPILED MODE: Don't track
             if (mapperMode == MapperMode.COMPILED) {
-                //  FASTEST PATH: Use COMPILED batch mapper
-
                 if (annotation != null && (annotation.includeId() || annotation.includeAudit())) {
-                    // Use Map-based response to auto-inject audit fields
-                    responses = entities.stream()
+                    return entities.stream()
                             .map(entity -> {
                                 try {
                                     return mapperGenerator != null
                                             ? mapperGenerator.toResponseMap(entity, responseDtoClass)
                                             : compiledMapper.toResponse(entity);
                                 } catch (Exception e) {
-                                    log.warn("Map-based response failed, using direct: {}", e.getMessage());
                                     return compiledMapper.toResponse(entity);
                                 }
                             })
                             .collect(Collectors.toList());
-
-                    log.debug("⚡ COMPILED batch (Map mode): {} entities with auto-injected fields", entities.size());
-                } else {
-                    // Direct DTO mapping (no audit injection needed)
-                    responses = compiledMapper.toResponseList(entities);
-                    log.debug("⚡ COMPILED batch (Direct mode): {} entities", entities.size());
                 }
+                return compiledMapper.toResponseList(entities);
+            }
 
-                if (log.isDebugEnabled()) {
-                    long elapsed = (System.nanoTime() - start) / 1_000_000;
-                    log.debug("⚡ COMPILED batch: {} entities→{} in {} ms ({} μs/entity)",
-                            entities.size(),
-                            responseDtoClass.getSimpleName(),
-                            elapsed,
-                            elapsed > 0 ? (elapsed * 1000) / entities.size() : 0);
-                }
+            // RUNTIME MODE: Track time
+            long start = System.nanoTime();
+            List<?> responses;
 
+            if (annotation != null && (annotation.includeId() || annotation.includeAudit())) {
+                responses = mapperGenerator.toResponseMapList(entities, responseDtoClass);
             } else {
-                // Fallback: Runtime generation
-                if (annotation != null && (annotation.includeId() || annotation.includeAudit())) {
-                    responses = mapperGenerator.toResponseMapList(entities, responseDtoClass);
-                    log.debug("⚠️  RUNTIME batch (Map mode): {} entities", entities.size());
-                } else {
-                    responses = mapperGenerator.toResponseList(entities, responseDtoClass);
-                    log.debug("⚠️  RUNTIME batch (Direct mode): {} entities", entities.size());
-                }
-
-                if (log.isDebugEnabled()) {
-                    long elapsed = (System.nanoTime() - start) / 1_000_000;
-                    log.debug("⚠️  RUNTIME batch: {} entities in {} ms",
-                            entities.size(), elapsed);
-                }
+                responses = mapperGenerator.toResponseList(entities, responseDtoClass);
             }
 
             trackDtoConversion(start, true);
@@ -1263,9 +1170,17 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
     // ==================== PERFORMANCE TRACKING ====================
 
+    /**
+     * SMART DTO TRACKING:
+     * - COMPILED mappers: NO tracking (overhead < 1ms, negligible)
+     * - RUNTIME mappers: YES tracking (measurable overhead 5-50ms)
+     */
     private void trackDtoConversion(long startNanos, boolean used) {
         long durationMs = (System.nanoTime() - startNanos) / 1_000_000;
-
+        // Skip if < 1ms (COMPILED mappers are this fast)
+        if (durationMs < 1) {
+            return;
+        }
         try {
             ServletRequestAttributes attrs = (ServletRequestAttributes)
                     RequestContextHolder.getRequestAttributes();
@@ -1281,8 +1196,7 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                         (request.getAttribute("dtoUsed") != null &&
                                 (Boolean) request.getAttribute("dtoUsed")));
 
-                //  FIX: Use debug level so it's visible
-                if (log.isDebugEnabled() && durationMs > 0) {
+                if (log.isDebugEnabled()) {
                     log.debug("✓ DTO conversion: +{} ms = {} ms total [Mapper: {}]",
                             durationMs, totalTime, mapperMode);
                 }

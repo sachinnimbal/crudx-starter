@@ -1,6 +1,5 @@
 package io.github.sachinnimbal.crudx.service.impl;
 
-import io.github.sachinnimbal.crudx.core.annotations.CrudXImmutable;
 import io.github.sachinnimbal.crudx.core.annotations.CrudXUniqueConstraint;
 import io.github.sachinnimbal.crudx.core.config.CrudXProperties;
 import io.github.sachinnimbal.crudx.core.exception.DuplicateEntityException;
@@ -30,8 +29,19 @@ import java.lang.reflect.Field;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
+/**
+ * 🚀 ENTERPRISE MongoDB Service
+ * <p>
+ * BULK INSERT STRATEGY:
+ * - UNORDERED bulk operations (continue on error)
+ * - Zero pre-validation DB queries
+ * - Adaptive batch sizing (MongoDB optimal: 1000-2000)
+ * - Streaming processing (memory-bounded)
+ * - Real-time progress tracking
+ */
 @Slf4j
 public abstract class CrudXMongoService<T extends CrudXMongoEntity<ID>, ID extends Serializable>
         implements CrudXService<T, ID> {
@@ -49,21 +59,31 @@ public abstract class CrudXMongoService<T extends CrudXMongoEntity<ID>, ID exten
 
     private static final int MAX_IN_MEMORY_THRESHOLD = 5000;
 
+    // 🔥 MongoDB-optimized batch sizes
+    private static final int BATCH_SIZE_SMALL = 100;
+    private static final int BATCH_SIZE_MEDIUM = 500;
+    private static final int BATCH_SIZE_LARGE = 1000;
+    private static final int BATCH_SIZE_MAX = 2000; // MongoDB recommended max
+
+    // 🔥 Unique constraint cache
+    private static final Map<Class<?>, List<UniqueConstraintMeta>> UNIQUE_CONSTRAINT_CACHE =
+            new ConcurrentHashMap<>();
+
     @PostConstruct
     @SuppressWarnings("unchecked")
     protected void init() {
         if (mongoTemplate == null) {
             throw new IllegalStateException(
-                    "MongoTemplate not available. Please add 'spring-boot-starter-data-mongodb' " +
-                            "dependency to your project and configure MongoDB connection."
-            );
+                    "MongoTemplate not available. Add 'spring-boot-starter-data-mongodb' dependency.");
         }
+
         Type genericSuperclass = getClass().getGenericSuperclass();
-        if (genericSuperclass instanceof ParameterizedType) {
-            Type[] typeArgs = ((ParameterizedType) genericSuperclass).getActualTypeArguments();
+        if (genericSuperclass instanceof ParameterizedType paramType) {
+            Type[] typeArgs = paramType.getActualTypeArguments();
             if (typeArgs.length > 0 && typeArgs[0] instanceof Class) {
                 entityClass = (Class<T>) typeArgs[0];
-                log.debug("Entity class resolved via direct superclass: {}", entityClass.getSimpleName());
+                cacheUniqueConstraints();
+                validateMongoConnection();
                 return;
             }
         }
@@ -71,80 +91,77 @@ public abstract class CrudXMongoService<T extends CrudXMongoEntity<ID>, ID exten
         Class<?>[] typeArgs = GenericTypeResolver.resolveTypeArguments(getClass(), CrudXMongoService.class);
         if (typeArgs != null && typeArgs.length > 0) {
             entityClass = (Class<T>) typeArgs[0];
-            log.debug("Entity class resolved via GenericTypeResolver: {}", entityClass.getSimpleName());
+            cacheUniqueConstraints();
+            validateMongoConnection();
             return;
         }
 
-        if (mongoTemplate != null) {
-            try {
-                mongoTemplate.executeCommand("{ ping: 1 }");
-                log.info("MongoDB connection validated for {}", entityClass.getSimpleName());
-            } catch (Exception e) {
-                log.error("MongoDB connection validation failed", e);
-                throw new IllegalStateException("Cannot connect to MongoDB", e);
-            }
+        throw new IllegalStateException("Could not resolve entity class: " + getClass().getSimpleName());
+    }
+
+    private void validateMongoConnection() {
+        try {
+            mongoTemplate.executeCommand("{ ping: 1 }");
+            log.debug("MongoDB connection validated for {}", entityClass.getSimpleName());
+        } catch (Exception e) {
+            log.error("MongoDB connection failed", e);
+            throw new IllegalStateException("Cannot connect to MongoDB", e);
         }
-        throw new IllegalStateException(
-                "Could not resolve entity class for service: " + getClass().getSimpleName() +
-                        ". Ensure service properly extends CrudXMongoService with concrete type parameters."
-        );
     }
 
     @Override
     public T create(T entity) {
-        long startTime = System.currentTimeMillis();
-        log.debug("Creating MongoDB entity: {}", getEntityClassName());
-
         validateUniqueConstraints(entity);
         entity.onCreate();
-
-        T saved = mongoTemplate.save(entity);
-
-        long duration = System.currentTimeMillis() - startTime;
-        log.info("MongoDB entity created with ID: {} | Time taken: {} ms", saved.getId(), duration);
-        return saved;
+        return mongoTemplate.save(entity);
     }
 
+    /**
+     * 🚀 ENTERPRISE BULK INSERT - MongoDB Optimized
+     * <p>
+     * STRATEGY:
+     * 1. UNORDERED bulk ops (continue on duplicate key errors)
+     * 2. Zero pre-validation queries (let MongoDB handle duplicates)
+     * 3. Adaptive batch sizing for optimal throughput
+     * 4. Streaming with immediate memory release
+     * 5. Real-time progress tracking
+     */
     @Override
     @Transactional(timeout = 1800)
     public BatchResult<T> createBatch(List<T> entities, boolean skipDuplicates) {
         long startTime = System.currentTimeMillis();
         int totalSize = entities.size();
 
-        log.info("🚀 MongoDB bulk insert: {} entities", totalSize);
+        log.info("🚀 MongoDB Bulk: {} entities | Mode: {}",
+                totalSize, skipDuplicates ? "SKIP_ERRORS" : "ABORT_ON_ERROR");
 
-        // 🔥 ADAPTIVE BATCH SIZE
-        int batchSize = calculateMongoOptimalBatchSize(totalSize);
+        // 🔥 ADAPTIVE batch sizing for MongoDB
+        int batchSize = calculateMongoBatchSize(totalSize);
+
         int successCount = 0;
         int skipCount = 0;
-        List<String> skipReasons = new ArrayList<>(Math.min(1000, totalSize / 10));
-
         int batchNumber = 0;
         int totalBatches = (totalSize + batchSize - 1) / batchSize;
 
+        List<String> skipReasons = new ArrayList<>(Math.min(1000, totalSize / 10));
+
+        // 🔥 STREAMING: Process in chunks
         for (int i = 0; i < totalSize; i += batchSize) {
             batchNumber++;
             int end = Math.min(i + batchSize, totalSize);
 
+            // 🔥 Prepare batch (in-memory validation only)
             List<T> validEntities = new ArrayList<>(end - i);
 
-            // Validate and prepare batch
             for (int j = i; j < end; j++) {
                 T entity = entities.get(j);
+                if (entity == null) continue;
+
                 try {
-                    validateUniqueConstraints(entity);
+                    // 🔥 IN-MEMORY validation only
+                    validateInMemory(entity);
                     entity.onCreate();
                     validEntities.add(entity);
-                } catch (DuplicateEntityException e) {
-                    if (skipDuplicates) {
-                        skipCount++;
-                        if (skipReasons.size() < 1000) {
-                            skipReasons.add(String.format("Index %d: %s", j, e.getMessage()));
-                        }
-                    } else {
-                        log.error("Duplicate at index {} - aborting", j);
-                        throw e;
-                    }
                 } catch (Exception e) {
                     if (skipDuplicates) {
                         skipCount++;
@@ -152,197 +169,242 @@ public abstract class CrudXMongoService<T extends CrudXMongoEntity<ID>, ID exten
                             skipReasons.add(String.format("Index %d: %s", j, e.getMessage()));
                         }
                     } else {
-                        throw e;
+                        log.error("Validation failed at index {}: {}", j, e.getMessage());
+                        throw new IllegalArgumentException("Validation failed at index " + j, e);
                     }
                 }
-                entities.set(j, null); // Free immediately
+
+                // 🔥 Free memory immediately
+                entities.set(j, null);
             }
 
-            // 🔥 BULK INSERT
+            // 🔥 BULK INSERT via MongoDB BulkOperations
             if (!validEntities.isEmpty()) {
                 try {
                     BulkOperations bulkOps = mongoTemplate.bulkOps(
-                            BulkOperations.BulkMode.UNORDERED, entityClass);
+                            skipDuplicates ? BulkOperations.BulkMode.UNORDERED : BulkOperations.BulkMode.ORDERED,
+                            entityClass);
+
                     bulkOps.insert(validEntities);
 
                     com.mongodb.bulk.BulkWriteResult result = bulkOps.execute();
                     int inserted = result.getInsertedCount();
                     successCount += inserted;
 
-                    log.debug("✅ Batch {}/{}: {} entities inserted",
-                            batchNumber, totalBatches, inserted);
+                    // 🔥 Calculate skipped (validation passed but DB rejected)
+                    int dbSkipped = validEntities.size() - inserted;
+                    if (dbSkipped > 0) {
+                        skipCount += dbSkipped;
+                        if (skipReasons.size() < 1000) {
+                            skipReasons.add(String.format("Batch %d: %d duplicate key errors",
+                                    batchNumber, dbSkipped));
+                        }
+                    }
 
-                } catch (Exception e) {
-                    log.error("❌ Bulk insert failed for batch {}/{}: {}",
-                            batchNumber, totalBatches, e.getMessage());
+                    log.debug("✅ Batch {}/{}: {} inserted, {} skipped",
+                            batchNumber, totalBatches, inserted, dbSkipped);
 
-                    if (!skipDuplicates) throw e;
+                } catch (org.springframework.dao.DuplicateKeyException e) {
+                    if (skipDuplicates) {
+                        // 🔥 Fallback: Individual inserts to identify duplicates
+                        int individualSuccess = 0;
+                        int individualSkip = 0;
 
-                    // Fallback: individual inserts
-                    for (T entity : validEntities) {
-                        try {
-                            mongoTemplate.save(entity);
-                            successCount++;
-                        } catch (Exception ex) {
-                            skipCount++;
-                            if (skipReasons.size() < 1000) {
-                                skipReasons.add("Fallback: " + ex.getMessage());
+                        for (T entity : validEntities) {
+                            try {
+                                mongoTemplate.save(entity);
+                                individualSuccess++;
+                            } catch (org.springframework.dao.DuplicateKeyException dupEx) {
+                                individualSkip++;
+                                if (skipReasons.size() < 1000) {
+                                    skipReasons.add("Duplicate key: " + extractDuplicateKey(dupEx));
+                                }
                             }
                         }
+
+                        successCount += individualSuccess;
+                        skipCount += individualSkip;
+
+                        log.debug("⚠️ Batch {}/{} fallback: {} success, {} duplicates",
+                                batchNumber, totalBatches, individualSuccess, individualSkip);
+                    } else {
+                        log.error("Batch {} aborted: {}", batchNumber, e.getMessage());
+                        throw new DuplicateEntityException("Duplicate key in batch " + batchNumber);
+                    }
+                } catch (Exception e) {
+                    log.error("Batch {} failed: {}", batchNumber, e.getMessage());
+                    if (!skipDuplicates) throw e;
+
+                    skipCount += validEntities.size();
+                    if (skipReasons.size() < 1000) {
+                        skipReasons.add(String.format("Batch %d failed: %s", batchNumber, e.getMessage()));
                     }
                 }
             }
 
             validEntities.clear();
 
-            // 🔥 REAL-TIME PROGRESS
+            // 🔥 PROGRESS logging
             if (batchNumber % 10 == 0 || batchNumber == totalBatches) {
-                long elapsed = System.currentTimeMillis() - startTime;
-                double speed = elapsed > 0 ? (successCount * 1000.0) / elapsed : 0;
-                long memory = (Runtime.getRuntime().totalMemory() -
-                        Runtime.getRuntime().freeMemory()) / 1024 / 1024;
-
-                log.info("📊 MongoDB Progress: {}/{} batches | Success: {} | Skipped: {} | " +
-                                "Speed: {} rec/sec | Memory: {} MB",
-                        batchNumber, totalBatches, successCount, skipCount, (int) speed, memory);
+                logProgress(totalSize, end, successCount, skipCount, startTime, batchNumber, totalBatches);
             }
 
-            // Memory cleanup
-            if (batchNumber % 100 == 0) {
+            // 🔥 GC hint for large datasets
+            if (batchNumber % 100 == 0 && totalSize > 50_000) {
                 System.gc();
             }
         }
 
+        // Clear input list
         entities.clear();
 
         long duration = System.currentTimeMillis() - startTime;
-        double recordsPerSecond = duration > 0 ? (successCount * 1000.0) / duration : 0.0;
+        double throughput = duration > 0 ? (successCount * 1000.0) / duration : 0.0;
 
-        log.info("✅ MongoDB bulk insert completed: {} created, {} skipped | {} rec/sec | {} ms",
-                successCount, skipCount, (int) recordsPerSecond, duration);
+        log.info("✅ MongoDB Bulk Complete: {} success, {} skipped | {:.0f} rec/sec | {} ms",
+                successCount, skipCount, throughput, duration);
 
         BatchResult<T> result = new BatchResult<>();
         result.setCreatedEntities(Collections.emptyList());
         result.setSkippedCount(skipCount);
-        result.setSkippedReasons(skipReasons);
+        result.setSkippedReasons(skipReasons.isEmpty() ? null : skipReasons);
 
         return result;
     }
 
     /**
-     * 🔥 ADAPTIVE: Optimal batch size for MongoDB
+     * 🔥 IN-MEMORY validation (no DB queries)
      */
-    private int calculateMongoOptimalBatchSize(int totalSize) {
-        if (totalSize <= 1000) return Math.min(100, totalSize);
-        if (totalSize <= 10_000) return 500;
-        if (totalSize <= 50_000) return 1000;
-        return 2000; // MongoDB recommended max
+    private void validateInMemory(T entity) {
+        if (validator != null) {
+            Set<ConstraintViolation<T>> violations = validator.validate(entity);
+            if (!violations.isEmpty()) {
+                String errors = violations.stream()
+                        .map(v -> v.getPropertyPath() + ": " + v.getMessage())
+                        .collect(Collectors.joining(", "));
+                throw new IllegalArgumentException("Validation failed: " + errors);
+            }
+        }
+        // Unique constraints validated by MongoDB on INSERT
     }
+
+    /**
+     * 🔥 MongoDB-optimized batch sizing
+     */
+    private int calculateMongoBatchSize(int totalSize) {
+        if (totalSize <= 1000) return Math.min(BATCH_SIZE_SMALL, totalSize);
+        if (totalSize <= 10_000) return BATCH_SIZE_MEDIUM;
+        if (totalSize <= 50_000) return BATCH_SIZE_LARGE;
+        return BATCH_SIZE_MAX;
+    }
+
+    /**
+     * 🔥 Real-time progress logging
+     */
+    private void logProgress(int total, int current, int success, int skipped,
+                             long startTime, int batchNum, int totalBatches) {
+        long elapsed = System.currentTimeMillis() - startTime;
+        double progress = (double) current / total * 100;
+        double throughput = elapsed > 0 ? (success * 1000.0) / elapsed : 0;
+        long eta = elapsed > 0 ? (long) ((elapsed / progress) * (100 - progress)) : 0;
+
+        long heapUsed = (Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) >> 20;
+        long heapMax = Runtime.getRuntime().maxMemory() >> 20;
+
+        log.info("📊 Progress: {}/{} ({:.1f}%) | Batch {}/{} | Success: {} | Skip: {} | " +
+                        "{:.0f} rec/sec | Mem: {}/{} MB | ETA: {} sec",
+                current, total, progress, batchNum, totalBatches, success, skipped,
+                throughput, heapUsed, heapMax, eta / 1000);
+    }
+
+    /**
+     * Extract duplicate key from exception
+     */
+    private String extractDuplicateKey(Exception e) {
+        String msg = e.getMessage();
+        if (msg != null && msg.contains("duplicate key")) {
+            int start = msg.indexOf("dup key:");
+            if (start > 0) {
+                return msg.substring(start, Math.min(start + 100, msg.length()));
+            }
+        }
+        return "Unknown duplicate";
+    }
+
+    // ==================== READ OPERATIONS ====================
 
     @Override
     public T findById(ID id) {
-        long startTime = System.currentTimeMillis();
-        log.debug("Finding MongoDB entity by ID: {}", id);
         T entity = mongoTemplate.findById(id, entityClass);
-
         if (entity == null) {
-            log.warn("Entity not found with ID: {}", id);
             throw new EntityNotFoundException(getEntityClassName(), id);
         }
-
-        long duration = System.currentTimeMillis() - startTime;
-        log.info("MongoDB entity found by ID: {} | Time taken: {} ms", id, duration);
         return entity;
     }
 
     @Override
     public List<T> findAll() {
-        long startTime = System.currentTimeMillis();
         long totalCount = count();
 
-        log.debug("Finding all MongoDB entities (total: {})", totalCount);
-
         if (totalCount > MAX_IN_MEMORY_THRESHOLD) {
-            log.warn("Large dataset detected ({} records). Consider using streamAll() or pagination instead", totalCount);
+            log.warn("Large dataset ({} records) - using streaming", totalCount);
             return findAllBatched(null);
         }
 
-        List<T> entities = mongoTemplate.findAll(entityClass);
-        long duration = System.currentTimeMillis() - startTime;
-        log.info("Found {} MongoDB entities | Time taken: {} ms", entities.size(), duration);
-        return entities;
+        return mongoTemplate.findAll(entityClass);
     }
 
     @Override
     public List<T> findAll(Sort sort) {
-        long startTime = System.currentTimeMillis();
         long totalCount = count();
 
-        log.debug("Finding all MongoDB entities with sorting (total: {})", totalCount);
-
         if (totalCount > MAX_IN_MEMORY_THRESHOLD) {
-            log.warn("Large dataset detected ({} records). Consider using streamAll(sort, batchSize, processor) instead", totalCount);
             return findAllBatched(sort);
         }
 
         Query query = new Query().with(sort);
-        List<T> entities = mongoTemplate.find(query, entityClass);
-        long duration = System.currentTimeMillis() - startTime;
-        log.info("Found {} sorted MongoDB entities | Time taken: {} ms", entities.size(), duration);
-        return entities;
+        return mongoTemplate.find(query, entityClass);
     }
 
+    /**
+     * 🔥 Batched retrieval for large datasets
+     */
     private List<T> findAllBatched(Sort sort) {
-        List<T> allEntities = new ArrayList<>();
+        List<T> result = new ArrayList<>();
         int skip = 0;
-        int batchSize = crudxProperties.getBatchSize();
+        int fetchSize = 50;
 
         while (true) {
-            Query query = new Query().skip(skip).limit(batchSize);
-            if (sort != null) {
-                query.with(sort);
-            }
+            Query query = new Query().skip(skip).limit(fetchSize);
+            if (sort != null) query.with(sort);
 
             List<T> batch = mongoTemplate.find(query, entityClass);
-            if (batch.isEmpty()) {
-                break;
-            }
+            if (batch.isEmpty()) break;
 
-            allEntities.addAll(batch);
-            skip += batchSize;
+            result.addAll(batch);
+            skip += fetchSize;
 
-            log.debug("Fetched batch: {}/{} entities", allEntities.size(), count());
-
-            if (batch.size() < batchSize) {
-                break;
-            }
+            if (batch.size() < fetchSize) break;
         }
 
-        return allEntities;
+        return result;
     }
 
     @Override
     public Page<T> findAll(Pageable pageable) {
-        long startTime = System.currentTimeMillis();
-        log.debug("Finding paged MongoDB entities");
         Query query = new Query().with(pageable);
-
-        List<T> entities = mongoTemplate.find(query, entityClass);
+        List<T> content = mongoTemplate.find(query, entityClass);
         long total = mongoTemplate.count(new Query(), entityClass);
-
-        long duration = System.currentTimeMillis() - startTime;
-        log.info("Found page of {} MongoDB entities (total: {}) | Time taken: {} ms",
-                entities.size(), total, duration);
-        return new PageImpl<>(entities, pageable, total);
+        return new PageImpl<>(content, pageable, total);
     }
+
+    // ==================== UPDATE OPERATIONS ====================
 
     @Override
     public T update(ID id, Map<String, Object> updates) {
-        long startTime = System.currentTimeMillis();
-        log.debug("Updating MongoDB entity with ID: {}", id);
-
         T existingEntity = findById(id);
         autoValidateUpdates(updates, existingEntity);
+
         Query query = new Query(Criteria.where("_id").is(id));
         Update update = new Update();
 
@@ -356,150 +418,135 @@ public abstract class CrudXMongoService<T extends CrudXMongoEntity<ID>, ID exten
         update.set("audit.updatedAt", existingEntity.getAudit().getUpdatedAt());
 
         mongoTemplate.updateFirst(query, update, entityClass);
-
-        T updatedEntity = findById(id);
-        long duration = System.currentTimeMillis() - startTime;
-        log.info("MongoDB entity updated with ID: {} | Time taken: {} ms", id, duration);
-        return updatedEntity;
-    }
-
-    @Override
-    public T delete(ID id) {
-        long startTime = System.currentTimeMillis();
-        log.debug("Deleting MongoDB entity with ID: {}", id);
-        Query query = new Query(Criteria.where("_id").is(id));
-        T deletedEntity = mongoTemplate.findAndRemove(query, entityClass);
-        if (deletedEntity == null) {
-            log.warn("Entity not found with ID: {}", id);
-            throw new EntityNotFoundException(getEntityClassName(), id);
-        }
-        long duration = System.currentTimeMillis() - startTime;
-        log.info("MongoDB entity deleted with ID: {} | Time taken: {} ms", id, duration);
-        return deletedEntity;
-    }
-
-    @Override
-    public long count() {
-        long startTime = System.currentTimeMillis();
-        long count = mongoTemplate.count(new Query(), entityClass);
-        long duration = System.currentTimeMillis() - startTime;
-        log.debug("MongoDB entity count: {} | Time taken: {} ms", count, duration);
-        return count;
-    }
-
-    @Override
-    public boolean existsById(ID id) {
-        long startTime = System.currentTimeMillis();
-        boolean exists = mongoTemplate.exists(Query.query(Criteria.where("_id").is(id)), entityClass);
-        long duration = System.currentTimeMillis() - startTime;
-        log.info("MongoDB entity exists check for ID: {} | Result: {} | Time taken: {} ms",
-                id, exists, duration);
-        return exists;
-    }
-
-    @Override
-    public BatchResult<T> deleteBatch(List<ID> ids) {
-        long startTime = System.currentTimeMillis();
-        log.debug("Deleting batch of {} MongoDB entities", ids.size());
-
-        BatchResult<T> result = new BatchResult<>();
-
-        Query findQuery = Query.query(Criteria.where("_id").in(ids));
-        List<T> entitiesToDelete = mongoTemplate.find(findQuery, entityClass);
-
-        Set<ID> foundIds = entitiesToDelete.stream()
-                .map(T::getId)
-                .collect(Collectors.toSet());
-
-        for (ID id : ids) {
-            if (!foundIds.contains(id)) {
-                result.addSkippedReason(String.format("ID %s not found", id));
-            }
-        }
-        result.setSkippedCount(ids.size() - foundIds.size());
-
-        if (!entitiesToDelete.isEmpty()) {
-            Query deleteQuery = Query.query(Criteria.where("_id").in(foundIds));
-            mongoTemplate.remove(deleteQuery, entityClass);
-
-            // 🔥 OPTIMIZATION: Don't store deleted entities
-            result.setCreatedEntities(Collections.emptyList());
-        }
-
-        long duration = System.currentTimeMillis() - startTime;
-        log.info("Batch deletion completed: {} deleted, {} skipped | Time taken: {} ms",
-                foundIds.size(), result.getSkippedCount(), duration);
-
-        return result;
+        return findById(id);
     }
 
     @Override
     @Transactional(timeout = 600)
     public BatchResult<T> updateBatch(Map<ID, Map<String, Object>> updates) {
-        long startTime = System.currentTimeMillis();
-        log.debug("Updating batch of {} MongoDB entities", updates.size());
-
-        // 🔥 OPTIMIZATION: Counter-based result
         int successCount = 0;
         int skipCount = 0;
         List<String> skipReasons = new ArrayList<>();
 
         for (Map.Entry<ID, Map<String, Object>> entry : updates.entrySet()) {
             try {
-                T entity = findById(entry.getKey());
-                autoValidateUpdates(entry.getValue(), entity);
-
-                Query query = new Query(Criteria.where("_id").is(entry.getKey()));
-                Update update = new Update();
-
-                entry.getValue().forEach((key, value) -> {
-                    if (!"id".equals(key) && !"_id".equals(key)) {
-                        update.set(key, value);
-                    }
-                });
-
-                entity.onUpdate();
-                update.set("audit.updatedAt", entity.getAudit().getUpdatedAt());
-
-                mongoTemplate.updateFirst(query, update, entityClass);
+                update(entry.getKey(), entry.getValue());
                 successCount++;
-
             } catch (Exception e) {
                 skipCount++;
-                skipReasons.add("ID " + entry.getKey() + ": " + e.getMessage());
+                if (skipReasons.size() < 1000) {
+                    skipReasons.add("ID " + entry.getKey() + ": " + e.getMessage());
+                }
             }
         }
 
-        long totalDuration = System.currentTimeMillis() - startTime;
-
-        log.info("Batch update completed: {} updated, {} skipped | Total time: {} ms",
-                successCount, skipCount, totalDuration);
-
-        // 🔥 LIGHTWEIGHT RESULT
         BatchResult<T> result = new BatchResult<>();
         result.setCreatedEntities(Collections.emptyList());
         result.setSkippedCount(skipCount);
         result.setSkippedReasons(skipReasons);
-
         return result;
     }
 
-    private void validateUniqueConstraints(T entity) {
-        CrudXUniqueConstraint[] constraints = entityClass.getAnnotationsByType(CrudXUniqueConstraint.class);
-        for (CrudXUniqueConstraint constraint : constraints) {
-            Query query = new Query();
+    // ==================== DELETE OPERATIONS ====================
 
-            for (String fieldName : constraint.fields()) {
+    @Override
+    public T delete(ID id) {
+        Query query = new Query(Criteria.where("_id").is(id));
+        T entity = mongoTemplate.findAndRemove(query, entityClass);
+        if (entity == null) {
+            throw new EntityNotFoundException(getEntityClassName(), id);
+        }
+        return entity;
+    }
+
+    @Override
+    public BatchResult<T> deleteBatch(List<ID> ids) {
+        Query findQuery = Query.query(Criteria.where("_id").in(ids));
+        List<T> found = mongoTemplate.find(findQuery, entityClass);
+
+        Set<ID> foundIds = found.stream().map(T::getId).collect(Collectors.toSet());
+        int notFound = ids.size() - foundIds.size();
+
+        List<String> skipReasons = new ArrayList<>();
+        for (ID id : ids) {
+            if (!foundIds.contains(id)) {
+                if (skipReasons.size() < 1000) {
+                    skipReasons.add("ID " + id + " not found");
+                }
+            }
+        }
+
+        if (!foundIds.isEmpty()) {
+            Query deleteQuery = Query.query(Criteria.where("_id").in(foundIds));
+            mongoTemplate.remove(deleteQuery, entityClass);
+        }
+
+        BatchResult<T> result = new BatchResult<>();
+        result.setCreatedEntities(Collections.emptyList());
+        result.setSkippedCount(notFound);
+        result.setSkippedReasons(skipReasons);
+        return result;
+    }
+
+    // ==================== UTILITY ====================
+
+    @Override
+    public long count() {
+        return mongoTemplate.count(new Query(), entityClass);
+    }
+
+    @Override
+    public boolean existsById(ID id) {
+        return mongoTemplate.exists(Query.query(Criteria.where("_id").is(id)), entityClass);
+    }
+
+    /**
+     * 🔥 Cached unique constraints
+     */
+    private void cacheUniqueConstraints() {
+        if (UNIQUE_CONSTRAINT_CACHE.containsKey(entityClass)) return;
+
+        List<UniqueConstraintMeta> constraints = new ArrayList<>();
+        CrudXUniqueConstraint[] annotations = entityClass.getAnnotationsByType(CrudXUniqueConstraint.class);
+
+        for (CrudXUniqueConstraint ann : annotations) {
+            List<Field> fields = new ArrayList<>();
+            for (String fieldName : ann.fields()) {
                 try {
                     Field field = getFieldFromClass(entityClass, fieldName);
                     field.setAccessible(true);
-                    Object value = field.get(entity);
+                    fields.add(field);
+                } catch (Exception e) {
+                    log.warn("Field not found: {}", fieldName);
+                }
+            }
+            if (!fields.isEmpty()) {
+                constraints.add(new UniqueConstraintMeta(fields, ann.message()));
+            }
+        }
 
+        UNIQUE_CONSTRAINT_CACHE.put(entityClass, constraints);
+    }
+
+    /**
+     * Validate unique constraints (DB query)
+     * Only for single creates, NOT batch
+     */
+    private void validateUniqueConstraints(T entity) {
+        List<UniqueConstraintMeta> constraints = UNIQUE_CONSTRAINT_CACHE.get(entityClass);
+        if (constraints == null || constraints.isEmpty()) return;
+
+        for (UniqueConstraintMeta meta : constraints) {
+            Query query = new Query();
+
+            for (Field field : meta.fields) {
+                try {
+                    Object value = field.get(entity);
                     if (value != null) {
-                        query.addCriteria(Criteria.where(fieldName).is(value));
+                        query.addCriteria(Criteria.where(field.getName()).is(value));
                     }
                 } catch (Exception e) {
-                    log.error("Error accessing field: {}", fieldName, e);
+                    log.debug("Field access error: {}", field.getName());
                 }
             }
 
@@ -508,14 +555,66 @@ public abstract class CrudXMongoService<T extends CrudXMongoEntity<ID>, ID exten
             }
 
             if (mongoTemplate.exists(query, entityClass)) {
-                String message = constraint.message().isEmpty()
-                        ? String.format("Duplicate entry found for fields: %s", String.join(", ", constraint.fields()))
-                        : constraint.message();
-
-                log.warn("Unique constraint violation: {}", message);
-                throw new DuplicateEntityException(message);
+                String msg = meta.message.isEmpty() ?
+                        "Duplicate entry for unique constraint" : meta.message;
+                throw new DuplicateEntityException(msg);
             }
         }
+    }
+
+    private void autoValidateUpdates(Map<String, Object> updates, T entity) {
+        List<String> protectedFields = List.of("_id", "id", "createdAt", "created_at", "createdBy", "created_by");
+
+        for (String field : protectedFields) {
+            if (updates.containsKey(field)) {
+                throw new IllegalArgumentException("Cannot update protected field: " + field);
+            }
+        }
+
+        for (String fieldName : updates.keySet()) {
+            try {
+                Field field = getFieldFromClass(entityClass, fieldName);
+                if (field.isAnnotationPresent(io.github.sachinnimbal.crudx.core.annotations.CrudXImmutable.class)) {
+                    throw new IllegalArgumentException("Field '" + fieldName + "' is immutable");
+                }
+            } catch (NoSuchFieldException e) {
+                throw new IllegalArgumentException("Field '" + fieldName + "' does not exist");
+            }
+        }
+
+        if (validator != null) {
+            Map<String, Object> oldValues = new HashMap<>();
+            try {
+                for (Map.Entry<String, Object> entry : updates.entrySet()) {
+                    Field field = getFieldFromClass(entityClass, entry.getKey());
+                    field.setAccessible(true);
+                    oldValues.put(entry.getKey(), field.get(entity));
+                    field.set(entity, entry.getValue());
+                }
+
+                Set<ConstraintViolation<T>> violations = validator.validate(entity);
+                if (!violations.isEmpty()) {
+                    String errors = violations.stream()
+                            .map(v -> v.getPropertyPath() + ": " + v.getMessage())
+                            .collect(Collectors.joining(", "));
+                    throw new IllegalArgumentException("Validation failed: " + errors);
+                }
+            } catch (IllegalAccessException | NoSuchFieldException e) {
+                throw new RuntimeException(e);
+            } finally {
+                oldValues.forEach((key, val) -> {
+                    try {
+                        Field field = getFieldFromClass(entityClass, key);
+                        field.setAccessible(true);
+                        field.set(entity, val);
+                    } catch (Exception e) {
+                        log.debug("Rollback error", e);
+                    }
+                });
+            }
+        }
+
+        validateUniqueConstraints(entity);
     }
 
     private Field getFieldFromClass(Class<?> clazz, String fieldName) throws NoSuchFieldException {
@@ -533,74 +632,13 @@ public abstract class CrudXMongoService<T extends CrudXMongoEntity<ID>, ID exten
         return entityClass != null ? entityClass.getSimpleName() : "Unknown";
     }
 
-    private void autoValidateUpdates(Map<String, Object> updates, T entity) {
-        List<String> autoProtectedFields = List.of(
-                "_id", "id",
-                "createdAt", "created_at",
-                "createdBy", "created_by"
-        );
+    private static class UniqueConstraintMeta {
+        final List<Field> fields;
+        final String message;
 
-        for (String protectedField : autoProtectedFields) {
-            if (updates.containsKey(protectedField)) {
-                throw new IllegalArgumentException(
-                        "Cannot update protected field: " + protectedField
-                );
-            }
+        UniqueConstraintMeta(List<Field> fields, String message) {
+            this.fields = fields;
+            this.message = message;
         }
-
-        for (String fieldName : updates.keySet()) {
-            try {
-                Field field = getFieldFromClass(entityClass, fieldName);
-
-                if (field.isAnnotationPresent(CrudXImmutable.class)) {
-                    CrudXImmutable annotation = field.getAnnotation(CrudXImmutable.class);
-                    throw new IllegalArgumentException(
-                            String.format("Field '%s' is immutable: %s", fieldName, annotation.message())
-                    );
-                }
-
-            } catch (NoSuchFieldException e) {
-                throw new IllegalArgumentException("Field '" + fieldName + "' does not exist");
-            }
-        }
-
-        Map<String, Object> oldValues = new HashMap<>();
-        try {
-            for (Map.Entry<String, Object> entry : updates.entrySet()) {
-                Field field = null;
-                try {
-                    field = getFieldFromClass(entityClass, entry.getKey());
-                } catch (NoSuchFieldException e) {
-                    throw new RuntimeException(e);
-                }
-                field.setAccessible(true);
-                oldValues.put(entry.getKey(), field.get(entity));
-                field.set(entity, entry.getValue());
-            }
-
-            if (validator != null) {
-                Set<ConstraintViolation<T>> violations = validator.validate(entity);
-                if (!violations.isEmpty()) {
-                    String errors = violations.stream()
-                            .map(v -> v.getPropertyPath() + ": " + v.getMessage())
-                            .collect(Collectors.joining(", "));
-                    throw new IllegalArgumentException("Validation failed: " + errors);
-                }
-            }
-
-        } catch (IllegalAccessException e) {
-            throw new RuntimeException(e);
-        } finally {
-            oldValues.forEach((fieldName, oldValue) -> {
-                try {
-                    Field field = getFieldFromClass(entityClass, fieldName);
-                    field.setAccessible(true);
-                    field.set(entity, oldValue);
-                } catch (Exception e) {
-                    log.debug("Error rolling back", e);
-                }
-            });
-        }
-        validateUniqueConstraints(entity);
     }
 }
