@@ -278,9 +278,37 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             @RequestParam(required = false, defaultValue = "true") boolean skipDuplicates) {
 
         long startTime = System.currentTimeMillis();
-        int totalSize = requestBodies.size();
 
-        log.info("🚀 Starting intelligent batch: {} entities", totalSize);
+        // ==================== CRITICAL VALIDATIONS (PREVENT HANGING) ====================
+
+        // 1. NULL/EMPTY CHECK - Immediate fail
+        if (requestBodies == null || requestBodies.isEmpty()) {
+            throw new IllegalArgumentException("Request body cannot be null or empty");
+        }
+
+        // 2. SIZE LIMIT CHECK - Prevent memory overflow
+        int totalSize = getSize(requestBodies, crudxProperties.getMaxBatchSize());
+
+        // 4. VALIDATE FIRST RECORD STRUCTURE - Fast fail on bad format
+        try {
+            if (requestBodies.getFirst() == null || requestBodies.getFirst().isEmpty()) {
+                throw new IllegalArgumentException(
+                        "First record in batch is null or empty. All records must contain data."
+                );
+            }
+            // Quick test conversion to catch format errors early
+            T testEntity = convertMapToEntity(requestBodies.getFirst(), BATCH_CREATE);
+            validateRequiredFields(testEntity);
+        } catch (Exception e) {
+            throw new IllegalArgumentException(
+                    "Invalid data format in batch. First record validation failed: " +
+                            e.getMessage() + ". Please check your data structure."
+            );
+        }
+
+        log.info("🚀 Starting batch creation: {} entities (validated)", totalSize);
+
+        // ==================== INTELLIGENT BATCH PROCESSING ====================
 
         int dbBatchSize = calculateOptimalBatchSize(totalSize);
         int conversionBatchSize = Math.min(200, dbBatchSize / 5);
@@ -290,43 +318,86 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
         List<String> skipReasons = new ArrayList<>();
         int dbHits = 0;
 
+        // Add timeout protection
+        long maxProcessingTime = 300000; // 5 minutes max
+        long processingDeadline = startTime + maxProcessingTime;
+
         for (int chunkStart = 0; chunkStart < totalSize; chunkStart += dbBatchSize) {
+
+            // ==================== TIMEOUT CHECK ====================
+            if (System.currentTimeMillis() > processingDeadline) {
+                String timeoutMsg = String.format(
+                        "Batch processing timeout after %d ms. Processed %d/%d records successfully. " +
+                                "Increase batch size limits or split into smaller requests.",
+                        maxProcessingTime, successCount, totalSize
+                );
+                log.error(timeoutMsg);
+
+                // Return partial success response with data
+                long duration = System.currentTimeMillis() - startTime;
+                Map<String, Object> partialResponse = buildBatchResponse(
+                        totalSize, successCount, skipCount, dbHits,
+                        duration,
+                        (successCount * 1000.0) / duration,
+                        skipReasons
+                );
+                partialResponse.put("status", "PARTIAL_SUCCESS");
+                partialResponse.put("timeoutError", timeoutMsg);
+
+                // Use success method with data since we have partial results
+                return ResponseEntity.status(HttpStatus.PARTIAL_CONTENT)
+                        .body(ApiResponse.success(partialResponse,
+                                timeoutMsg,
+                                HttpStatus.PARTIAL_CONTENT,
+                                duration));
+            }
+
             int chunkEnd = Math.min(chunkStart + dbBatchSize, totalSize);
-            int chunkSize = chunkEnd - chunkStart;
+            List<T> chunkEntities = new ArrayList<>(chunkEnd - chunkStart);
 
-            List<T> chunkEntities = new ArrayList<>(chunkSize);
-
-            // Conversion phase - track what we actually converted
-            int convertedInChunk = 0;
+            // ==================== CONVERSION PHASE ====================
             for (int i = chunkStart; i < chunkEnd; i += conversionBatchSize) {
                 int batchEnd = Math.min(i + conversionBatchSize, chunkEnd);
 
                 for (int j = i; j < batchEnd; j++) {
                     try {
-                        T entity = convertMapToEntity(requestBodies.get(j), BATCH_CREATE);
+                        Map<String, Object> record = requestBodies.get(j);
+
+                        // Skip null records
+                        if (record == null || record.isEmpty()) {
+                            skipCount++;
+                            if (skipReasons.size() < 1000) {
+                                skipReasons.add(String.format("Index %d: Empty or null record", j));
+                            }
+                            continue;
+                        }
+
+                        T entity = convertMapToEntity(record, BATCH_CREATE);
                         validateRequiredFields(entity);
                         chunkEntities.add(entity);
-                        convertedInChunk++; //  COUNT CONVERSIONS
+
                     } catch (Exception e) {
                         skipCount++;
                         if (skipReasons.size() < 1000) {
                             skipReasons.add(String.format("Index %d: %s", j, e.getMessage()));
                         }
+                        log.debug("Skipped record {}: {}", j, e.getMessage());
                     }
+
+                    // Clear processed record to free memory
                     requestBodies.set(j, null);
                 }
             }
-            int entitiesToInsert = chunkEntities.size();
-            // Insert phase
+
+            // ==================== DATABASE INSERT PHASE ====================
             if (!chunkEntities.isEmpty()) {
                 try {
                     beforeCreateBatch(chunkEntities);
                     BatchResult<T> result = crudService.createBatch(chunkEntities, skipDuplicates);
                     afterCreateBatch(result.getCreatedEntities());
 
-                    int inserted = entitiesToInsert - result.getSkippedCount();
+                    int inserted = chunkEntities.size() - result.getSkippedCount();
                     successCount += inserted;
-                    skipCount += result.getSkippedCount();
                     skipCount += result.getSkippedCount();
                     dbHits++;
 
@@ -338,39 +409,58 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                             (chunkStart / dbBatchSize) + 1, inserted, result.getSkippedCount());
 
                 } catch (Exception e) {
-                    log.error("❌ Chunk {} failed: {}", (chunkStart / dbBatchSize) + 1, e.getMessage());
-                    if (!skipDuplicates) throw e;
+                    log.error("❌ Chunk {} failed: {}",
+                            (chunkStart / dbBatchSize) + 1, e.getMessage());
+
+                    if (!skipDuplicates) {
+                        // Clean up and throw error
+                        requestBodies.clear();
+                        throw new RuntimeException(
+                                String.format("Batch failed at chunk %d: %s",
+                                        (chunkStart / dbBatchSize) + 1, e.getMessage()),
+                                e
+                        );
+                    }
                     skipCount += chunkEntities.size();
                 }
             }
 
             chunkEntities.clear();
 
+            // ==================== PROGRESS LOGGING ====================
             if ((chunkStart / dbBatchSize) % 5 == 0 || chunkEnd == totalSize) {
                 logRealtimeProgress(totalSize, chunkEnd, successCount, skipCount, startTime);
             }
 
+            // ==================== MEMORY MANAGEMENT ====================
             if ((chunkStart / dbBatchSize) % 50 == 0) {
                 System.gc();
             }
         }
 
+        // Clear request list
         requestBodies.clear();
 
+        // ==================== FINAL RESPONSE ====================
         long duration = System.currentTimeMillis() - startTime;
         double recordsPerSecond = duration > 0 ? (successCount * 1000.0) / duration : 0.0;
 
         Map<String, Object> responseData = buildBatchResponse(
                 totalSize, successCount, skipCount, dbHits, duration,
-                recordsPerSecond, skipReasons);
+                recordsPerSecond, skipReasons
+        );
 
         log.info("✅ Batch completed: {} created, {} skipped | {} DB hits | {} rec/sec | {} ms",
                 successCount, skipCount, dbHits, (int) recordsPerSecond, duration);
 
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(ApiResponse.success(responseData,
-                        String.format("Batch: %d created, %d skipped", successCount, skipCount),
-                        HttpStatus.CREATED, duration));
+        // Determine response status
+        HttpStatus status = successCount > 0 ? HttpStatus.CREATED : HttpStatus.BAD_REQUEST;
+        String message = successCount > 0
+                ? String.format("Batch: %d created, %d skipped", successCount, skipCount)
+                : "Batch failed: All records were skipped or invalid";
+
+        return ResponseEntity.status(status)
+                .body(ApiResponse.success(responseData, message, status, duration));
     }
 
     @GetMapping("/{id}")
@@ -731,6 +821,28 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             log.error("Force delete error: {} | Time: {} ms", e.getMessage(), executionTime, e);
             throw new RuntimeException("Failed to force delete batch: " + e.getMessage(), e);
         }
+    }
+
+    private int getSize(List<Map<String, Object>> requestBodies, int maxBatchSize) {
+        int totalSize = requestBodies.size();
+
+        if (totalSize > maxBatchSize) {
+            throw new IllegalArgumentException(
+                    String.format("Batch size %d exceeds maximum allowed %d. " +
+                                    "Please split your request into smaller batches.",
+                            totalSize, maxBatchSize)
+            );
+        }
+
+        // 3. MINIMUM BATCH CHECK - Must have at least 2 records for batch
+        if (totalSize < 2) {
+            throw new IllegalArgumentException(
+                    String.format("Batch creation requires at least 2 records. " +
+                                    "Current size: %d. Use POST / endpoint for single record creation.",
+                            totalSize)
+            );
+        }
+        return totalSize;
     }
 
     // ==================== DTO CONVERSION METHODS ====================

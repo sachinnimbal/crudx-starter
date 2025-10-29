@@ -19,7 +19,7 @@ public class CrudXProperties {
      * Maximum allowed batch size to prevent memory issues
      * Default: 100,000
      */
-    private int maxBatchSize = 100000;
+    private Integer maxBatchSize = 100000;
 
     /**
      * Query timeout in milliseconds
