@@ -966,7 +966,6 @@ public class CrudXDTOProcessor extends AbstractProcessor {
 
             writeln(" *");
             writeln(" * @author CrudX DTO Processor");
-            writeln(" * @version 1.0");
             writeln(" * @see CrudXMapper");
             writeln(" * @see " + context.entitySimpleName);
             writeln(" * @generatedAt " + timestamp);
