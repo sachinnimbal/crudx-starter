@@ -261,9 +261,8 @@ public class CrudXGlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> handleRuntimeException(
             RuntimeException ex, WebRequest request) {
 
-        log.error("Runtime exception: {}", ex.getMessage(), ex);
+        log.error("Runtime exception: {}", ex.getMessage()); // Remove stack trace logging
 
-        // Check if it's a wrapped exception with a more specific message
         String message = ex.getMessage() != null ? ex.getMessage() : "An unexpected error occurred";
 
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)

@@ -3,7 +3,7 @@ package io.github.sachinnimbal.crudx.web;
 import io.github.sachinnimbal.crudx.core.config.CrudXProperties;
 import io.github.sachinnimbal.crudx.core.dto.mapper.CrudXMapperGenerator;
 import io.github.sachinnimbal.crudx.core.dto.mapper.CrudXMapperRegistry;
-import io.github.sachinnimbal.crudx.core.enums.CrudXOperation;
+import io.github.sachinnimbal.crudx.core.exception.DuplicateEntityException;
 import io.github.sachinnimbal.crudx.core.model.CrudXBaseEntity;
 import io.github.sachinnimbal.crudx.core.response.ApiResponse;
 import io.github.sachinnimbal.crudx.core.response.BatchResult;
@@ -26,6 +26,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.Serializable;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -193,6 +194,10 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                     .body(ApiResponse.success(response, "Entity created successfully",
                             HttpStatus.CREATED, executionTime));
 
+        } catch (DuplicateEntityException e) {
+            long executionTime = System.currentTimeMillis() - startTime;
+            log.error("Error creating entity: {} | Time: {} ms", e.getMessage(), executionTime);
+            throw e; // Re-throw without wrapping
         } catch (Exception e) {
             long executionTime = System.currentTimeMillis() - startTime;
             log.error("Error creating entity: {} | Time: {} ms", e.getMessage(), executionTime, e);
@@ -211,7 +216,6 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             validationHelper.validateBatchRequestBody(requestBodies);
             validationHelper.validateBatchSize(requestBodies.size(), crudxProperties.getMaxBatchSize());
 
-            // Quick test conversion to catch format errors early
             T testEntity = dtoConverter.convertMapToEntity(requestBodies.get(0), BATCH_CREATE);
             validationHelper.validateRequiredFields(testEntity);
 
@@ -223,15 +227,41 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
                     crudxProperties.getBatchSize()
             );
 
+            // 🔥 Build enhanced response data
             Map<String, Object> responseData = batchProcessor.buildBatchResponseData(result);
 
-            HttpStatus status = helper.determineBatchStatus(result.getSuccessCount(), result.getTotalProcessed());
-            String message = helper.formatBatchMessage(result.getSuccessCount(), result.getSkipCount(), "creation");
+            // 🔥 Enhanced message with detailed breakdown
+            String message = buildBatchCreationMessage(
+                    result.getSuccessCount(),
+                    result.getSkipCount(),
+                    result.getTotalProcessed(),
+                    result.getDuplicateCount(),
+                    result.getValidationFailCount()
+            );
 
-            log.info("Batch completed: {} | {} ms", message, result.getDuration());
+            HttpStatus status = determineBatchResponseStatus(
+                    result.getSuccessCount(),
+                    result.getTotalProcessed()
+            );
 
+            // 🔥 Extract warnings for response
+            List<String> warnings = result.getSkipReasons() != null && !result.getSkipReasons().isEmpty()
+                    ? result.getSkipReasons().subList(0, Math.min(10, result.getSkipReasons().size()))
+                    : null;
+
+            log.info("✅ Batch completed: {} | {} ms", message, result.getDuration());
+
+            // 🔥 Use enhanced batch response
             return ResponseEntity.status(status)
-                    .body(ApiResponse.success(responseData, message, status, result.getDuration()));
+                    .body(ApiResponse.batchSuccess(
+                            responseData,
+                            message,
+                            status,
+                            result.getDuration(),
+                            result.getSuccessCount(),
+                            result.getSkipCount(),
+                            result.getDuplicateCount()
+                    ));
 
         } catch (Exception e) {
             long executionTime = System.currentTimeMillis() - startTime;
@@ -387,13 +417,23 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
             long executionTime = System.currentTimeMillis() - startTime;
             Object responseData = dtoConverter.convertBatchResultToResponse(result, BATCH_UPDATE);
 
-            String message = helper.formatBatchMessage(
+            // 🔥 Enhanced message with duplicate count
+            String message = buildBatchUpdateMessage(
                     result.getCreatedEntities().size(),
                     result.getSkippedCount(),
-                    "update"
+                    result.getDuplicateSkipCount()
             );
 
-            return ResponseEntity.ok(ApiResponse.success(responseData, message, executionTime));
+            // 🔥 Determine status based on results
+            HttpStatus status = determineBatchResponseStatus(
+                    result.getCreatedEntities().size(),
+                    result.getTotalProcessed()
+            );
+
+            log.info("✅ Batch update: {} | {} ms", message, executionTime);
+
+            return ResponseEntity.status(status)
+                    .body(ApiResponse.success(responseData, message, status, executionTime));
 
         } catch (Exception e) {
             long executionTime = System.currentTimeMillis() - startTime;
@@ -554,5 +594,58 @@ public abstract class CrudXController<T extends CrudXBaseEntity<ID>, ID extends 
 
     protected String getMapperMode() {
         return dtoConverter.getMapperMode().name();
+    }
+
+    private String buildBatchCreationMessage(int success, int skipped, int total,
+                                             int duplicates, int validationFails) {
+        if (skipped == 0) {
+            return String.format("All %d records created successfully", success);
+        }
+
+        StringBuilder msg = new StringBuilder();
+        msg.append(String.format("Batch creation: %d/%d successful", success, total));
+
+        if (duplicates > 0 || validationFails > 0) {
+            msg.append(String.format(", %d skipped", skipped));
+
+            List<String> reasons = new ArrayList<>();
+            if (duplicates > 0) {
+                reasons.add(String.format("%d duplicates", duplicates));
+            }
+            if (validationFails > 0) {
+                reasons.add(String.format("%d validation errors", validationFails));
+            }
+
+            msg.append(" (").append(String.join(", ", reasons)).append(")");
+        } else {
+            msg.append(String.format(", %d skipped", skipped));
+        }
+
+        return msg.toString();
+    }
+
+    private String buildBatchUpdateMessage(int success, int skipped, Integer duplicates) {
+        if (skipped == 0) {
+            return String.format("All %d records updated successfully", success);
+        }
+
+        StringBuilder msg = new StringBuilder();
+        msg.append(String.format("Batch update: %d successful, %d skipped", success, skipped));
+
+        if (duplicates != null && duplicates > 0) {
+            msg.append(String.format(" (%d duplicate constraint violations)", duplicates));
+        }
+
+        return msg.toString();
+    }
+
+    private HttpStatus determineBatchResponseStatus(int successCount, int totalCount) {
+        if (successCount == 0) {
+            return HttpStatus.BAD_REQUEST; // All failed
+        }
+        if (successCount < totalCount) {
+            return HttpStatus.PARTIAL_CONTENT; // Some failed
+        }
+        return HttpStatus.CREATED; // All succeeded
     }
 }

@@ -13,22 +13,11 @@ import java.io.Serializable;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 
-/**
- * General utility methods for CrudXController
- */
 @Slf4j
 public class CrudXControllerHelper<T extends CrudXBaseEntity<ID>, ID extends Serializable> {
 
-    /**
-     * -- GETTER --
-     * Get entity class
-     */
     @Getter
     private final Class<T> entityClass;
-    /**
-     * -- GETTER --
-     * Get ID class
-     */
     @Getter
     private final Class<ID> idClass;
     private final Class<?> controllerClass;
@@ -40,9 +29,6 @@ public class CrudXControllerHelper<T extends CrudXBaseEntity<ID>, ID extends Ser
         this.idClass = typeInfo.idClass;
     }
 
-    /**
-     * Determine database type from entity class
-     */
     public DatabaseType getDatabaseType() {
         if (CrudXMongoEntity.class.isAssignableFrom(entityClass)) {
             return DatabaseType.MONGODB;
@@ -54,9 +40,6 @@ public class CrudXControllerHelper<T extends CrudXBaseEntity<ID>, ID extends Ser
         throw new IllegalStateException("Unknown database type for: " + entityClass.getSimpleName());
     }
 
-    /**
-     * Generate service bean name based on entity and database type
-     */
     public String getServiceBeanName() {
         DatabaseType databaseType = getDatabaseType();
         return Character.toLowerCase(entityClass.getSimpleName().charAt(0)) +
@@ -64,17 +47,11 @@ public class CrudXControllerHelper<T extends CrudXBaseEntity<ID>, ID extends Ser
                 databaseType.name().toLowerCase();
     }
 
-    /**
-     * Generate mapper bean name
-     */
     public String getMapperBeanName() {
         return Character.toLowerCase(entityClass.getSimpleName().charAt(0)) +
                 entityClass.getSimpleName().substring(1) + "MapperCrudX";
     }
 
-    /**
-     * Clone entity (basic implementation)
-     */
     @SuppressWarnings("unchecked")
     public T cloneEntity(T entity) {
         try {
@@ -85,9 +62,6 @@ public class CrudXControllerHelper<T extends CrudXBaseEntity<ID>, ID extends Ser
         }
     }
 
-    /**
-     * Determine HTTP status for batch operation results
-     */
     public HttpStatus determineBatchStatus(int successCount, int totalCount) {
         if (successCount == 0) {
             return HttpStatus.BAD_REQUEST;
@@ -98,59 +72,89 @@ public class CrudXControllerHelper<T extends CrudXBaseEntity<ID>, ID extends Ser
         return HttpStatus.CREATED;
     }
 
-    /**
-     * Format batch response message
-     */
+    // Batch message with duplicate breakdown
     public String formatBatchMessage(int successCount, int skipCount, String operation) {
-        if (skipCount > 0) {
-            return String.format("Batch %s: %d %s, %d skipped",
-                    operation, successCount,
-                    operation.equals("deletion") ? "deleted" : "processed",
-                    skipCount);
-        }
-        return String.format("Batch %s: %d entities %s",
-                operation, successCount,
-                operation.equals("deletion") ? "deleted" : "processed");
+        return formatBatchMessageDetailed(successCount, skipCount, null, null, operation);
     }
 
-    /**
-     * Format count message
-     */
+    // Detailed batch message with categorization
+    public String formatBatchMessageDetailed(int successCount, int skipCount,
+                                             Integer duplicates, Integer validationFails,
+                                             String operation) {
+        if (skipCount == 0) {
+            return String.format("Batch %s: %d entities %s successfully",
+                    operation, successCount,
+                    operation.equals("deletion") ? "deleted" : "processed");
+        }
+
+        StringBuilder msg = new StringBuilder();
+        msg.append(String.format("Batch %s: %d %s, %d skipped",
+                operation, successCount,
+                operation.equals("deletion") ? "deleted" : "processed",
+                skipCount));
+
+        // Add breakdown if available
+        if ((duplicates != null && duplicates > 0) || (validationFails != null && validationFails > 0)) {
+            msg.append(" (");
+            boolean first = true;
+
+            if (duplicates != null && duplicates > 0) {
+                msg.append(String.format("%d duplicates", duplicates));
+                first = false;
+            }
+
+            if (validationFails != null && validationFails > 0) {
+                if (!first) msg.append(", ");
+                msg.append(String.format("%d validation errors", validationFails));
+            }
+
+            msg.append(")");
+        }
+
+        return msg.toString();
+    }
+
     public String formatCountMessage(long count) {
         return String.format("Total count: %d", count);
     }
 
-    /**
-     * Format exists message
-     */
     public String formatExistsMessage(ID id, boolean exists) {
         return String.format("Entity %s", exists ? "exists" : "does not exist");
     }
 
-    /**
-     * Format page message
-     */
     public String formatPageMessage(int page, int size, long totalElements) {
         return String.format("Retrieved page %d with %d elements (total: %d)",
                 page, size, totalElements);
     }
 
-    /**
-     * Format list message
-     */
     public String formatListMessage(int count) {
         return String.format("Retrieved %d entities", count);
     }
 
-    /**
-     * Format large dataset warning
-     */
     public String formatLargeDatasetWarning(long totalCount, int returnedSize) {
         return String.format("Large dataset (%d records). Returning first %d. Use /paged for more.",
                 totalCount, returnedSize);
     }
 
-    // ==================== PRIVATE METHODS ====================
+    // Format success rate message
+    public String formatSuccessRateMessage(int success, int total) {
+        if (total == 0) return "No records processed";
+
+        double rate = (success * 100.0) / total;
+        return String.format("Success rate: %.2f%% (%d/%d)", rate, success, total);
+    }
+
+    // Format duplicate skip message
+    public String formatDuplicateMessage(int duplicateCount, int totalSkipped) {
+        if (duplicateCount == 0) return "No duplicates detected";
+
+        if (duplicateCount == totalSkipped) {
+            return String.format("All %d skipped records were duplicates", duplicateCount);
+        }
+
+        return String.format("%d out of %d skipped records were duplicates",
+                duplicateCount, totalSkipped);
+    }
 
     @SuppressWarnings("unchecked")
     private GenericTypeInfo<T, ID> resolveGenericTypes() {
@@ -176,8 +180,6 @@ public class CrudXControllerHelper<T extends CrudXBaseEntity<ID>, ID extends Ser
                 "Could not resolve entity class for controller: " + controllerClass.getSimpleName()
         );
     }
-
-    // ==================== INNER CLASSES ====================
 
     private record GenericTypeInfo<T extends CrudXBaseEntity<ID>, ID extends Serializable>(
             Class<T> entityClass,

@@ -3,6 +3,7 @@ package io.github.sachinnimbal.crudx.core.config;
 import io.github.sachinnimbal.crudx.core.exception.CrudXGlobalExceptionHandler;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.domain.EntityScan;
@@ -26,7 +27,8 @@ import org.springframework.data.mongodb.repository.config.EnableMongoRepositorie
         CrudXBannerConfiguration.class,
         CrudXServiceAutoConfiguration.class,
         CrudXGlobalExceptionHandler.class,
-        CrudXPerformanceConfiguration.class
+        CrudXPerformanceConfiguration.class,
+        CrudXDataSourceConfiguration.class  // 🔥 Add DataSource config here
 })
 public class CrudXConfiguration {
 
@@ -39,9 +41,13 @@ public class CrudXConfiguration {
     private static final String WHITE = "\u001B[37m";
 
     private final Environment environment;
+    private final CrudXProperties crudxProperties;
 
-    public CrudXConfiguration(Environment environment) {
+    // 🔥 FIX: Use constructor injection to avoid circular dependency
+    public CrudXConfiguration(Environment environment,
+                              @Autowired(required = false) CrudXProperties crudxProperties) {
         this.environment = environment;
+        this.crudxProperties = crudxProperties != null ? crudxProperties : new CrudXProperties();
         frameworkInitialization();
     }
 
@@ -120,6 +126,7 @@ public class CrudXConfiguration {
         return value != null && !value.trim().isEmpty();
     }
 
+    // ... keep all your existing error message methods ...
     private String buildNoDriverError() {
         return "\n" +
                 RED + "================================================\n" + RESET +
@@ -314,8 +321,8 @@ public class CrudXConfiguration {
             logInfo(CYAN + "----------------------------------------" + RESET);
             logInfo(BOLD + WHITE + "  JPA/SQL Configuration Active" + RESET);
             logInfo(CYAN + "----------------------------------------" + RESET);
-            logInfo(GREEN + "  [OK] DataSource will be auto-configured" + RESET);
-            logInfo(GREEN + "  [OK] EntityManager will be created" + RESET);
+            logInfo(GREEN + "  [OK] DataSource configured via CrudX" + RESET);
+            logInfo(GREEN + "  [OK] EntityManager created" + RESET);
             logInfo(GREEN + "  [OK] JPA Auditing enabled" + RESET);
             logInfo(GREEN + "  [OK] JPA Repositories enabled" + RESET);
             logInfo(CYAN + "  Database: " + RESET + databaseType);

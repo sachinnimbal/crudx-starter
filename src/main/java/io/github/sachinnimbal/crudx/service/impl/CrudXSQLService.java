@@ -2,6 +2,7 @@ package io.github.sachinnimbal.crudx.service.impl;
 
 import io.github.sachinnimbal.crudx.core.annotations.CrudXImmutable;
 import io.github.sachinnimbal.crudx.core.annotations.CrudXUniqueConstraint;
+import io.github.sachinnimbal.crudx.core.annotations.CrudXUniqueConstraints;
 import io.github.sachinnimbal.crudx.core.config.CrudXProperties;
 import io.github.sachinnimbal.crudx.core.exception.DuplicateEntityException;
 import io.github.sachinnimbal.crudx.core.exception.EntityNotFoundException;
@@ -14,7 +15,6 @@ import jakarta.persistence.PersistenceException;
 import jakarta.persistence.TypedQuery;
 import jakarta.persistence.criteria.*;
 import jakarta.validation.ConstraintViolation;
-import jakarta.validation.ConstraintViolationException;
 import jakarta.validation.Validator;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,6 +23,8 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.io.Serializable;
@@ -30,20 +32,8 @@ import java.lang.reflect.Field;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
-/**
- * 🚀 ENTERPRISE-GRADE SQL Service
- * <p>
- * BATCH INSERT OPTIMIZATIONS:
- * - Single transaction for entire batch (configurable chunk size)
- * - Zero unnecessary DB queries (no pre-validation fetches)
- * - Streaming validation (memory-bounded)
- * - Intelligent error recovery (skip vs abort)
- * - Lock-free unique constraint caching
- * - Primitive-based counters (no boxing)
- */
 @Slf4j
 @Transactional
 public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends Serializable>
@@ -61,17 +51,11 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
     protected CrudXProperties crudxProperties;
 
     private static final int MAX_IN_MEMORY_THRESHOLD = 5000;
-
-    // ADAPTIVE batch sizing based on dataset
-    private static final int BATCH_SIZE_SMALL = 200;    // < 1K records
-    private static final int BATCH_SIZE_MEDIUM = 500;   // 1K-10K
-    private static final int BATCH_SIZE_LARGE = 1000;   // 10K-50K
-    private static final int BATCH_SIZE_X_LARGE = 2000;  // 50K-100K
-    private static final int BATCH_SIZE_MAX = 5000;     // > 100K
-
-    // Cache for unique constraint fields (avoid reflection)
-    private static final Map<Class<?>, List<UniqueConstraintMeta>> UNIQUE_CONSTRAINT_CACHE =
-            new ConcurrentHashMap<>();
+    private static final int BATCH_SIZE_SMALL = 200;
+    private static final int BATCH_SIZE_MEDIUM = 500;
+    private static final int BATCH_SIZE_LARGE = 1000;
+    private static final int BATCH_SIZE_X_LARGE = 2000;
+    private static final int BATCH_SIZE_MAX = 5000;
 
     @PostConstruct
     @SuppressWarnings("unchecked")
@@ -87,9 +71,6 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
             if (typeArgs.length > 0 && typeArgs[0] instanceof Class) {
                 entityClass = (Class<T>) typeArgs[0];
                 log.debug("Entity class: {}", entityClass.getSimpleName());
-
-                // Pre-cache unique constraints
-                cacheUniqueConstraints();
                 return;
             }
         }
@@ -97,7 +78,6 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
         Class<?>[] typeArgs = GenericTypeResolver.resolveTypeArguments(getClass(), CrudXSQLService.class);
         if (typeArgs != null && typeArgs.length > 0) {
             entityClass = (Class<T>) typeArgs[0];
-            cacheUniqueConstraints();
             return;
         }
 
@@ -105,186 +85,403 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
     }
 
     @Override
-    @Transactional(timeout = 300)
+    @Transactional(timeout = 300, isolation = Isolation.READ_COMMITTED)
     public T create(T entity) {
         long start = System.currentTimeMillis();
+        log.debug("Creating entity: {}", getEntityClassName());
+
         validateUniqueConstraints(entity);
         entityManager.persist(entity);
         entityManager.flush();
 
-        log.debug("Entity created: {} in {} ms", entity.getId(), System.currentTimeMillis() - start);
+        log.info("Entity created: {} in {} ms", entity.getId(), System.currentTimeMillis() - start);
         return entity;
     }
 
-    /**
-     * 🚀 ENTERPRISE BATCH INSERT - Zero Unnecessary DB Hits
-     * <p>
-     * STRATEGY:
-     * 1. No pre-validation DB queries (validate during insert)
-     * 2. Single transaction with adaptive batch flushing
-     * 3. Streaming processing (bounded memory)
-     * 4. Intelligent error handling (continue vs abort)
-     * 5. Real-time progress tracking
-     */
     @Override
-    @Transactional(timeout = 1800)
+    @Transactional(timeout = 1800, isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRED)
     public BatchResult<T> createBatch(List<T> entities, boolean skipDuplicates) {
         long startTime = System.currentTimeMillis();
         int totalSize = entities.size();
 
-        log.info("🚀 SQL Batch: {} entities | Mode: {}",
-                totalSize, skipDuplicates ? "SKIP_ERRORS" : "ABORT_ON_ERROR");
+        log.info("🚀 SQL Batch: {} entities | Mode: {} | Isolation: READ_COMMITTED",
+                totalSize, skipDuplicates ? "SKIP_DUPLICATES" : "ABORT_ON_ERROR");
 
-        // ADAPTIVE: Calculate optimal batch size
         int batchSize = calculateOptimalBatchSize(totalSize);
 
-        // PRIMITIVES: Zero boxing overhead
         int successCount = 0;
         int skipCount = 0;
+        int duplicateSkipCount = 0;
+        int validationSkipCount = 0;
         int batchNumber = 0;
         int totalBatches = (totalSize + batchSize - 1) / batchSize;
 
-        // BOUNDED: Error tracking (max 1000 reasons)
         List<String> skipReasons = new ArrayList<>(Math.min(1000, totalSize / 10));
 
-        // STREAMING: Process in chunks to bound memory
-        for (int i = 0; i < totalSize; i += batchSize) {
+        long maxProcessingTime = 300000; // 5 minutes
+        long processingDeadline = startTime + maxProcessingTime;
+
+        int dbBatchSize = calculateOptimalBatchSize(totalSize);
+
+        // Build in-memory duplicate detection for current batch
+        Set<String> inMemoryConstraintKeys = new HashSet<>();
+
+        for (int chunkStart = 0; chunkStart < totalSize; chunkStart += dbBatchSize) {
             batchNumber++;
-            int end = Math.min(i + batchSize, totalSize);
-            int currentBatchSize = end - i;
 
-            long batchStart = System.currentTimeMillis();
-
-            // Process chunk without pre-fetching
-            BatchChunkResult chunkResult = processChunkDirectInsert(
-                    entities, i, end, skipDuplicates, skipReasons, batchNumber, totalBatches
-            );
-
-            successCount += chunkResult.successCount;
-            skipCount += chunkResult.skipCount;
-
-            // FLUSH: Commit chunk to DB
-            try {
-                entityManager.flush();
-                entityManager.clear(); // Free memory immediately
-            } catch (Exception e) {
-                log.error("Batch {} flush failed: {}", batchNumber, e.getMessage());
-                if (!skipDuplicates) throw e;
-                skipCount += chunkResult.successCount; // Rollback counted as skipped
-                successCount -= chunkResult.successCount;
+            // Timeout check
+            if (System.currentTimeMillis() > processingDeadline) {
+                return buildTimeoutResult(totalSize, successCount, skipCount,
+                        duplicateSkipCount, validationSkipCount, startTime, skipReasons);
             }
 
-            // Nullify processed entities to free memory
-            for (int j = i; j < end; j++) {
-                entities.set(j, null);
+            int chunkEnd = Math.min(chunkStart + dbBatchSize, totalSize);
+            List<T> chunkEntities = new ArrayList<>(chunkEnd - chunkStart);
+
+            // Conversion & Validation Phase
+            for (int i = chunkStart; i < chunkEnd; i++) {
+                T entity = entities.get(i);
+                if (entity == null) continue;
+
+                try {
+                    // Jakarta Bean Validation
+                    validateJakartaValidation(entity);
+
+                    // Check in-memory duplicates FIRST (within same batch)
+                    String constraintKey = buildConstraintKey(entity);
+                    if (constraintKey != null && !constraintKey.isEmpty() && inMemoryConstraintKeys.contains(constraintKey)) {
+                        skipCount++;
+                        duplicateSkipCount++;
+                        if (skipReasons.size() < 1000) {
+                            skipReasons.add(String.format("Index %d: Duplicate within batch - %s",
+                                    i, buildDuplicateMessage(entity)));
+                        }
+
+                        if (!skipDuplicates) {
+                            log.error("Batch {} aborted: In-memory duplicate at index {}", batchNumber, i);
+                            throw new DuplicateEntityException("Duplicate within batch at index " + i + ": " +
+                                    buildDuplicateMessage(entity));
+                        }
+
+                        log.debug("Skipped in-memory duplicate at index {}", i);
+                        entities.set(i, null);
+                        continue;
+                    }
+
+                    // Check DB duplicates using direct query
+                    if (violatesUniqueConstraints(entity)) {
+                        skipCount++;
+                        duplicateSkipCount++;
+
+                        if (skipReasons.size() < 1000) {
+                            String duplicateMsg = buildDuplicateMessage(entity);
+                            skipReasons.add(String.format("Index %d: %s", i, duplicateMsg));
+                        }
+
+                        if (!skipDuplicates) {
+                            log.error("Batch {} aborted: DB duplicate at index {}", batchNumber, i);
+                            throw new DuplicateEntityException("Duplicate at index " + i + ": " +
+                                    buildDuplicateMessage(entity));
+                        }
+
+                        log.debug("Skipped DB duplicate at index {}", i);
+                        entities.set(i, null);
+                        continue;
+                    }
+
+                    // Add to in-memory tracking
+                    if (constraintKey != null && !constraintKey.isEmpty()) {
+                        inMemoryConstraintKeys.add(constraintKey);
+                    }
+
+                    chunkEntities.add(entity);
+
+                } catch (DuplicateEntityException e) {
+                    throw e; // Re-throw if abort mode
+                } catch (Exception e) {
+                    skipCount++;
+                    validationSkipCount++;
+                    if (skipReasons.size() < 1000) {
+                        skipReasons.add(String.format("Index %d: Validation failed - %s", i, e.getMessage()));
+                    }
+                    log.debug("Validation failed at index {}: {}", i, e.getMessage());
+
+                    if (!skipDuplicates) {
+                        throw new IllegalArgumentException("Validation failed at index " + i, e);
+                    }
+                }
+
+                entities.set(i, null); // Free memory
             }
 
-            // PROGRESS: Log every 10 batches or at completion
+            // Database Insert Phase
+            if (!chunkEntities.isEmpty()) {
+                try {
+                    for (T entity : chunkEntities) {
+                        entityManager.persist(entity);
+                        successCount++;
+
+                        // Periodic flush to maintain memory
+                        if (successCount % 100 == 0) {
+                            entityManager.flush();
+                        }
+                    }
+
+                    entityManager.flush();
+                    entityManager.clear();
+
+                } catch (PersistenceException e) {
+                    // DB constraint violation
+                    skipCount++;
+                    duplicateSkipCount++;
+
+                    if (skipReasons.size() < 1000) {
+                        skipReasons.add(String.format("Batch %d: DB constraint violation - %s",
+                                batchNumber, extractRootCause(e)));
+                    }
+
+                    if (!skipDuplicates) {
+                        throw new DuplicateEntityException("Database constraint violation in batch " +
+                                batchNumber + ": " + extractRootCause(e));
+                    }
+
+                    entityManager.clear();
+                    log.warn("Batch {} had DB constraint violations, skipped", batchNumber);
+
+                } catch (Exception e) {
+                    log.error("Batch {} insert failed: {}", batchNumber, e.getMessage());
+                    if (!skipDuplicates) {
+                        throw new RuntimeException("Insert failed in batch " + batchNumber, e);
+                    }
+
+                    skipCount += chunkEntities.size();
+                    entityManager.clear();
+                }
+            }
+
+            chunkEntities.clear();
+
+            // Progress logging
             if (batchNumber % 10 == 0 || batchNumber == totalBatches) {
-                logBatchProgress(totalSize, end, successCount, skipCount, startTime, batchNumber, totalBatches);
+                logBatchProgress(totalSize, chunkEnd, successCount, skipCount,
+                        duplicateSkipCount, validationSkipCount, startTime, batchNumber, totalBatches);
             }
 
-            // GC HINT: Every 100 batches for large datasets
-            if (batchNumber % 100 == 0 && totalSize > 50_000) {
+            // Memory management
+            if (batchNumber % 50 == 0) {
                 System.gc();
             }
         }
 
-        // Clear input list (caller should not hold reference)
         entities.clear();
+        inMemoryConstraintKeys.clear();
 
         long duration = System.currentTimeMillis() - startTime;
         double throughput = duration > 0 ? (successCount * 1000.0) / duration : 0.0;
-        String throughputStr = String.format("%.0f", throughput);
 
-        log.info("✅ SQL Batch Complete: {} success, {} skipped | {} rec/sec | {} ms",
-                successCount, skipCount, throughputStr, duration);
+        log.info("✅ SQL Batch Complete: {} success, {} skipped (duplicates: {}, validation: {}) | {} rec/sec | {} ms",
+                successCount, skipCount, duplicateSkipCount, validationSkipCount,
+                String.format("%.0f", throughput), duration);
 
-        // LIGHTWEIGHT result (no entity copies)
         BatchResult<T> result = new BatchResult<>();
         result.setCreatedEntities(Collections.emptyList());
         result.setSuccessCount(successCount);
         result.setSkippedCount(skipCount);
+        result.setDuplicateSkipCount(duplicateSkipCount);
         result.setSkippedReasons(skipReasons.isEmpty() ? null : skipReasons);
 
         return result;
     }
 
     /**
-     * ZERO-COPY chunk processing
-     * - Direct persist without pre-validation queries
-     * - Constraint violations caught during insert
-     * - Streaming validation (no intermediate collections)
+     * Build unique constraint key for in-memory deduplication within batch
      */
-    private BatchChunkResult processChunkDirectInsert(
-            List<T> entities, int start, int end, boolean skipDuplicates,
-            List<String> skipReasons, int batchNum, int totalBatches) {
+    private String buildConstraintKey(T entity) {
+        CrudXUniqueConstraint[] constraints = getUniqueConstraints();
+        if (constraints == null || constraints.length == 0) {
+            return null;
+        }
 
-        int successCount = 0;
-        int skipCount = 0;
+        StringBuilder key = new StringBuilder();
+        boolean hasAnyValue = false;
 
-        for (int i = start; i < end; i++) {
-            T entity = entities.get(i);
-            if (entity == null) continue; // Already processed
+        for (CrudXUniqueConstraint constraint : constraints) {
+            key.append(constraint.name()).append(":");
+            boolean allFieldsHaveValues = true;
 
-            try {
-                // VALIDATION: In-memory only (no DB query)
-                validateInMemory(entity);
+            for (String fieldName : constraint.fields()) {
+                try {
+                    Field field = getFieldFromClass(entityClass, fieldName);
+                    field.setAccessible(true);
+                    Object value = field.get(entity);
 
-                // PERSIST: Let DB handle constraint violations
-                entityManager.persist(entity);
-                successCount++;
-
-            } catch (ConstraintViolationException | PersistenceException e) {
-                // DB constraint violation (duplicate, FK, etc.)
-                skipCount++;
-                if (skipReasons.size() < 1000) {
-                    skipReasons.add(String.format("Index %d: %s", i, extractRootCause(e)));
-                }
-
-                if (!skipDuplicates) {
-                    log.error("Batch {} aborted at index {}: {}", batchNum, i, e.getMessage());
-                    throw new DuplicateEntityException("Duplicate at index " + i + ": " + extractRootCause(e));
-                }
-
-                // Clear failed entity from persistence context
-                if (entityManager.contains(entity)) {
-                    entityManager.detach(entity);
-                }
-
-            } catch (Exception e) {
-                skipCount++;
-                if (skipReasons.size() < 1000) {
-                    skipReasons.add(String.format("Index %d: %s", i, e.getMessage()));
-                }
-
-                if (!skipDuplicates) {
-                    throw new RuntimeException("Validation failed at index " + i, e);
+                    if (value == null) {
+                        allFieldsHaveValues = false;
+                        break;
+                    }
+                    key.append(fieldName).append("=").append(value).append("|");
+                    hasAnyValue = true;
+                } catch (Exception e) {
+                    log.debug("Cannot access field: {}", fieldName);
+                    allFieldsHaveValues = false;
+                    break;
                 }
             }
 
-            // PERIODIC FLUSH: Every 500 entities within chunk
-            if ((i - start + 1) % 500 == 0) {
-                try {
-                    entityManager.flush();
-                    entityManager.clear();
-                } catch (Exception e) {
-                    log.debug("Mid-chunk flush failed: {}", e.getMessage());
+            // Only include this constraint if all its fields have values
+            if (!allFieldsHaveValues) {
+                int lastColon = key.lastIndexOf(constraint.name() + ":");
+                if (lastColon >= 0) {
+                    key.setLength(lastColon);
                 }
+            } else {
+                key.append(";");
             }
         }
 
-        log.debug("✅ Batch {}/{}: {} inserted, {} skipped",
-                batchNum, totalBatches, successCount, skipCount);
-
-        return new BatchChunkResult(successCount, skipCount);
+        return hasAnyValue ? key.toString() : null;
     }
 
     /**
-     * IN-MEMORY validation only (no DB queries)
+     * Validate unique constraints using direct DB query
      */
-    private void validateInMemory(T entity) {
-        // Jakarta Validation (annotations like @NotNull, @Size, etc.)
+    private void validateUniqueConstraints(T entity) {
+        if (violatesUniqueConstraints(entity)) {
+            String duplicateMsg = buildDuplicateMessage(entity);
+            log.error("Duplicate entity: {}", duplicateMsg);
+            throw new DuplicateEntityException(duplicateMsg);
+        }
+    }
+
+    /**
+     * Check if entity violates unique constraints in DB
+     */
+    private boolean violatesUniqueConstraints(T entity) {
+        CrudXUniqueConstraint[] constraints = getUniqueConstraints();
+        if (constraints == null || constraints.length == 0) {
+            return false;
+        }
+
+        for (CrudXUniqueConstraint constraint : constraints) {
+            if (checkDuplicateInDB(entity, constraint)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Query database to check for duplicates (no lock)
+     */
+    private boolean checkDuplicateInDB(T entity, CrudXUniqueConstraint constraint) {
+        try {
+            CriteriaBuilder cb = entityManager.getCriteriaBuilder();
+            CriteriaQuery<Long> query = cb.createQuery(Long.class);
+            Root<T> root = query.from(entityClass);
+
+            List<Predicate> predicates = new ArrayList<>();
+            boolean hasAllValues = true;
+
+            // All fields in constraint must have values
+            for (String fieldName : constraint.fields()) {
+                try {
+                    Field field = getFieldFromClass(entityClass, fieldName);
+                    field.setAccessible(true);
+                    Object value = field.get(entity);
+
+                    if (value == null) {
+                        hasAllValues = false;
+                        break;
+                    }
+                    predicates.add(cb.equal(root.get(fieldName), value));
+                } catch (Exception e) {
+                    log.debug("Field access error: {}", fieldName);
+                    return false;
+                }
+            }
+
+            // If any field is null in compound constraint, skip validation
+            if (!hasAllValues) {
+                return false;
+            }
+
+            // Exclude current entity if updating
+            if (entity.getId() != null) {
+                predicates.add(cb.notEqual(root.get("id"), entity.getId()));
+            }
+
+            if (predicates.isEmpty()) {
+                return false;
+            }
+
+            query.select(cb.count(root)).where(predicates.toArray(new Predicate[0]));
+
+            TypedQuery<Long> typedQuery = entityManager.createQuery(query);
+            Long count = typedQuery.getSingleResult();
+
+            return count > 0;
+
+        } catch (Exception e) {
+            log.warn("Duplicate check failed: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Build human-readable duplicate message
+     */
+    private String buildDuplicateMessage(T entity) {
+        CrudXUniqueConstraint[] constraints = getUniqueConstraints();
+        if (constraints == null || constraints.length == 0) {
+            return "Duplicate entry detected";
+        }
+
+        for (CrudXUniqueConstraint constraint : constraints) {
+            if (checkDuplicateInDB(entity, constraint)) {
+                if (!constraint.message().isEmpty()) {
+                    return constraint.message();
+                }
+
+                StringBuilder msg = new StringBuilder("Duplicate constraint '");
+                msg.append(constraint.name()).append("': Fields [");
+
+                for (String fieldName : constraint.fields()) {
+                    try {
+                        Field field = getFieldFromClass(entityClass, fieldName);
+                        field.setAccessible(true);
+                        Object value = field.get(entity);
+                        msg.append(fieldName).append("=").append(value).append(", ");
+                    } catch (Exception e) {
+                        msg.append(fieldName).append(", ");
+                    }
+                }
+                msg.setLength(msg.length() - 2);
+                msg.append("] already exist");
+                return msg.toString();
+            }
+        }
+
+        return "Duplicate entry detected";
+    }
+
+    /**
+     * Get unique constraints from entity class
+     */
+    private CrudXUniqueConstraint[] getUniqueConstraints() {
+        CrudXUniqueConstraints containerAnnotation = entityClass.getAnnotation(CrudXUniqueConstraints.class);
+
+        if (containerAnnotation != null) {
+            return containerAnnotation.value();
+        }
+
+        return entityClass.getAnnotationsByType(CrudXUniqueConstraint.class);
+    }
+
+    /**
+     * Jakarta Bean Validation
+     */
+    private void validateJakartaValidation(T entity) {
         if (validator != null) {
             Set<ConstraintViolation<T>> violations = validator.validate(entity);
             if (!violations.isEmpty()) {
@@ -294,14 +491,8 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
                 throw new IllegalArgumentException("Validation failed: " + errors);
             }
         }
-
-        // NOTE: Unique constraints validated by DB on INSERT
-        // This eliminates unnecessary SELECT queries before each INSERT
     }
 
-    /**
-     * ADAPTIVE batch sizing based on dataset size
-     */
     private int calculateOptimalBatchSize(int totalSize) {
         if (totalSize <= 1000) return BATCH_SIZE_SMALL;
         if (totalSize <= 10_000) return BATCH_SIZE_MEDIUM;
@@ -310,11 +501,9 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
         return BATCH_SIZE_MAX;
     }
 
-    /**
-     * REAL-TIME progress with metrics
-     */
     private void logBatchProgress(int total, int current, int success, int skipped,
-                                  long startTime, int batchNum, int totalBatches) {
+                                  int duplicates, int validationFails, long startTime,
+                                  int batchNum, int totalBatches) {
         long elapsed = System.currentTimeMillis() - startTime;
         double progress = (double) current / total * 100;
         double throughput = elapsed > 0 ? (success * 1000.0) / elapsed : 0;
@@ -323,18 +512,18 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
         long heapUsed = (Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) >> 20;
         long heapMax = Runtime.getRuntime().maxMemory() >> 20;
 
-        String progressStr = String.format("%.1f", progress);
-        String throughputStr = String.format("%.0f", throughput);
+        String message = String.format(
+                "📊 Progress: %d/%d (%.1f%%) | Batch %d/%d | Success: %d | " +
+                        "Skipped: %d (Duplicates: %d, Validation: %d) | %.0f rec/sec | " +
+                        "Mem: %d/%d MB | ETA: %d sec",
+                current, total, progress, batchNum, totalBatches, success,
+                skipped, duplicates, validationFails, throughput,
+                heapUsed, heapMax, eta / 1000
+        );
 
-        log.info("📊 Progress: {}/{} ({}%) | Batch {}/{} | Success: {} | Skip: {} | " +
-                        "{} rec/sec | Mem: {}/{} MB | ETA: {} sec",
-                current, total, progressStr, batchNum, totalBatches, success, skipped,
-                throughputStr, heapUsed, heapMax, eta / 1000);
+        log.info(message);
     }
 
-    /**
-     * Extract root cause from exception chain
-     */
     private String extractRootCause(Throwable e) {
         Throwable cause = e;
         while (cause.getCause() != null && cause.getCause() != cause) {
@@ -344,17 +533,22 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
         return msg != null && msg.length() > 100 ? msg.substring(0, 100) + "..." : msg;
     }
 
-    /**
-     * Lightweight result holder
-     */
-    private static class BatchChunkResult {
-        final int successCount;
-        final int skipCount;
+    private BatchResult<T> buildTimeoutResult(int totalSize, int successCount, int skipCount,
+                                              int duplicateCount, int validationCount,
+                                              long startTime, List<String> skipReasons) {
+        long duration = System.currentTimeMillis() - startTime;
 
-        BatchChunkResult(int successCount, int skipCount) {
-            this.successCount = successCount;
-            this.skipCount = skipCount;
-        }
+        log.error("Batch processing timeout after {} ms. Processed {}/{} records (duplicates: {}, validation: {})",
+                duration, successCount, totalSize, duplicateCount, validationCount);
+
+        BatchResult<T> result = new BatchResult<>();
+        result.setCreatedEntities(Collections.emptyList());
+        result.setSuccessCount(successCount);
+        result.setSkippedCount(skipCount);
+        result.setDuplicateSkipCount(duplicateCount);
+        result.setSkippedReasons(skipReasons);
+
+        return result;
     }
 
     // ==================== READ OPERATIONS ====================
@@ -400,7 +594,6 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
         Root<T> root = query.from(entityClass);
         query.select(root);
 
-        // Apply sorting
         List<Order> orders = new ArrayList<>();
         sort.forEach(order -> {
             orders.add(order.isAscending() ? cb.asc(root.get(order.getProperty()))
@@ -411,14 +604,11 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
         return entityManager.createQuery(query).getResultList();
     }
 
-    /**
-     * STREAMING: For large datasets (bounded memory)
-     */
     @Transactional(readOnly = true)
     private List<T> findAllStreaming(Sort sort) {
         List<T> result = new ArrayList<>();
         int offset = 0;
-        int fetchSize = 50; // Small chunks for memory efficiency
+        int fetchSize = 50;
 
         while (true) {
             CriteriaBuilder cb = entityManager.getCriteriaBuilder();
@@ -444,8 +634,6 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
 
             result.addAll(batch);
             offset += fetchSize;
-
-            // Clear session to prevent memory buildup
             entityManager.clear();
 
             if (batch.size() < fetchSize) break;
@@ -462,7 +650,6 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
         Root<T> root = query.from(entityClass);
         query.select(root);
 
-        // Apply sorting
         if (pageable.getSort().isSorted()) {
             List<Order> orders = new ArrayList<>();
             pageable.getSort().forEach(order -> {
@@ -484,6 +671,7 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
     // ==================== UPDATE OPERATIONS ====================
 
     @Override
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public T update(ID id, Map<String, Object> updates) {
         T entity = findById(id);
         autoValidateUpdates(updates, entity);
@@ -507,16 +695,20 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
             // Ignore if onUpdate not present
         }
 
+        // Validate unique constraints using DB query
+        validateUniqueConstraints(entity);
+
         entityManager.merge(entity);
         entityManager.flush();
         return entity;
     }
 
     @Override
-    @Transactional(timeout = 600)
+    @Transactional(timeout = 600, isolation = Isolation.READ_COMMITTED)
     public BatchResult<T> updateBatch(Map<ID, Map<String, Object>> updates) {
         int successCount = 0;
         int skipCount = 0;
+        int duplicateSkipCount = 0;
         List<String> skipReasons = new ArrayList<>();
 
         int processed = 0;
@@ -526,12 +718,17 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
                 successCount++;
                 processed++;
 
-                // Periodic flush
                 if (processed % 50 == 0) {
                     entityManager.flush();
                     entityManager.clear();
                 }
 
+            } catch (DuplicateEntityException e) {
+                skipCount++;
+                duplicateSkipCount++;
+                if (skipReasons.size() < 1000) {
+                    skipReasons.add("ID " + entry.getKey() + ": " + e.getMessage());
+                }
             } catch (Exception e) {
                 skipCount++;
                 if (skipReasons.size() < 1000) {
@@ -540,9 +737,13 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
             }
         }
 
+        log.info("Batch update complete: {} success, {} skipped ({} duplicates)",
+                successCount, skipCount, duplicateSkipCount);
+
         BatchResult<T> result = new BatchResult<>();
         result.setCreatedEntities(Collections.emptyList());
         result.setSkippedCount(skipCount);
+        result.setDuplicateSkipCount(duplicateSkipCount);
         result.setSkippedReasons(skipReasons);
         return result;
     }
@@ -617,77 +818,10 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
     }
 
     /**
-     * CACHED unique constraint metadata
+     * Auto-validate updates using annotations and DB checks
      */
-    private void cacheUniqueConstraints() {
-        if (UNIQUE_CONSTRAINT_CACHE.containsKey(entityClass)) return;
-
-        List<UniqueConstraintMeta> constraints = new ArrayList<>();
-        CrudXUniqueConstraint[] annotations = entityClass.getAnnotationsByType(CrudXUniqueConstraint.class);
-
-        for (CrudXUniqueConstraint ann : annotations) {
-            List<Field> fields = new ArrayList<>();
-            for (String fieldName : ann.fields()) {
-                try {
-                    Field field = getFieldFromClass(entityClass, fieldName);
-                    field.setAccessible(true);
-                    fields.add(field);
-                } catch (Exception e) {
-                    log.warn("Unique constraint field not found: {}", fieldName);
-                }
-            }
-            if (!fields.isEmpty()) {
-                constraints.add(new UniqueConstraintMeta(fields, ann.message()));
-            }
-        }
-
-        UNIQUE_CONSTRAINT_CACHE.put(entityClass, constraints);
-        log.debug("Cached {} unique constraints for {}", constraints.size(), entityClass.getSimpleName());
-    }
-
-    /**
-     * Validate unique constraints (DB query)
-     * NOTE: Only called for single creates, NOT batch inserts
-     */
-    private void validateUniqueConstraints(T entity) {
-        List<UniqueConstraintMeta> constraints = UNIQUE_CONSTRAINT_CACHE.get(entityClass);
-        if (constraints == null || constraints.isEmpty()) return;
-
-        for (UniqueConstraintMeta meta : constraints) {
-            CriteriaBuilder cb = entityManager.getCriteriaBuilder();
-            CriteriaQuery<Long> query = cb.createQuery(Long.class);
-            Root<T> root = query.from(entityClass);
-
-            List<Predicate> predicates = new ArrayList<>();
-
-            for (Field field : meta.fields) {
-                try {
-                    Object value = field.get(entity);
-                    if (value != null) {
-                        predicates.add(cb.equal(root.get(field.getName()), value));
-                    }
-                } catch (Exception e) {
-                    log.debug("Field access error: {}", field.getName());
-                }
-            }
-
-            if (entity.getId() != null) {
-                predicates.add(cb.notEqual(root.get("id"), entity.getId()));
-            }
-
-            query.select(cb.count(root)).where(predicates.toArray(new Predicate[0]));
-            Long count = entityManager.createQuery(query).getSingleResult();
-
-            if (count > 0) {
-                String msg = meta.message.isEmpty() ?
-                        "Duplicate entry for unique constraint" : meta.message;
-                throw new DuplicateEntityException(msg);
-            }
-        }
-    }
-
     private void autoValidateUpdates(Map<String, Object> updates, T entity) {
-        // Protected fields
+        // 1. Protect system fields
         List<String> protectedFields = List.of("id", "createdAt", "created_at", "createdBy", "created_by");
 
         for (String field : protectedFields) {
@@ -696,7 +830,7 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
             }
         }
 
-        // Check immutable fields
+        // 2. Check immutable fields and field existence
         for (String fieldName : updates.keySet()) {
             try {
                 Field field = getFieldFromClass(entityClass, fieldName);
@@ -710,17 +844,18 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
             }
         }
 
-        // Validate via Jakarta Validation
-        if (validator != null) {
-            Map<String, Object> oldValues = new HashMap<>();
-            try {
-                for (Map.Entry<String, Object> entry : updates.entrySet()) {
-                    Field field = getFieldFromClass(entityClass, entry.getKey());
-                    field.setAccessible(true);
-                    oldValues.put(entry.getKey(), field.get(entity));
-                    field.set(entity, entry.getValue());
-                }
+        // 3. Apply updates temporarily for validation
+        Map<String, Object> oldValues = new HashMap<>();
+        try {
+            for (Map.Entry<String, Object> entry : updates.entrySet()) {
+                Field field = getFieldFromClass(entityClass, entry.getKey());
+                field.setAccessible(true);
+                oldValues.put(entry.getKey(), field.get(entity));
+                field.set(entity, entry.getValue());
+            }
 
+            // 4. Jakarta Bean Validation
+            if (validator != null) {
                 Set<ConstraintViolation<T>> violations = validator.validate(entity);
                 if (!violations.isEmpty()) {
                     String errors = violations.stream()
@@ -728,23 +863,25 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
                             .collect(Collectors.joining(", "));
                     throw new IllegalArgumentException("Validation failed: " + errors);
                 }
-            } catch (IllegalAccessException | NoSuchFieldException e) {
-                throw new RuntimeException("Validation error", e);
-            } finally {
-                // Rollback changes
-                oldValues.forEach((key, val) -> {
-                    try {
-                        Field field = getFieldFromClass(entityClass, key);
-                        field.setAccessible(true);
-                        field.set(entity, val);
-                    } catch (Exception e) {
-                        log.debug("Rollback error", e);
-                    }
-                });
             }
-        }
 
-        validateUniqueConstraints(entity);
+            // 5. Check unique constraints using DB query
+            validateUniqueConstraints(entity);
+
+        } catch (IllegalAccessException | NoSuchFieldException e) {
+            throw new RuntimeException("Validation error", e);
+        } finally {
+            // Always rollback temporary changes
+            oldValues.forEach((key, val) -> {
+                try {
+                    Field field = getFieldFromClass(entityClass, key);
+                    field.setAccessible(true);
+                    field.set(entity, val);
+                } catch (Exception e) {
+                    log.debug("Rollback error", e);
+                }
+            });
+        }
     }
 
     private Field getFieldFromClass(Class<?> clazz, String fieldName) throws NoSuchFieldException {
@@ -760,18 +897,5 @@ public abstract class CrudXSQLService<T extends CrudXBaseEntity<ID>, ID extends 
 
     private String getEntityClassName() {
         return entityClass != null ? entityClass.getSimpleName() : "Unknown";
-    }
-
-    /**
-     * Unique constraint metadata holder
-     */
-    private static class UniqueConstraintMeta {
-        final List<Field> fields;
-        final String message;
-
-        UniqueConstraintMeta(List<Field> fields, String message) {
-            this.fields = fields;
-            this.message = message;
-        }
     }
 }
